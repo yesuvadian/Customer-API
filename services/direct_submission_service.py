@@ -428,10 +428,19 @@ class DirectSubmissionService:
         is_fr = getattr(req.request_category, "value", None) == "failure_registry"
         form_data = req.form_data or {}
 
+        # Resolve test type: prefer the linked test_type relation; for FR (and any
+        # request where it is absent) fall back to form_data["test_types"] names.
+        test_type_name = req.test_type.name if req.test_type else None
+        if not test_type_name:
+            fd_types = form_data.get("test_types") or []
+            names = [t["name"] for t in fd_types if t.get("name")]
+            test_type_name = ", ".join(names) if names else None
+
         return {
             "id": str(req.id),
             "request_number": req.request_number,
             "title": req.title,
+            "test_type": test_type_name,
 
             "request_category": getattr(req.request_category, "value", None),
             "status": getattr(req.status, "value", None),

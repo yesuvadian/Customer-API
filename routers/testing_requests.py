@@ -36,11 +36,12 @@ def _enrich(req):
         else None
     )
 
-    req.test_type_name = (
-        req.test_type.name
-        if req.test_type
-        else None
-    )
+    if req.test_type:
+        req.test_type_name = req.test_type.name
+    else:
+        fd_types = (req.form_data or {}).get("test_types") or []
+        names = [t["name"] for t in fd_types if t.get("name")]
+        req.test_type_name = ", ".join(names) if names else None
 
     req.department_name = (
         req.department.name

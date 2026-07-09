@@ -92,6 +92,7 @@ class TestScheduleDashboardService:
         voltage_class: Optional[str] = None,
         department_id: Optional[UUID] = None,
         search: Optional[str] = None,
+        request_category: str = "test",
     ) -> dict:
         """
         Returns:
@@ -151,6 +152,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.in_(eq_ids),
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                TestRequestSchedule.request_category == request_category,
                 (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
             )
             .all()
@@ -449,7 +451,7 @@ class TestScheduleDashboardService:
     # Public — filter options
     # ─────────────────────────────────────────────────────────────
 
-    def get_filter_options(self, org_id: UUID) -> dict:
+    def get_filter_options(self, org_id: UUID, request_category: str = "test") -> dict:
         """
         Returns equipment types, voltage classes, and departments with
         equipment/schedule counts — drives the compliance tab filter UI.
@@ -516,6 +518,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.is_(None),
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                TestRequestSchedule.request_category == request_category,
                 TestRequestSchedule.department_id.isnot(None),
                 (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now_dept)),
             )
@@ -533,6 +536,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.organization_id == org_id,
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                TestRequestSchedule.request_category == request_category,
                 Equipment.department_id.isnot(None),
                 (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now_dept)),
             )
@@ -689,6 +693,7 @@ class TestScheduleDashboardService:
         self,
         org_id: UUID,
         department_id: Optional[UUID] = None,
+        request_category: str = "test",
     ) -> dict:
         """
         Returns active schedules that are not linked to a specific equipment
@@ -702,6 +707,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.is_(None),
                 TestRequestSchedule.is_active.is_(True),
                 TestRequestSchedule.is_deleted.is_(False),
+                TestRequestSchedule.request_category == request_category,
                 (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > datetime.now(timezone.utc))),
             )
         )

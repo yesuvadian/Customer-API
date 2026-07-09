@@ -11933,12 +11933,26 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Schedule module permissions failed (non-fatal): {_e}")
 
-        # Test Schedules module — KPTCL-only (pass kptcl_org to scope it)
-        print("\n--- Test Schedules Module Permissions (KPTCL) ---")
+        # CM Schedules module — KPTCL-only (pass kptcl_org to scope it)
+        print("\n--- CM Schedules Module Permissions (KPTCL) ---")
         try:
             seed_schedule_compliance_module_permissions(session, org=kptcl_org)
         except Exception as _e:
-            print(f"[WARN] Test Schedules module permissions failed (non-fatal): {_e}")
+            print(f"[WARN] CM Schedules module permissions failed (non-fatal): {_e}")
+
+        # PM Schedules module — all active orgs + role templates
+        print("\n--- PM Schedules Module ---")
+        try:
+            from seed_pm_schedules_module import (
+                seed_pm_schedules_module,
+                seed_pm_schedules_permissions,
+                seed_pm_schedules_role_templates,
+            )
+            seed_pm_schedules_module(session)
+            seed_pm_schedules_permissions(session)
+            seed_pm_schedules_role_templates(session)
+        except Exception as _e:
+            print(f"[WARN] PM Schedules module failed (non-fatal): {_e}")
 
         # Approval module permissions — Technical Approver + Org Admin across all orgs
         # Grants can_view + can_approve on Approvals (module 48) and
