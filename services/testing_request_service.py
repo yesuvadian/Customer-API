@@ -1185,6 +1185,9 @@ class TestingRequestService:
                 if tpl is None:
                     continue  # skip test types that have no linked template
                 tpl_data = tpl.template_data or {}
+                # Skip if the template has been toggled inactive in the designer
+                if tpl_data.get("is_active") is False:
+                    continue
                 bucket.append({
                     "id": t.id,
                     "name": t.name,
