@@ -11,7 +11,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, text
 
-from models import Equipment, EquipmentStatus, OrgDepartment, CategoryMaster
+from models import Equipment, EquipmentStatus, OrgDepartment, CategoryMaster, BaySequence, EquipmentSerialCounter
 
 
 class EquipmentService:
@@ -159,27 +159,96 @@ class EquipmentService:
         return result
 
     @classmethod
+    def _get_or_create_bay_sequence(cls, db: Session, department_id: UUID, bay_name: str) -> int:
+        """
+        Return the permanent 2-digit bay sequence number for this bay name at this
+        substation, assigning the next number (in order of first registration) the
+        first time this bay name is seen here. Uses a transaction-scoped advisory
+        lock keyed to the department so concurrent registrations for two different
+        new bays at the same substation can't race to the same sequence number.
+        """
+        bay_name = bay_name or "UNSPECIFIED"
+
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"bay_seq:{department_id}"},
+        )
+
+        existing = db.query(BaySequence).filter(
+            BaySequence.department_id == department_id,
+            BaySequence.bay_name == bay_name,
+        ).first()
+        if existing:
+            return existing.sequence_number
+
+        next_seq = (
+            db.query(func.coalesce(func.max(BaySequence.sequence_number), 0))
+            .filter(BaySequence.department_id == department_id)
+            .scalar() or 0
+        ) + 1
+
+        row = BaySequence(department_id=department_id, bay_name=bay_name, sequence_number=next_seq)
+        db.add(row)
+        db.flush()
+        return next_seq
+
+    @classmethod
+    def _get_or_increment_serial(
+        cls, db: Session, department_id: UUID, voltage_class: str, bay_sequence: int, equipment_type_id: int,
+    ) -> int:
+        """
+        Atomically increment (or create at 1) the persistent serial counter for
+        this (substation, voltage class, bay sequence, equipment type) key.
+        This never decreases, so a serial number already issued is never
+        reused — even if the equipment row it was issued to is later removed.
+        """
+        row = db.execute(
+            text("""
+                INSERT INTO public.equipment_serial_counters
+                    (id, department_id, voltage_class, bay_sequence, equipment_type_id, last_serial)
+                VALUES (gen_random_uuid(), :department_id, :voltage_class, :bay_sequence, :equipment_type_id, 1)
+                ON CONFLICT (department_id, voltage_class, bay_sequence, equipment_type_id)
+                DO UPDATE SET last_serial = public.equipment_serial_counters.last_serial + 1,
+                              updated_at = now()
+                RETURNING last_serial
+            """),
+            {
+                "department_id": str(department_id),
+                "voltage_class": voltage_class or "000",
+                "bay_sequence": bay_sequence,
+                "equipment_type_id": equipment_type_id,
+            },
+        ).first()
+        return row[0]
+
+    @classmethod
     def generate_ueic(
         cls,
         db: Session,
         department_id: UUID,
+        equipment_type_id: int,
         equipment_type_name: str,
         voltage_class: str,
         bay_number: str,
     ) -> str:
         """
         Generate UEIC: {zone_code}-{substation_code}-{voltage}-{bay}-{type_code}-{serial}
-        Example: BN-HEBL-220-04-PT-01
+        Example: NZ-BLRY-220-04-CB-01  (SRS §3.1.1)
 
         Requires:
           - Zone department (depth=0) must have a 2-char code
-          - Substation department (depth=3) must have a 4-char code
+          - Substation department (the department passed in) must have a curated
+            code set. This is NOT derived from the department name: real
+            substation abbreviations (e.g. "Bellary" -> "BLRY") are a deliberate
+            editorial choice, not something that can be produced reliably by
+            string-mangling the name, and UEICs are permanent once issued — so a
+            missing code is a hard error rather than a best-effort guess.
         """
         zone_dept = cls._get_department_ancestor(db, department_id, target_level=0)
         if not zone_dept or not zone_dept.code:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Zone department has no code set. Update OrgDepartment.code before registering equipment.",
+                detail="Zone department has no code set. Update OrgDepartment.code before registering equipment.",
             )
 
         substation = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
@@ -189,31 +258,29 @@ class EquipmentService:
                 detail=f"Department '{department_id}' not found.",
             )
 
-        zone_code = zone_dept.code.upper()[:2]
+        if not substation.code or substation.code.strip().upper() in ("TODO", "XXXX", "TBD"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Substation '{substation.name}' has no valid code set. UEICs require a curated "
+                    f"4-character substation abbreviation (e.g. 'BLRY' for Bellary) — set "
+                    f"OrgDepartment.code for this substation before registering equipment."
+                ),
+            )
 
-        if substation.code and len(substation.code) == 4:
-            substation_code = substation.code.upper()
-        else:
-            base = re.sub(r"^\d+\s*kV\s*", "", substation.name or "", flags=re.IGNORECASE).strip()
-            cleaned = re.sub(r"[^A-Za-z0-9 ]", "", base)
-            letters = re.sub(r"\s+", "", cleaned)
-            substation_code = (letters[:4]).upper().ljust(4, "X")
+        zone_code = zone_dept.code.upper()[:2]
+        substation_code = substation.code.upper()[:4].ljust(4, "X")
 
         type_code = cls.EQUIPMENT_TYPE_CODES.get(equipment_type_name, "XX")
 
         v_class = str(voltage_class).zfill(3) if voltage_class else "000"
-        bay = str(bay_number).zfill(2) if bay_number else "00"
 
-        existing_count = db.query(func.count(Equipment.id)).filter(
-            Equipment.department_id == department_id,
-            Equipment.voltage_class == voltage_class,
-            Equipment.bay_number == bay_number,
-            Equipment.equipment_type_id == db.query(CategoryMaster.id).filter(
-                CategoryMaster.name == equipment_type_name
-            ).scalar_subquery()
-        ).scalar() or 0
+        bay_seq = cls._get_or_create_bay_sequence(db, department_id, bay_number)
+        bay = str(bay_seq).zfill(2)
 
-        serial = str(existing_count + 1).zfill(2)
+        serial_num = cls._get_or_increment_serial(db, department_id, voltage_class, bay_seq, equipment_type_id)
+        serial = str(serial_num).zfill(2)
+
         return f"{zone_code}-{substation_code}-{v_class}-{bay}-{type_code}-{serial}"
 
     @classmethod
@@ -251,13 +318,17 @@ class EquipmentService:
         if not dept:
             raise HTTPException(status_code=404, detail="Department/substation not found")
 
-        ueic = cls.generate_ueic(db, department_id, eq_type.name, voltage_class, bay_number)
+        ueic = cls.generate_ueic(db, department_id, equipment_type_id, eq_type.name, voltage_class, bay_number)
 
-        while db.query(Equipment).filter(Equipment.ueic == ueic).first():
-            parts = ueic.rsplit("-", 1)
-            current_serial = int(parts[-1])
-            parts[-1] = str(current_serial + 1).zfill(2)
-            ueic = "-".join(parts)
+        # Collisions should be structurally impossible now that the serial segment
+        # comes from an atomic, monotonically-increasing counter — this is a defensive
+        # integrity check, not a recovery path. Silently bumping the serial here (as the
+        # old logic did) would desync the UEIC from the counter table and risk reuse.
+        if db.query(Equipment).filter(Equipment.ueic == ueic).first():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Generated UEIC '{ueic}' already exists. This indicates a data integrity issue with the serial counter — investigate before retrying.",
+            )
 
         equipment = Equipment(
             ueic=ueic,

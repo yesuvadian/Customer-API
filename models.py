@@ -1718,6 +1718,54 @@ class Equipment(Base):
     creator = relationship("User", foreign_keys=[created_by])
     modifier = relationship("User", foreign_keys=[modified_by])
 
+# ------------------------------
+# UEIC generation support tables
+# ------------------------------
+class BaySequence(Base):
+    """
+    Maps a free-text bay name (e.g. "100MVA Power TR-1") to a stable, permanent
+    2-digit bay sequence number within a substation, assigned the first time
+    that bay name is seen at that substation (order of registration).
+    Used as the "Bay Number" segment of the UEIC (SRS §3.1.1).
+    """
+    __tablename__ = "bay_sequences"
+    __table_args__ = (
+        UniqueConstraint("department_id", "bay_name", name="uq_bay_sequence_dept_name"),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="CASCADE"), nullable=False)
+    bay_name = Column(String(255), nullable=False)
+    sequence_number = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EquipmentSerialCounter(Base):
+    """
+    Persistent, monotonically-increasing counter for the "Equipment Serial"
+    segment of the UEIC, keyed by (substation, voltage class, bay sequence,
+    equipment type). Guarantees UEIC serials are permanent and non-reusable
+    (SRS §3.1.1) even if equipment rows are ever hard-deleted, and is updated
+    atomically to avoid race conditions under concurrent registration.
+    """
+    __tablename__ = "equipment_serial_counters"
+    __table_args__ = (
+        UniqueConstraint(
+            "department_id", "voltage_class", "bay_sequence", "equipment_type_id",
+            name="uq_equipment_serial_counter_key",
+        ),
+        {"schema": "public"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="CASCADE"), nullable=False)
+    voltage_class = Column(String(20), nullable=False, default="000")
+    bay_sequence = Column(Integer, nullable=False, default=0)
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id"), nullable=False)
+    last_serial = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 
 # ------------------------------
 # Organization Role Model

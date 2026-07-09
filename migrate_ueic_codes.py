@@ -68,23 +68,49 @@ EQUIPMENT_TYPE_CODES = {
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
+
+# Common filler words seen in real KPTCL substation/department names that are
+# NOT part of the place name and should never leak into an abbreviation.
+_STATION_FILLER_WORDS = (
+    "receiving", "station", "substation", "ss", "tl", "sub", "division",
+    "circle", "zone", "grid", "switching",
+)
+
+
 def strip_voltage_prefix(name: str) -> str:
-    """Remove leading voltage prefix like '110kV ', '220kV ', '66kV ', '400kV '."""
-    return re.sub(r"^\d+\s*kV\s*", "", name, flags=re.IGNORECASE).strip()
-
-
-def make_4char_code(base_name: str) -> str:
     """
-    Generate a 4-char code from a substation base name (voltage prefix already stripped).
-    Strategy: take first 4 alpha-numeric chars, uppercase.
-    Examples:
-      Achanur        -> ACHE  (first 4 letters)
-      Navanagar-2    -> NAVA
-      Kulageri Cross -> KULA
+    Remove voltage rating tokens from a station name, wherever they appear —
+    e.g. '110kV Achanur' (leading) or 'BIAL Begur 220/66/11kV receiving station'
+    (embedded compound ratio). Real KPTCL names commonly use slash-separated
+    compound ratios like '220/66/11kV', not just a single leading voltage.
+    """
+    # Compound or single voltage ratio, e.g. "220/66/11kV", "110kV", "66/11kV"
+    cleaned = re.sub(r"\d+(?:\s*/\s*\d+)*\s*kv\b", "", name, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def make_4char_code(base_name: str) -> str | None:
+    """
+    Generate a 4-char code candidate from a substation base name (voltage
+    tokens already stripped). This is a best-effort fallback for the one-time
+    backfill only — it is NOT used at runtime. Real substation abbreviations
+    (e.g. "Bellary" -> "BLRY") are a curated editorial choice that can't be
+    reliably reproduced by string-mangling the name, so every code produced
+    here should be reviewed by a human before being treated as final.
+
+    Returns None if no usable letters remain after stripping filler words,
+    so the caller can flag the row for manual attention instead of emitting
+    a meaningless numeric/placeholder code.
     """
     # Remove punctuation except letters/digits/spaces
-    cleaned = re.sub(r"[^A-Za-z0-9 ]", "", base_name)
-    letters = re.sub(r"\s+", "", cleaned)  # collapse spaces
+    cleaned = re.sub(r"[^A-Za-z0-9 ]", " ", base_name)
+    words = [w for w in cleaned.split() if w.lower() not in _STATION_FILLER_WORDS]
+    letters = "".join(words)
+    # Drop any leading digits left over (e.g. a stray ratio fragment) — a code
+    # should read as an abbreviation, not a number.
+    letters = re.sub(r"^\d+", "", letters)
+    if not letters:
+        return None
     code = letters[:4].upper()
     return code.ljust(4, "X")  # pad if shorter than 4
 
@@ -186,10 +212,19 @@ def run(dry_run: bool):
             zone = id_map[zone_id]
             # Build proposed codes
             proposed = {}
+            needs_manual_review = []
             for s in subs:
                 base = strip_voltage_prefix(s.name)
                 code = make_4char_code(base)
+                if code is None:
+                    needs_manual_review.append(s.name)
+                    code = "TODO"  # visibly wrong placeholder — must be fixed by hand before use
                 proposed[s.id] = code
+            if needs_manual_review:
+                print(f"  MANUAL REVIEW NEEDED for zone '{zone.name}' — no usable name left after "
+                      f"stripping voltage/filler words, set OrgDepartment.code by hand for:")
+                for name in needs_manual_review:
+                    print(f"    - {name}")
 
             # Detect collisions within zone
             code_to_ids: dict[str, list] = defaultdict(list)
@@ -257,7 +292,7 @@ def run(dry_run: bool):
                 sub_code = sub_id_to_new_code[dept.id]
             else:
                 base = strip_voltage_prefix(dept.name)
-                sub_code = make_4char_code(base)
+                sub_code = make_4char_code(base) or "TODO"
 
             type_row = db.query(CategoryMaster).filter(
                 CategoryMaster.id == eq.equipment_type_id
