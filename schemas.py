@@ -976,6 +976,7 @@ class CategoryDetailsBase(BaseModel):
     description: Optional[str] = None
     is_active: bool = True          # ✅ FIXED
     category_master_id: int
+    category_type: Optional[str] = None
 
 
 class CategoryDetailsCreate(CategoryDetailsBase):
@@ -987,6 +988,7 @@ class CategoryDetailsUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     modified_by: Optional[UUID] = None
+    category_type: Optional[str] = None
 
 class CategoryDetailsResponse(CategoryDetailsBase):
     id: int

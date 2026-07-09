@@ -11818,6 +11818,8 @@ def run_seed():
         seed_category_details(session, master_ids)
         from seed_category_active_flags import sync_category_details_active_flags
         sync_category_details_active_flags(session)
+        from seed_category_types import seed_category_types
+        seed_category_types(session)
         seed_test_type_categories(session, master_ids)
         # seed_tester_locations(session)  # DEPRECATED - using org departments instead
         seed_sample_testing_request(session)
