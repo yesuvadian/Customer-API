@@ -1119,14 +1119,38 @@ class TestingRequestService:
 
         return result
 
+    # Non-equipment masters — same exclusion list as the Flutter Template Designer.
+    _NON_EQUIPMENT_MASTERS = {
+        "Annual Audit Categories",
+        "Calibration Lifecycle",
+        "Cumulative Lifecycle",
+        "Repair Lifecycle",
+        "Inspection Types",
+        "Generic",
+    }
+
     def list_equipment_types(self) -> list:
-        """Return CategoryMaster rows where description='Testing Equipment'
-        with their CategoryDetails grouped by request category."""
+        """Return active CategoryMaster rows that represent real equipment types,
+        grouped by their CategoryDetails request category.
+
+        Inclusion rule: any active master whose name is NOT in the non-equipment
+        exclusion list AND that either carries description='Testing Equipment' OR
+        has at least one active CategoryDetail — so newly created equipment types
+        appear here as soon as they have test/maintenance types defined."""
         masters = (
             self.db.query(CategoryMaster)
             .filter(
-                CategoryMaster.description == "Testing Equipment",
                 CategoryMaster.is_active.is_(True),
+                ~CategoryMaster.name.in_(self._NON_EQUIPMENT_MASTERS),
+                # Must have description='Testing Equipment' OR have active details
+                (
+                    (CategoryMaster.description == "Testing Equipment") |
+                    CategoryMaster.id.in_(
+                        self.db.query(CategoryDetails.category_master_id)
+                        .filter(CategoryDetails.is_active.is_(True))
+                        .distinct()
+                    )
+                ),
             )
             .order_by(CategoryMaster.name)
             .all()
@@ -1145,8 +1169,11 @@ class TestingRequestService:
             types_by_category: dict = {
                 "test": [], "maintenance": [], "inspection": [], "repair_lifecycle": []
             }
+            # Map seed value 'repair' to the TR bucket 'repair_lifecycle'
+            _CAT_ALIAS = {"repair": "repair_lifecycle"}
             for t in all_types:
-                cat = t.category_type or "test"
+                raw_cat = t.category_type or "test"
+                cat = _CAT_ALIAS.get(raw_cat, raw_cat)
                 bucket = types_by_category.get(cat, types_by_category["test"])
                 # Look up linked OrgTestTemplate to expose lifecycle flags
                 tpl = (
