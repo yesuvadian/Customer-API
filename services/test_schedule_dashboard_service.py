@@ -270,8 +270,10 @@ class TestScheduleDashboardService:
         kpis = self._compute_kpis(rows, columns)
 
         # 8. Upcoming schedule counts per time window
-        # Counts distinct schedules that have next_run_date within each window
-        # and whose end_date (if set) has not already passed.
+        # A schedule counts in the 30d bucket if it has a run within 30 days.
+        # It counts in the 180d bucket only if its end_date extends past 30 days
+        # (i.e. it still has runs in the 30–180d range).
+        # Same logic for 365d (end_date must extend past 180 days).
         today_dt = self._today
         d30 = d180 = d365 = 0
         for s in schedules:
@@ -282,16 +284,22 @@ class TestScheduleDashboardService:
             days = (nr_date - today_dt).days
             if days < 0:
                 continue  # overdue — not "upcoming"
-            # Clamp: if next_run is beyond end_date, no valid run
+            # Clamp: if next_run is beyond end_date, no valid run at all
+            end_d = None
             if s.end_date:
                 end_d = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
                 if nr_date > end_d:
                     continue
+            # days_until_end: None means schedule runs indefinitely
+            days_until_end = (end_d - today_dt).days if end_d else None
+
             if days <= 30:
                 d30 += 1
-            if days <= 180:
+            # Only count in 180d if schedule still has runs beyond 30 days
+            if days <= 180 and (days_until_end is None or days_until_end > 30):
                 d180 += 1
-            if days <= 365:
+            # Only count in 365d if schedule still has runs beyond 180 days
+            if days <= 365 and (days_until_end is None or days_until_end > 180):
                 d365 += 1
 
         upcoming_counts = {"30": d30, "180": d180, "365": d365}
