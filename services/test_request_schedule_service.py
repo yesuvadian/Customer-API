@@ -933,6 +933,9 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         """
         from models import Equipment, CategoryMaster
         from sqlalchemy import func, case
+        from datetime import datetime, timezone as _tz
+
+        _now = datetime.now(_tz.utc)
 
         # Build query to group schedules by equipment
         query = (
@@ -959,6 +962,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             )
             .filter(
                 TestRequestSchedule.is_deleted == False,
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
             )
             .group_by(
                 Equipment.id,

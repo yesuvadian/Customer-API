@@ -144,12 +144,14 @@ class TestScheduleDashboardService:
             type_name_map = {r.id: r.name for r in type_rows}
 
         # 3. All operational schedules for these equipment
+        _now = datetime.now(timezone.utc)
         schedules = (
             self.db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.equipment_id.in_(eq_ids),
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
             )
             .all()
         )
@@ -209,6 +211,13 @@ class TestScheduleDashboardService:
                     continue
 
                 next_run = sched.next_run_date
+                # If next_run_date is beyond end_date, there are no more valid runs
+                if next_run and sched.end_date:
+                    end_naive = sched.end_date.date() if isinstance(sched.end_date, datetime) else sched.end_date
+                    next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
+                    if next_naive > end_naive:
+                        next_run = None
+
                 if next_run:
                     next_date = next_run.date() if isinstance(next_run, datetime) else next_run
                     days = (next_date - self._today).days
@@ -275,12 +284,14 @@ class TestScheduleDashboardService:
         today = self._today
         cutoff = today + timedelta(days=60)
 
+        _now = datetime.now(timezone.utc)
         schedules = (
             self.db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.equipment_id == equipment_id,
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
             )
             .all()
         )
@@ -296,6 +307,12 @@ class TestScheduleDashboardService:
             next_run = s.next_run_date
             if not next_run:
                 continue
+            # Clamp: if next_run is beyond end_date, no more valid runs
+            if s.end_date:
+                end_naive = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
+                next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
+                if next_naive > end_naive:
+                    continue
             next_date = next_run.date() if isinstance(next_run, datetime) else next_run
             days = (next_date - today).days
             tt = tt_map.get(s.test_type_id)
@@ -345,6 +362,12 @@ class TestScheduleDashboardService:
         cells_for_health: dict[str, dict] = {}
         for s in all_scheds:
             next_run = s.next_run_date
+            # Clamp: if next_run is beyond end_date, treat as no upcoming run
+            if next_run and s.end_date:
+                end_naive = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
+                next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
+                if next_naive > end_naive:
+                    next_run = None
             if next_run:
                 nd = next_run.date() if isinstance(next_run, datetime) else next_run
                 days = (nd - today).days
@@ -443,6 +466,7 @@ class TestScheduleDashboardService:
 
         # Schedule count per department — org-level (equipment_id IS NULL)
         dept_sched_counts: dict = {}
+        _now_dept = datetime.now(timezone.utc)
         sched_dept_rows = (
             self.db.query(TestRequestSchedule.department_id, func.count(TestRequestSchedule.id))
             .filter(
@@ -451,6 +475,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
                 TestRequestSchedule.department_id.isnot(None),
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now_dept)),
             )
             .group_by(TestRequestSchedule.department_id)
             .all()
@@ -467,6 +492,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
                 Equipment.department_id.isnot(None),
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now_dept)),
             )
             .group_by(Equipment.department_id)
             .all()
@@ -634,6 +660,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.is_(None),
                 TestRequestSchedule.is_active.is_(True),
                 TestRequestSchedule.is_deleted.is_(False),
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > datetime.now(timezone.utc))),
             )
         )
         if department_id:
@@ -666,6 +693,12 @@ class TestScheduleDashboardService:
         items = []
         for s in schedules:
             next_run = s.next_run_date
+            # Clamp: if next_run is beyond end_date, no more valid runs
+            if next_run and s.end_date:
+                end_naive = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
+                next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
+                if next_naive > end_naive:
+                    next_run = None
             if next_run:
                 next_date = next_run.date() if isinstance(next_run, datetime) else next_run
                 days = (next_date - self._today).days
