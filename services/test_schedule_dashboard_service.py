@@ -144,6 +144,35 @@ class TestScheduleDashboardService:
             type_rows = self.db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
             type_name_map = {r.id: r.name for r in type_rows}
 
+        # 2c. Department name + ancestor path map
+        dept_ids_used = list({e.department_id for e in equipments if e.department_id})
+        dept_name_map: dict = {}   # id -> name
+        dept_parent_map: dict = {} # id -> parent_id
+        if dept_ids_used:
+            # Fetch all departments for the org once (needed to walk ancestry)
+            all_depts = (
+                self.db.query(OrgDepartment)
+                .filter(OrgDepartment.organization_id == org_id, OrgDepartment.is_active == True)
+                .all()
+            )
+            for d in all_depts:
+                dept_name_map[d.id] = d.name
+                if d.parent_department_id:
+                    dept_parent_map[d.id] = d.parent_department_id
+
+        def _dept_path(dept_id) -> list[str]:
+            """Walk up the tree and return names from root to leaf."""
+            path, visited = [], set()
+            cur = dept_id
+            while cur and cur not in visited:
+                visited.add(cur)
+                name = dept_name_map.get(cur)
+                if name:
+                    path.append(name)
+                cur = dept_parent_map.get(cur)
+            path.reverse()
+            return path
+
         # 3. All operational schedules for these equipment
         _now = datetime.now(timezone.utc)
         schedules = (
@@ -254,12 +283,15 @@ class TestScheduleDashboardService:
             # Dominant frequency: most common among this equipment's schedules
             freqs = freq_idx.get(eq.id, [])
             dominant_freq = max(set(freqs), key=freqs.count) if freqs else None
+            dept_path = _dept_path(eq.department_id) if eq.department_id else []
             rows.append({
                 "equipment_id":       str(eq.id),
                 "ueic":               eq.ueic,
                 "voltage_class":      eq.voltage_class,
                 "manufacturer":       eq.manufacturer,
                 "year_of_manufacture":eq.year_of_manufacture,
+                "department_name":    dept_path[-1] if dept_path else None,
+                "department_path":    dept_path,
                 "model_number":       eq.model_number,
                 "overall_status":     _OVERALL_LABEL[worst_status],
                 "health_index":       health,
@@ -638,14 +670,14 @@ class TestScheduleDashboardService:
         return visited
 
     def _compute_kpis(self, rows: list, columns: list) -> dict:
+        from models import TestingRequest
         today = self._today
-        month_start = today.replace(day=1)
+        month_start = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
 
-        total            = len(rows)
-        overdue          = 0
-        due_30           = 0
-        critical_alert   = 0
-        completed_month  = 0
+        total          = len(rows)
+        overdue        = 0
+        due_30         = 0
+        critical_alert = 0
 
         for row in rows:
             status = row["overall_status"]
@@ -657,23 +689,33 @@ class TestScheduleDashboardService:
             if status == "DUE":
                 due_30 += 1
 
-        # Completed this month: count completed TestingRequests across all equipment
-        # We can't do it cheaply here without an extra query; use due_30 proxy for now
-        # (callers can override with a real count from a separate query if needed)
-        completed_month = 0  # populated by router via separate query
+        # Count distinct equipment that had at least one completed test this month
+        eq_ids = [row["equipment_id"] for row in rows if row.get("equipment_id")]
+        completed_month = 0
+        if eq_ids:
+            completed_month = (
+                self.db.query(TestingRequest.equipment_id)
+                .filter(
+                    TestingRequest.equipment_id.in_(eq_ids),
+                    TestingRequest.status == "completed",
+                    TestingRequest.completed_at >= month_start,
+                )
+                .distinct()
+                .count()
+            )
 
         pct = lambda n: f"{round(n / total * 100, 1)}%" if total else "0%"
 
         return {
-            "total_transformers":  total,
-            "tests_due_30_days":   due_30,
-            "tests_due_pct":       pct(due_30),
-            "overdue_tests":       overdue,
-            "overdue_pct":         pct(overdue),
-            "critical_alert":      critical_alert,
-            "critical_pct":        pct(critical_alert),
+            "total_transformers":   total,
+            "tests_due_30_days":    due_30,
+            "tests_due_pct":        pct(due_30),
+            "overdue_tests":        overdue,
+            "overdue_pct":          pct(overdue),
+            "critical_alert":       critical_alert,
+            "critical_pct":         pct(critical_alert),
             "completed_this_month": completed_month,
-            "completed_pct":       "—",
+            "completed_pct":        pct(completed_month),
         }
 
     def _empty_kpis(self) -> dict:
