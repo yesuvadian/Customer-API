@@ -1197,12 +1197,13 @@ class TestingRequestService:
                     "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)),
                     "enable_calibration": bool(tpl_data.get("enable_calibration", False)),
                 })
-            result.append({
-                "id": m.id,
-                "name": m.name,
-                "tests": types_by_category["test"],    # legacy field
-                "types_by_category": types_by_category,
-            })
+            if any(types_by_category[cat] for cat in types_by_category):
+                result.append({
+                    "id": m.id,
+                    "name": m.name,
+                    "tests": types_by_category["test"],    # legacy field
+                    "types_by_category": types_by_category,
+                })
         return result
 
     def list_all_test_types(self, category: str = None) -> list:
