@@ -654,7 +654,7 @@ class TestScheduleDashboardService:
                 critical_alert += 1
             elif status == "ALERT":
                 critical_alert += 1
-            if status in ("DUE", "ALERT", "OVERDUE"):
+            if status == "DUE":
                 due_30 += 1
 
         # Completed this month: count completed TestingRequests across all equipment
