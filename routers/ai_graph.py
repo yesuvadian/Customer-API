@@ -168,7 +168,7 @@ def get_overview(
     ids = _dept_ids(department_id, db)
 
     # ── Equipment analytics in scope ─────────────────────────────────────────
-    ea_list: list[EquipmentAnalytics] = _scoped_ea(department_id, db, organization_id=user.get("organization_id"))
+    ea_list: list[EquipmentAnalytics] = _scoped_ea(department_id, db, organization_id=user.organization_id)
     ea_map = {ea.equipment_id: ea for ea in ea_list}
     eq_ids = list(ea_map.keys())
 
@@ -308,7 +308,7 @@ def get_life_left(
                 expected_life, condition, health_score, commissioned_year}]
       life_trend: [{period, avg_life_left}]  -- quarterly snapshot from TestAnalytics
     """
-    ea_list = _scoped_ea(department_id, db, organization_id=user.get("organization_id"))
+    ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
     ea_map = {ea.equipment_id: ea for ea in ea_list}
 
@@ -414,7 +414,7 @@ def get_ageing(
       asset_scores: [{ueic, ageing_index}]  -- per-asset ageing risk 0-100
       dp_trend: [{ueic, tested_at, value, unit, condition}]  -- DP history across fleet
     """
-    ea_list = _scoped_ea(department_id, db, organization_id=user.get("organization_id"))
+    ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
     ea_map = {ea.equipment_id: ea for ea in ea_list}
 
@@ -564,7 +564,7 @@ def get_dielectric(
         dga:       [{equipment_id, ueic, parameter_label, tested_at, value, unit, condition}]
         bdv:       [{equipment_id, ueic, tested_at, value, unit, condition}]
     """
-    ea_list = _scoped_ea(department_id, db, organization_id=user.get("organization_id"))
+    ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
 
     eq_list = db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all() if eq_ids else []
@@ -677,7 +677,7 @@ def get_grouped(
     if group_by not in _VALID_GROUP_BY:
         group_by = "equipment_type"
 
-    ea_list = _scoped_ea(department_id, db, organization_id=user.get("organization_id"))
+    ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids  = [ea.equipment_id for ea in ea_list]
     ea_map  = {ea.equipment_id: ea for ea in ea_list}
 
