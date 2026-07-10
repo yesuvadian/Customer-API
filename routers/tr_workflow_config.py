@@ -529,9 +529,6 @@ def patch_stage(
     stage = db.query(TrWfStage).filter(TrWfStage.id == stage_id).first()
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
-    _STRUCTURAL_FIELDS = {"name", "code", "sequence", "weight", "status_id", "is_mandatory", "is_active", "default_duration_days"}
-    if any(k in body for k in _STRUCTURAL_FIELDS):
-        _assert_no_active_instances(db, stage.wf_definition_id)
     for k in ("name", "code", "sequence", "weight", "status_id",
               "is_mandatory", "is_active", "default_duration_days",
               "show_recommendation", "is_result_stage", "use_l2_route", "is_role_scoped"):

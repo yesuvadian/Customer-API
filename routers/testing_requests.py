@@ -27,7 +27,46 @@ router = APIRouter(
 )
 
 
-def _enrich(req):
+def _build_dept_path_map(reqs, db) -> dict:
+    """
+    Batch-build a {dept_id_str: [root_name, ..., leaf_name]} map for all
+    department IDs seen in *reqs*. Uses one query to load all org departments,
+    then walks ancestry in Python — avoids N+1 queries.
+    """
+    from models import OrgDepartment
+    dept_ids = set()
+    org_ids  = set()
+    for r in reqs:
+        if r.department_id:
+            dept_ids.add(r.department_id)
+        if r.organization_id:
+            org_ids.add(r.organization_id)
+    if not dept_ids or not org_ids:
+        return {}
+
+    all_depts = (
+        db.query(OrgDepartment)
+        .filter(OrgDepartment.organization_id.in_(list(org_ids)))
+        .all()
+    )
+    name_map:   dict = {d.id: d.name for d in all_depts}
+    parent_map: dict = {d.id: d.parent_department_id for d in all_depts if d.parent_department_id}
+
+    result: dict = {}
+    for did in dept_ids:
+        path, visited = [], set()
+        cur = did
+        while cur and cur not in visited:
+            visited.add(cur)
+            if cur in name_map:
+                path.append(name_map[cur])
+            cur = parent_map.get(cur)
+        path.reverse()
+        result[str(did)] = path
+    return result
+
+
+def _enrich(req, dept_path_map: dict | None = None):
     """Attach computed display names to ORM object."""
 
     req.equipment_type_name = (
@@ -48,6 +87,14 @@ def _enrich(req):
         if req.department
         else None
     )
+
+    # Full department hierarchy path: ["Zone", "Circle", ..., "Substation"]
+    if dept_path_map is not None and req.department_id:
+        req.department_path = dept_path_map.get(str(req.department_id), [])
+    elif req.department:
+        req.department_path = [req.department.name]
+    else:
+        req.department_path = []
 
     # Equipment asset register fields
     if req.equipment:
@@ -519,8 +566,9 @@ def list_testing_requests(
 
     total = service.count_requests(**common)
     items = service.get_requests(skip=skip, limit=ps, **common)
+    dept_path_map = _build_dept_path_map(items, db)
     serialized = [
-        TestingRequestResponse.model_validate(_enrich(r), from_attributes=True).model_dump(mode='json')
+        TestingRequestResponse.model_validate(_enrich(r, dept_path_map), from_attributes=True).model_dump(mode='json')
         for r in items
     ]
 

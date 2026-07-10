@@ -154,13 +154,9 @@ class DirectSubmissionService:
                 pass
 
         # ── TestingRequest ────────────────────────────────────────────────────
-        # FR + next_action=Maintenance → PM Workflow; all others → Standard Test Workflow
+        # Failure Registry always uses PM Workflow
         if category == RequestCategory.failure_registry:
-            request_type = (
-                "pm"
-                if (_td.get("next_action") or "").lower() == "maintenance"
-                else "normal"
-            )
+            request_type = "pm"
         else:
             request_type = category.value  # e.g. "taqc_inspection"
 
@@ -338,6 +334,7 @@ class DirectSubmissionService:
                 detail=f"Invalid category: {category}",
             )
 
+        from models import TrWfStage as _WfStage
         query = (
             self.db.query(TestingRequest)
             .options(
@@ -346,6 +343,8 @@ class DirectSubmissionService:
                 joinedload(TestingRequest.organization),
                 joinedload(TestingRequest.department),
                 joinedload(TestingRequest.test_results),
+                joinedload(TestingRequest.wf_instance),
+                joinedload(TestingRequest.current_wf_stage).joinedload(_WfStage.status),
             )
             .filter(
                 TestingRequest.request_category == cat,
@@ -372,6 +371,7 @@ class DirectSubmissionService:
 
     def get_submission(self, request_id: UUID, user: User) -> dict:
         """Return single submission with its test result."""
+        from models import TrWfStage as _WfStage
         req = (
             self.db.query(TestingRequest)
             .options(
@@ -380,6 +380,8 @@ class DirectSubmissionService:
                 joinedload(TestingRequest.organization),
                 joinedload(TestingRequest.department),
                 joinedload(TestingRequest.test_results),
+                joinedload(TestingRequest.wf_instance),
+                joinedload(TestingRequest.current_wf_stage).joinedload(_WfStage.status),
             )
             .filter(
                 TestingRequest.id == request_id,
@@ -446,6 +448,7 @@ class DirectSubmissionService:
             "status": getattr(req.status, "value", None),
             "priority": req.priority,
 
+            "equipment_id": str(req.equipment_id) if req.equipment_id else None,
             "equipment_ueic": getattr(eq, "ueic", None),
             "equipment_type_name": eq_type_name,
             "equipment_manufacturer": getattr(eq, "manufacturer", None),
@@ -458,6 +461,16 @@ class DirectSubmissionService:
                 if req.originator else "-"
             ),
 
+            "current_status_code": (
+                req.current_status_code
+                or (req.wf_instance.current_status_code if req.wf_instance else None)
+                or (
+                    req.current_wf_stage.status.status_code
+                    if req.current_wf_stage and req.current_wf_stage.status
+                    else None
+                )
+            ),
+            "wf_stage_name": req.current_wf_stage.name if req.current_wf_stage else None,
             "cts": req.cts.isoformat() if req.cts else None,
             "notes": req.notes,
 

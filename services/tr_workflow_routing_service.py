@@ -29,6 +29,7 @@ from models import (
     TrWfStageInstance,
     TrWfStageRole,
     TrWfStageTransition,
+    TrWfStatus,
     TrWfRoutingDefault,
     TrWfRoutingRule,
     TrWfRoutingRuleRole,
@@ -342,12 +343,27 @@ class WorkflowRoutingService:
                 f"Workflow '{defn.name}' has no active stages configured."
             )
 
+        # Resolve status_code: prefer the stage's linked status; fall back to
+        # the first active TrWfStatus for this definition (ordered by sequence).
+        _stage_status_code = first_stage.status.status_code if first_stage.status else None
+        if not _stage_status_code:
+            _fallback_status = (
+                self.db.query(TrWfStatus)
+                .filter(
+                    TrWfStatus.wf_definition_id == defn.id,
+                    TrWfStatus.is_active.is_(True),
+                )
+                .order_by(TrWfStatus.sequence)
+                .first()
+            )
+            _stage_status_code = _fallback_status.status_code if _fallback_status else None
+
         instance = TrWfInstance(
             wf_definition_id=defn.id,
             testing_request_id=testing_request.id,
             org_id=testing_request.organization_id,
             current_stage_id=first_stage.id,
-            current_status_code=first_stage.status.status_code if first_stage.status else None,
+            current_status_code=_stage_status_code,
             status="active",
             resolved_l3_role_id=resolved_l3_role_id,
             resolved_tester_role_id=resolved_tester_role_id,
@@ -483,11 +499,21 @@ class WorkflowRoutingService:
             is_terminal = True
 
         # Resolve terminal status code
-        if is_terminal and terminal_status_id:
-            from models import TrWfStatus
-            ts = self.db.query(TrWfStatus).filter(TrWfStatus.id == terminal_status_id).first()
-            if ts:
-                terminal_status_code = ts.status_code
+        if is_terminal:
+            if terminal_status_id:
+                ts = self.db.query(TrWfStatus).filter(TrWfStatus.id == terminal_status_id).first()
+                if ts:
+                    terminal_status_code = ts.status_code
+            if not terminal_status_code:
+                # Fallback: last TrWfStatus (by sequence) for this definition
+                _last = (
+                    self.db.query(TrWfStatus)
+                    .filter(TrWfStatus.wf_definition_id == instance.wf_definition_id)
+                    .order_by(TrWfStatus.sequence.desc())
+                    .first()
+                )
+                if _last:
+                    terminal_status_code = _last.status_code
 
         # Close current stage instance
         current_stage_inst: Optional[TrWfStageInstance] = (
@@ -533,9 +559,25 @@ class WorkflowRoutingService:
             )
             self.db.add(new_stage_inst)
 
-            next_status_code = (
-                to_stage.status.status_code if to_stage.status else None
-            )
+            next_status_code = to_stage.status.status_code if to_stage.status else None
+            if not next_status_code:
+                # Stage has no status linked — fall back to WF definition's next status by sequence
+                _cur_seq = (
+                    self.db.query(TrWfStage.sequence)
+                    .filter(TrWfStage.id == current_stage_id)
+                    .scalar() or 0
+                )
+                _next_status = (
+                    self.db.query(TrWfStatus)
+                    .filter(
+                        TrWfStatus.wf_definition_id == instance.wf_definition_id,
+                        TrWfStatus.is_active.is_(True),
+                        TrWfStatus.sequence > _cur_seq,
+                    )
+                    .order_by(TrWfStatus.sequence)
+                    .first()
+                )
+                next_status_code = _next_status.status_code if _next_status else None
             instance.current_stage_id = to_stage.id
             instance.current_status_code = next_status_code
             to_status_code = next_status_code
