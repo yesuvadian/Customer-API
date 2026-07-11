@@ -5240,6 +5240,19 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
     dept_map = {d.name.strip().lower(): d.id for d in depts}
     print(f"[INFO] {len(dept_map)} departments available for equipment lookup")
 
+    def _find_dept(name: str):
+        """Exact match first, then partial match (dept name contains query or vice versa)."""
+        if not name:
+            return None
+        key = name.strip().lower()
+        if key in dept_map:
+            return dept_map[key]
+        # Partial match: find a dept whose name contains the search term or vice versa
+        for dept_name, dept_id in dept_map.items():
+            if key in dept_name or dept_name in key:
+                return dept_id
+        return None
+
     created = skipped = 0
     missing_depts = set()
     missing_types = set()
@@ -5253,18 +5266,15 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
 
     for _, row in df.iterrows():
         substation_name = _safe_str(row.get("substation"))
-        dept_id = dept_map.get(substation_name.lower())
+        dept_id = _find_dept(substation_name)
         if not dept_id:
             # Fallback: try parent division name from the row
             division_name = _safe_str(row.get("division"))
-            if division_name:
-                dept_id = dept_map.get(division_name.lower())
+            dept_id = _find_dept(division_name)
             if not dept_id:
                 missing_depts.add(substation_name)
                 skipped += 1
                 continue
-            else:
-                print(f"  [INFO] Substation '{substation_name}' mapped to parent division '{division_name}'")
 
         raw_type = _safe_str(row.get("equipment_type"))
         equip_type_id = None
