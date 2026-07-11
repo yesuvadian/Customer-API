@@ -976,6 +976,7 @@ class CategoryDetailsBase(BaseModel):
     description: Optional[str] = None
     is_active: bool = True          # ✅ FIXED
     category_master_id: int
+    category_type: Optional[str] = None
 
 
 class CategoryDetailsCreate(CategoryDetailsBase):
@@ -987,6 +988,7 @@ class CategoryDetailsUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     modified_by: Optional[UUID] = None
+    category_type: Optional[str] = None
 
 class CategoryDetailsResponse(CategoryDetailsBase):
     id: int
@@ -1121,6 +1123,7 @@ class TestingRequestResponse(BaseModel):
     organization_id: Optional[UUID] = None
     department_id: Optional[UUID] = None
     department_name: Optional[str] = None  # Computed field
+    department_path: Optional[List[str]] = None  # Full hierarchy: [Zone, Circle, ..., Substation]
 
     # Legacy location fields
     zone: Optional[str] = None
@@ -1168,6 +1171,7 @@ class TestingRequestResponse(BaseModel):
     # ─────────────────────────────────────────────
     # Dynamic workflow status (from TrWfStatus config)
     # ─────────────────────────────────────────────
+    current_status_code: Optional[str] = None
     wf_status_name:  Optional[str] = None
     wf_status_color: Optional[str] = None
     wf_stage_name:   Optional[str] = None
@@ -2631,6 +2635,7 @@ class RepairAssignRequest(BaseModel):
 
 class RepairSubmitRequest(BaseModel):
     remarks: Optional[str] = None
+    form_data: Optional[dict] = None
 
 
 class RepairCancelRequest(BaseModel):

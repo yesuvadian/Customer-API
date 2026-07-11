@@ -14,15 +14,18 @@ from sqlalchemy import desc, func, text
 from models import Equipment, EquipmentStatus, OrgDepartment, CategoryMaster
 
 
+import re
+from datetime import datetime  # add this import if not already present at top
+
 class EquipmentService:
 
-    # ── Equipment Type Code Mapping (from SRS Appendix A) ──
+    # ── Equipment Type Code Mapping — kept in sync with migrate_ueic_add_make_serial.py ──
     EQUIPMENT_TYPE_CODES = {
-        "Power Transformer":             "PT",
+        "Power Transformer":             "TR",
         "Circuit Breaker":               "CB",
         "Current Transformer":           "CT",
-        "Potential Transformer":         "VT",
-        "Voltage Transformer":           "VT",
+        "Potential Transformer":         "PT",
+        "Voltage Transformer":           "PT",
         "Capacitor Voltage Transformer": "VT",
         "CVT":                           "VT",
         "Surge Arrestor":                "SA",
@@ -48,7 +51,60 @@ class EquipmentService:
         "Capacitor Bank":                "CP",
         "Reactor":                       "RC",
         "Lightning Arrester":            "LA",
+        "Control Valve":                 "CV",
     }
+
+    @staticmethod
+    def _normalize_voltage_class(raw: Optional[str]) -> Optional[str]:
+        """
+        Multi-voltage nameplate values like '400/220/33' or '220/66/11' get
+        collapsed to the single highest voltage ('400', '220') so filtering,
+        grouping, and UEIC generation stay consistent. Also strips 'kV'/'KV'
+        suffixes and whitespace.
+        """
+        if not raw:
+            return None
+        s = re.sub(r"kV", "", str(raw), flags=re.IGNORECASE).strip()
+        if not s:
+            return None
+        if "/" not in s:
+            return s
+
+        values = []
+        for part in s.split("/"):
+            part = part.strip()
+            try:
+                values.append(float(part))
+            except ValueError:
+                continue
+        if not values:
+            return s
+
+        top = max(values)
+        return str(int(top)) if top.is_integer() else str(top)
+
+    @staticmethod
+    def _strip_voltage_prefix(name: str) -> str:
+        """Remove a leading voltage prefix like '110kV ', '220kV '."""
+        if not name:
+            return ""
+        return re.sub(r"^\d+\s*kV\s*", "", name, flags=re.IGNORECASE).strip()
+
+    @staticmethod
+    def _make_4char_code(name: str) -> str:
+        """4-char uppercase code from a name, padded with X."""
+        if not name:
+            return "XXXX"
+        cleaned = re.sub(r"[^A-Za-z0-9]", "", name)
+        return cleaned[:4].upper().ljust(4, "X")
+
+    @staticmethod
+    def _make_code_upto4(name: str) -> str:
+        """Up to 4 alpha-numeric chars, uppercase, NOT padded."""
+        if not name:
+            return ""
+        cleaned = re.sub(r"[^A-Za-z0-9]", "", name)
+        return cleaned[:4].upper()
 
     @classmethod
     def _get_department_ancestor(
@@ -166,20 +222,23 @@ class EquipmentService:
         equipment_type_name: str,
         voltage_class: str,
         bay_number: str,
+        manufacturer: Optional[str] = None,
+        factory_serial_number: Optional[str] = None,
+        year_of_manufacture: Optional[int] = None,
     ) -> str:
         """
-        Generate UEIC: {zone_code}-{substation_code}-{voltage}-{bay}-{type_code}-{serial}
-        Example: BN-HEBL-220-04-PT-01
+        Generate UEIC: {zone}-{substation}-{bay}-{voltage_class}-{type_code}-{make}-{serial_no}
+        Example: BN-BBXX-Begur-Vidyanagar line-66-CT-KAPE-HT1690/122569
+        Falls back to {make}{year}-{counter} when factory_serial_number is missing.
 
         Requires:
           - Zone department (depth=0) must have a 2-char code
-          - Substation department (depth=3) must have a 4-char code
         """
         zone_dept = cls._get_department_ancestor(db, department_id, target_level=0)
         if not zone_dept or not zone_dept.code:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Zone department has no code set. Update OrgDepartment.code before registering equipment.",
+                detail="Zone department has no code set. Update OrgDepartment.code before registering equipment.",
             )
 
         substation = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
@@ -191,31 +250,30 @@ class EquipmentService:
 
         zone_code = zone_dept.code.upper()[:2]
 
-        if substation.code and len(substation.code) == 4:
-            substation_code = substation.code.upper()
-        else:
-            base = re.sub(r"^\d+\s*kV\s*", "", substation.name or "", flags=re.IGNORECASE).strip()
-            cleaned = re.sub(r"[^A-Za-z0-9 ]", "", base)
-            letters = re.sub(r"\s+", "", cleaned)
-            substation_code = (letters[:4]).upper().ljust(4, "X")
+        # Always derive fresh from the department name — don't trust a stored
+        # substation code, which can be stale (matches migrate_ueic_add_make_serial.py)
+        substation_code = cls._make_4char_code(cls._strip_voltage_prefix(substation.name or ""))
 
         type_code = cls.EQUIPMENT_TYPE_CODES.get(equipment_type_name, "XX")
 
-        v_class = str(voltage_class).zfill(3) if voltage_class else "000"
-        bay = str(bay_number).zfill(2) if bay_number else "00"
+        bay = str(bay_number).strip() if bay_number else ""
+        v_class = cls._normalize_voltage_class(voltage_class)
+        make_code = cls._make_code_upto4(manufacturer or "") or "Unknown"
 
-        existing_count = db.query(func.count(Equipment.id)).filter(
-            Equipment.department_id == department_id,
-            Equipment.voltage_class == voltage_class,
-            Equipment.bay_number == bay_number,
-            Equipment.equipment_type_id == db.query(CategoryMaster.id).filter(
-                CategoryMaster.name == equipment_type_name
-            ).scalar_subquery()
-        ).scalar() or 0
+        serial_no = (factory_serial_number or "").strip()
+        if not serial_no:
+            yom = year_of_manufacture or datetime.now().year
+            prefix = f"{zone_code}-{substation_code}-{bay}-{v_class}-{type_code}-{make_code}"
+            # DB-driven counter (script used an in-memory dict since it ran once over
+            # all rows at once; live requests need to check existing UEICs instead)
+            existing_count = db.query(func.count(Equipment.id)).filter(
+                Equipment.ueic.like(f"{prefix}-%")
+            ).scalar() or 0
+            serial_no = f"{make_code}{yom}-{existing_count + 1}"
 
-        serial = str(existing_count + 1).zfill(2)
-        return f"{zone_code}-{substation_code}-{v_class}-{bay}-{type_code}-{serial}"
-
+        parts = [zone_code, substation_code, bay, v_class, type_code, make_code, serial_no]
+        return "-".join(p for p in parts if p)
+    
     @classmethod
     def create_equipment(
         cls,
@@ -250,14 +308,22 @@ class EquipmentService:
         dept = db.query(OrgDepartment).filter(OrgDepartment.id == department_id).first()
         if not dept:
             raise HTTPException(status_code=404, detail="Department/substation not found")
+        
+        voltage_class = cls._normalize_voltage_class(voltage_class)
 
-        ueic = cls.generate_ueic(db, department_id, eq_type.name, voltage_class, bay_number)
+        ueic = cls.generate_ueic(
+            db, department_id, eq_type.name, voltage_class, bay_number,
+            manufacturer=manufacturer,
+            factory_serial_number=factory_serial_number,
+            year_of_manufacture=year_of_manufacture,
+        )
 
-        while db.query(Equipment).filter(Equipment.ueic == ueic).first():
-            parts = ueic.rsplit("-", 1)
-            current_serial = int(parts[-1])
-            parts[-1] = str(current_serial + 1).zfill(2)
-            ueic = "-".join(parts)
+        if db.query(Equipment).filter(Equipment.ueic == ueic).first():
+            base_ueic = ueic
+            suffix = 2
+            while db.query(Equipment).filter(Equipment.ueic == ueic).first():
+                ueic = f"{base_ueic}-{suffix}"
+                suffix += 1
 
         equipment = Equipment(
             ueic=ueic,
@@ -266,7 +332,7 @@ class EquipmentService:
             equipment_type_id=equipment_type_id,
             voltage_class=voltage_class,
             bay_number=bay_number,
-            serial_in_bay=ueic.rsplit("-", 1)[-1],
+            serial_in_bay=(factory_serial_number or "").strip() or ueic.rsplit("-", 1)[-1],
             nameplate_data=nameplate_data,
             status=EquipmentStatus.active,
             commissioned_date=commissioned_date,
@@ -482,6 +548,8 @@ class EquipmentService:
             "pt_ratio", "vector_group", "impedance_pct",
         ]
         for key, value in kwargs.items():
+            if key == "voltage_class" and value is not None:
+                value = cls._normalize_voltage_class(value)
             if key in allowed_fields and value is not None:
                 setattr(equipment, key, value)
 
@@ -588,14 +656,18 @@ class EquipmentService:
         )
 
     @classmethod
-    def get_applicable_tests(cls, db: Session, equipment_id: UUID) -> list:
-        """Get test types applicable to an equipment's type."""
+    def get_applicable_tests(cls, db: Session, equipment_id: UUID, org_id=None) -> list:
+        """Return only test types that have a template (canonical, same logic as TR form)."""
         from models import CategoryDetails
+        from services.org_test_template_service import OrgTestTemplateService
+
         equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
         if not equipment:
             raise HTTPException(status_code=404, detail="Equipment not found")
 
-        return (
+        canonical = OrgTestTemplateService(db).canonical_templates_for_org(org_id=org_id)
+
+        all_types = (
             db.query(CategoryDetails)
             .filter(
                 CategoryDetails.category_master_id == equipment.equipment_type_id,
@@ -604,6 +676,8 @@ class EquipmentService:
             .order_by(CategoryDetails.name)
             .all()
         )
+
+        return [t for t in all_types if t.id in canonical]
 
     @classmethod
     def get_equipment_count(

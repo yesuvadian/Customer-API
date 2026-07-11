@@ -31,6 +31,7 @@ router = APIRouter(
 @router.get("/filter-options")
 def filter_options(
     org_id: UUID = Query(...),
+    request_category: Optional[str] = Query("test"),
     db: Session = Depends(get_db),
 ):
     """
@@ -38,7 +39,7 @@ def filter_options(
     available for the given organisation — used to populate the
     Compliance tab filter dropdowns.
     """
-    return TestScheduleDashboardService(db).get_filter_options(org_id)
+    return TestScheduleDashboardService(db).get_filter_options(org_id, request_category=request_category or "test")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -52,6 +53,7 @@ def compliance_matrix(
     voltage_class: Optional[str] = Query(None),
     department_id: Optional[UUID] = Query(None),
     search: Optional[str] = Query(None, description="Filter by UEIC (partial match)"),
+    request_category: Optional[str] = Query("test", description="'test' for CM Schedules, 'maintenance' for PM Schedules"),
     db: Session = Depends(get_db),
 ):
     """
@@ -72,6 +74,7 @@ def compliance_matrix(
             voltage_class=voltage_class or None,
             department_id=department_id,
             search=search or None,
+            request_category=request_category or "test",
         )
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -109,6 +112,7 @@ def equipment_detail(
 def org_schedules(
     org_id: UUID = Query(...),
     department_id: Optional[UUID] = Query(None),
+    request_category: Optional[str] = Query("test"),
     db: Session = Depends(get_db),
 ):
     """
@@ -118,4 +122,5 @@ def org_schedules(
     return TestScheduleDashboardService(db).get_org_schedules(
         org_id=org_id,
         department_id=department_id,
+        request_category=request_category or "test",
     )

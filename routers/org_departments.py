@@ -213,7 +213,11 @@ def get_department_ancestors(
         ).first()
         if not dept:
             break
-        ancestors.append({"id": str(dept.id), "name": dept.name})
+        ancestors.append({
+            "id": str(dept.id),
+            "name": dept.name,
+            "parent_department_id": str(dept.parent_department_id) if dept.parent_department_id else None,
+        })
         current_id = dept.parent_department_id
     ancestors.reverse()
     # Assign level based on depth position (1 = root)

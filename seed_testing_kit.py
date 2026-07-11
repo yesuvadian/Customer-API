@@ -503,6 +503,23 @@ def seed_kit_equipment_records(db: Session):
             "is_portable":             True,
         }
 
+        existing = db.query(Equipment).filter_by(
+            organization_id=org.id,
+            factory_serial_number=serial,
+        ).first()
+        if existing:
+            print(f"[SKIP] Kit '{kit_name}' @ {dept.name} already exists")
+            continue
+
+        from models import Equipment
+        existing = db.query(Equipment).filter_by(
+            organization_id=org.id,
+            factory_serial_number=serial,
+        ).first()
+        if existing:
+            print(f"[SKIP] Kit '{kit_name}' @ {dept.name} already exists")
+            continue
+
         try:
             EquipmentService.create_equipment(
                 db=db,

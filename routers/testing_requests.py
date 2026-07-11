@@ -27,7 +27,46 @@ router = APIRouter(
 )
 
 
-def _enrich(req):
+def _build_dept_path_map(reqs, db) -> dict:
+    """
+    Batch-build a {dept_id_str: [root_name, ..., leaf_name]} map for all
+    department IDs seen in *reqs*. Uses one query to load all org departments,
+    then walks ancestry in Python — avoids N+1 queries.
+    """
+    from models import OrgDepartment
+    dept_ids = set()
+    org_ids  = set()
+    for r in reqs:
+        if r.department_id:
+            dept_ids.add(r.department_id)
+        if r.organization_id:
+            org_ids.add(r.organization_id)
+    if not dept_ids or not org_ids:
+        return {}
+
+    all_depts = (
+        db.query(OrgDepartment)
+        .filter(OrgDepartment.organization_id.in_(list(org_ids)))
+        .all()
+    )
+    name_map:   dict = {d.id: d.name for d in all_depts}
+    parent_map: dict = {d.id: d.parent_department_id for d in all_depts if d.parent_department_id}
+
+    result: dict = {}
+    for did in dept_ids:
+        path, visited = [], set()
+        cur = did
+        while cur and cur not in visited:
+            visited.add(cur)
+            if cur in name_map:
+                path.append(name_map[cur])
+            cur = parent_map.get(cur)
+        path.reverse()
+        result[str(did)] = path
+    return result
+
+
+def _enrich(req, dept_path_map: dict | None = None):
     """Attach computed display names to ORM object."""
 
     req.equipment_type_name = (
@@ -36,17 +75,26 @@ def _enrich(req):
         else None
     )
 
-    req.test_type_name = (
-        req.test_type.name
-        if req.test_type
-        else None
-    )
+    if req.test_type:
+        req.test_type_name = req.test_type.name
+    else:
+        fd_types = (req.form_data or {}).get("test_types") or []
+        names = [t["name"] for t in fd_types if t.get("name")]
+        req.test_type_name = ", ".join(names) if names else None
 
     req.department_name = (
         req.department.name
         if req.department
         else None
     )
+
+    # Full department hierarchy path: ["Zone", "Circle", ..., "Substation"]
+    if dept_path_map is not None and req.department_id:
+        req.department_path = dept_path_map.get(str(req.department_id), [])
+    elif req.department:
+        req.department_path = [req.department.name]
+    else:
+        req.department_path = []
 
     # Equipment asset register fields
     if req.equipment:
@@ -312,9 +360,12 @@ def get_department_ancestors(dept_id: UUID, db: Session = Depends(get_db)):
 
 # ─── Equipment Types (for form dropdowns) ───────────────────
 @router.get("/equipment_types")
-def list_equipment_types(db: Session = Depends(get_db)):
+def list_equipment_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Returns equipment types grouped by request category."""
-    return TestingRequestService(db).list_equipment_types()
+    return TestingRequestService(db).list_equipment_types(org_id=current_user.organization_id)
 
 
 # ─── Kit Sub-Types (Testing Kit CategoryDetails) ────────────
@@ -386,6 +437,30 @@ def get_dropdown_values(master_desc: str, db: Session = Depends(get_db)):
 
 
 # ─── List testers (users with Tester role, optionally filtered by location) ───
+@router.get("/by-equipment")
+def get_by_equipment(
+    org_id: Optional[UUID] = None,
+    department_id: Optional[UUID] = None,
+    request_category: Optional[str] = None,
+    is_closed: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return testing requests grouped by equipment with alert bar status."""
+    eff_org_id = org_id or current_user.organization_id
+    if not eff_org_id:
+        raise HTTPException(status_code=400, detail="org_id required")
+    dept_ids = None
+    if department_id:
+        dept_ids = get_dept_subtree_ids(db, department_id, eff_org_id)
+    return TestingRequestService(db).get_by_equipment(
+        org_id=eff_org_id,
+        department_ids=dept_ids,
+        request_category=request_category,
+        is_closed=is_closed,
+    )
+
+
 @router.get("/testers")
 def list_testers(
     zone: Optional[str] = None,
@@ -460,6 +535,7 @@ def list_testing_requests(
     date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
     is_closed: Optional[bool] = Query(None, description="True = legacy-closed or wf-completed; False = still active"),
+    wf_active: Optional[bool] = Query(None, description="True = only TRs with an active workflow instance (Kanban use)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -493,6 +569,7 @@ def list_testing_requests(
     common = dict(
         status_filter=status,
         is_closed=is_closed,
+        wf_active=wf_active,
         category_filter=category,
         originator_id=originator_id,
         tester_id=tester_id,
@@ -513,8 +590,9 @@ def list_testing_requests(
 
     total = service.count_requests(**common)
     items = service.get_requests(skip=skip, limit=ps, **common)
+    dept_path_map = _build_dept_path_map(items, db)
     serialized = [
-        TestingRequestResponse.model_validate(_enrich(r), from_attributes=True).model_dump(mode='json')
+        TestingRequestResponse.model_validate(_enrich(r, dept_path_map), from_attributes=True).model_dump(mode='json')
         for r in items
     ]
 
@@ -538,6 +616,7 @@ def get_testing_request_breakdown(
     equipment_id: Optional[UUID] = None,
     date_from: Optional[str] = Query(None, description="Filter completed_at >= YYYY-MM-DD"),
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
+    is_closed: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -564,6 +643,7 @@ def get_testing_request_breakdown(
 
     return service.get_breakdown(
         status_filter=status,
+        is_closed=is_closed,
         category_filter=category,
         originator_id=originator_id,
         tester_id=tester_id,

@@ -29,6 +29,7 @@ from models import (
     TrWfStageInstance,
     TrWfStageRole,
     TrWfStageTransition,
+    TrWfStatus,
     TrWfRoutingDefault,
     TrWfRoutingRule,
     TrWfRoutingRuleRole,
@@ -342,12 +343,27 @@ class WorkflowRoutingService:
                 f"Workflow '{defn.name}' has no active stages configured."
             )
 
+        # Resolve status_code: prefer the stage's linked status; fall back to
+        # the first active TrWfStatus for this definition (ordered by sequence).
+        _stage_status_code = first_stage.status.status_code if first_stage.status else None
+        if not _stage_status_code:
+            _fallback_status = (
+                self.db.query(TrWfStatus)
+                .filter(
+                    TrWfStatus.wf_definition_id == defn.id,
+                    TrWfStatus.is_active.is_(True),
+                )
+                .order_by(TrWfStatus.sequence)
+                .first()
+            )
+            _stage_status_code = _fallback_status.status_code if _fallback_status else None
+
         instance = TrWfInstance(
             wf_definition_id=defn.id,
             testing_request_id=testing_request.id,
             org_id=testing_request.organization_id,
             current_stage_id=first_stage.id,
-            current_status_code=first_stage.status.status_code if first_stage.status else None,
+            current_status_code=_stage_status_code,
             status="active",
             resolved_l3_role_id=resolved_l3_role_id,
             resolved_tester_role_id=resolved_tester_role_id,
@@ -483,11 +499,21 @@ class WorkflowRoutingService:
             is_terminal = True
 
         # Resolve terminal status code
-        if is_terminal and terminal_status_id:
-            from models import TrWfStatus
-            ts = self.db.query(TrWfStatus).filter(TrWfStatus.id == terminal_status_id).first()
-            if ts:
-                terminal_status_code = ts.status_code
+        if is_terminal:
+            if terminal_status_id:
+                ts = self.db.query(TrWfStatus).filter(TrWfStatus.id == terminal_status_id).first()
+                if ts:
+                    terminal_status_code = ts.status_code
+            if not terminal_status_code:
+                # Fallback: last TrWfStatus (by sequence) for this definition
+                _last = (
+                    self.db.query(TrWfStatus)
+                    .filter(TrWfStatus.wf_definition_id == instance.wf_definition_id)
+                    .order_by(TrWfStatus.sequence.desc())
+                    .first()
+                )
+                if _last:
+                    terminal_status_code = _last.status_code
 
         # Close current stage instance
         current_stage_inst: Optional[TrWfStageInstance] = (
@@ -533,9 +559,25 @@ class WorkflowRoutingService:
             )
             self.db.add(new_stage_inst)
 
-            next_status_code = (
-                to_stage.status.status_code if to_stage.status else None
-            )
+            next_status_code = to_stage.status.status_code if to_stage.status else None
+            if not next_status_code:
+                # Stage has no status linked — fall back to WF definition's next status by sequence
+                _cur_seq = (
+                    self.db.query(TrWfStage.sequence)
+                    .filter(TrWfStage.id == current_stage_id)
+                    .scalar() or 0
+                )
+                _next_status = (
+                    self.db.query(TrWfStatus)
+                    .filter(
+                        TrWfStatus.wf_definition_id == instance.wf_definition_id,
+                        TrWfStatus.is_active.is_(True),
+                        TrWfStatus.sequence > _cur_seq,
+                    )
+                    .order_by(TrWfStatus.sequence)
+                    .first()
+                )
+                next_status_code = _next_status.status_code if _next_status else None
             instance.current_stage_id = to_stage.id
             instance.current_status_code = next_status_code
             to_status_code = next_status_code
@@ -595,56 +637,91 @@ class WorkflowRoutingService:
             )
 
         # ── Notification ───────────────────────────────────────────────────
-        # Single tr_wf_status_changed event covers every stage transition.
-        # Recipients: @originator always + @assignee if set + active stage roles.
+        # Fire the appropriate notification for every stage transition.
+        # Rejection → request_rejected (has templates, notifies originator).
+        # All other transitions → notify_tr_wf_stage_changed (stage-advance event).
         try:
             from services.notification_service import NotificationService
+            _notif = NotificationService(self.db)
 
-            # Resolve human-readable status name from dynamic TrWfStatus row
-            status_name = (
-                to_stage.status.status_name
-                if to_stage and to_stage.status
-                else (to_status_code or "Updated")
-            )
-            equipment_label = (
-                getattr(testing_request.equipment, "ueic", None)
-                or (testing_request.equipment_type.name if testing_request.equipment_type else "Equipment")
-            )
+            # Resolve performer display name for context
+            _performer_name = ""
+            if performed_by_id:
+                from models import User as _User
+                _actor = self.db.query(_User).filter(_User.id == performed_by_id).first()
+                if _actor:
+                    _performer_name = (
+                        f"{_actor.firstname or ''} {_actor.lastname or ''}".strip()
+                        or _actor.email or ""
+                    )
 
-            # Collect active stage role names for the destination stage so those
-            # users are also notified (AEE R&D at L3, AE tester at L4, etc.)
-            stage_role_names: list = []
-            if to_stage:
-                stage_roles = (
-                    self.db.query(TrWfStageRole)
-                    .filter(TrWfStageRole.stage_id == to_stage.id)
-                    .all()
+            if transition.is_rejection:
+                _notif.notify_request_rejected(
+                    testing_request,
+                    rejected_by=_performer_name,
+                    reason=comment or "",
                 )
-                for sr in stage_roles:
-                    if sr.role and sr.role.name:
-                        stage_role_names.append(sr.role.name)
+            else:
+                # Collect next-stage role names so those users are notified
+                stage_role_names: list = []
+                if to_stage:
+                    _stage_roles = (
+                        self.db.query(TrWfStageRole)
+                        .filter(TrWfStageRole.stage_id == to_stage.id)
+                        .all()
+                    )
+                    for sr in _stage_roles:
+                        if sr.role and sr.role.name:
+                            stage_role_names.append(sr.role.name)
 
-            recipient_roles = ["@originator", "@assignee"] + stage_role_names
+                recipient_roles = ["@originator", "@assignee"] + stage_role_names
 
-            NotificationService(self.db).fire(
-                event_type="tr_wf_status_changed",
-                context={
-                    "request_number": getattr(testing_request, "request_number", ""),
-                    "equipment":      equipment_label,
-                    "status_name":    status_name,
-                    "stage_name":     to_stage.name if to_stage else "",
-                    "action_code":    action_code,
-                },
-                organization_id=testing_request.organization_id,
-                department_id=getattr(testing_request, "department_id", None),
-                source_id=testing_request.id,
-                source_type="testing_request",
-                status_from=from_status_code,
-                status_to=to_status_code,
-                recipient_roles_override=recipient_roles,
-            )
+                _notif.notify_tr_wf_stage_changed(
+                    testing_request,
+                    action_code=action_code,
+                    stage_name=to_stage.name if to_stage else "",
+                    status_code=to_status_code,
+                    performed_by=_performer_name,
+                    comment=comment,
+                    is_terminal=is_terminal,
+                    from_status_code=from_status_code,
+                    recipient_roles_override=recipient_roles,
+                )
         except Exception as _n_err:  # never let notification failure kill the workflow
             log.warning("TR-WF notification failed (non-fatal): %s", _n_err)
+
+        # ── Terminal: close the TestingRequest ─────────────────────────────
+        # When the WF instance reaches a terminal state, sync the TR status.
+        # For non-rejection terminals (complete/close) also auto-dispatch any
+        # pending recommendation so that follow-up actions (schedules, etc.) fire.
+        if is_terminal:
+            from models import TestingRequestStatus as _TRS, Recommendation as _Rec
+            from datetime import datetime as _dt, timezone as _tz
+            if transition.is_rejection:
+                testing_request.status = _TRS.closed
+            else:
+                # Check for pending recommendation → dispatch (handles outcome)
+                rec = (
+                    self.db.query(_Rec)
+                    .filter(_Rec.testing_request_id == testing_request.id)
+                    .order_by(_Rec.cts.desc())
+                    .first()
+                )
+                if rec and rec.approval_status == "pending":
+                    rec.approval_status = "approved"
+                    rec.approved_by = performed_by_id
+                    rec.approved_at = _dt.now(_tz.utc)
+                    self.db.flush()
+                    try:
+                        from services.workflow_dispatch_service import WorkflowDispatchService
+                        WorkflowDispatchService(self.db).dispatch(testing_request, rec, performed_by_id)
+                    except Exception as _de:
+                        log.warning("Dispatch after terminal action failed (non-fatal): %s", _de)
+                        testing_request.status = _TRS.closed
+                        testing_request.completed_at = _dt.now(_tz.utc)
+                else:
+                    testing_request.status = _TRS.closed
+                    testing_request.completed_at = _dt.now(_tz.utc)
 
         return instance
 
@@ -817,9 +894,15 @@ class WorkflowRoutingService:
                     if to_stage.status:
                         to_status_code = to_stage.status.status_code
 
+            # Prefer the transition's custom label; fall back to the action-code map.
+            display_label = (
+                t.label.strip()
+                if t.label and t.label.strip()
+                else ACTION_CODE_LABELS.get(t.action_code, t.action_code.replace("_", " ").title())
+            )
             result.append({
                 "action_code": t.action_code,
-                "label": ACTION_CODE_LABELS.get(t.action_code, t.action_code.replace("_", " ").title()),
+                "label": display_label,
                 "requires_comment": t.requires_comment,
                 "is_rejection": t.is_rejection,
                 "to_stage_id": t.to_stage_id,

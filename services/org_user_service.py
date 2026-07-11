@@ -369,6 +369,16 @@ class OrgUserService(UTCDateTimeMixin):
                     detail="Department not found in this organization"
                 )
 
+        # Enforce one-role-per-user-per-dept: deactivate any other active roles in same scope
+        other_roles = self.db.query(OrgUserRole).filter(
+            OrgUserRole.user_id == user_id,
+            OrgUserRole.department_id == department_id,
+            OrgUserRole.org_role_id != org_role_id,
+            OrgUserRole.is_active == True
+        ).all()
+        for other in other_roles:
+            other.is_active = False
+
         # Check if assignment already exists
         existing = self.db.query(OrgUserRole).filter(
             OrgUserRole.user_id == user_id,

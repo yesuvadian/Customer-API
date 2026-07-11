@@ -21,7 +21,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import or_, text as sa_text
 from sqlalchemy.orm import Session
 
 from models import (
@@ -591,6 +591,7 @@ class RepairWorkflowService:
         stage_id: UUID,
         remarks: Optional[str],
         user_id: UUID,
+        form_data: Optional[dict] = None,
     ) -> dict:
         """
         Stage actor submits the stage after filling the form.
@@ -615,6 +616,19 @@ class RepairWorkflowService:
         # Submitter must be the assigned user OR have can_edit for this stage
         if instance.assigned_user_id and str(instance.assigned_user_id) != str(user_id):
             self._check_stage_rbac(stage_id, user_id)
+
+        # Auto-save form data if submitted inline (user didn't explicitly save first)
+        if form_data:
+            data_row = self.db.query(RepairStageData).filter(
+                RepairStageData.stage_instance_id == instance.id
+            ).first()
+            if data_row:
+                data_row.form_data = form_data
+            else:
+                self.db.add(RepairStageData(
+                    stage_instance_id=instance.id,
+                    form_data=form_data,
+                ))
 
         # Validate required fields at submit time (not at save/draft time).
         # Use the same category-aware resolution as get_current_form so that
@@ -1186,6 +1200,44 @@ class RepairWorkflowService:
             })
         return result
 
+    def _get_dept_subtree_ids(self, dept_id) -> list:
+        rows = self.db.execute(sa_text("""
+            WITH RECURSIVE dept_tree AS (
+                SELECT id FROM org_departments
+                WHERE id = :root_id AND is_active = true
+                UNION ALL
+                SELECT d.id FROM org_departments d
+                INNER JOIN dept_tree dt ON d.parent_department_id = dt.id
+                WHERE d.is_active = true
+            )
+            SELECT id FROM dept_tree
+        """), {"root_id": str(dept_id)}).fetchall()
+        return [r[0] for r in rows]
+
+    def _caller_dept_ids(self, user) -> list:
+        dept_ids_raw = (
+            self.db.query(OrgUserRole.department_id)
+            .filter(
+                OrgUserRole.user_id == user.id,
+                OrgUserRole.is_active.is_(True),
+                OrgUserRole.department_id.isnot(None),
+            )
+            .distinct()
+            .all()
+        )
+        root_ids = [r[0] for r in dept_ids_raw]
+        if not root_ids and user.department_id:
+            root_ids = [user.department_id]
+        if not root_ids:
+            return []
+        result, seen = [], set()
+        for root in root_ids:
+            for did in self._get_dept_subtree_ids(root):
+                if did not in seen:
+                    seen.add(did)
+                    result.append(did)
+        return result
+
     def get_eligible_users(
     self,
     workflow_id: UUID,
@@ -1259,23 +1311,21 @@ class RepairWorkflowService:
                 "No assignable roles configured for this stage."
             )
 
-        # Fetch users in same organization
-        users = (
+        # Fetch users in same organization, scoped to caller's dept subtree
+        caller_depts = self._caller_dept_ids(current_user)
+        users_q = (
             self.db.query(User)
-            .join(
-                OrgUserRole,
-                OrgUserRole.user_id == User.id,
-            )
+            .join(OrgUserRole, OrgUserRole.user_id == User.id)
             .filter(
                 OrgUserRole.org_role_id.in_(role_ids),
                 OrgUserRole.is_active.is_(True),
                 User.isactive.is_(True),
-                User.organization_id
-                == current_user.organization_id,
+                User.organization_id == current_user.organization_id,
             )
-            .distinct()
-            .all()
         )
+        if caller_depts:
+            users_q = users_q.filter(OrgUserRole.department_id.in_(caller_depts))
+        users = users_q.distinct().all()
 
         result = []
 
