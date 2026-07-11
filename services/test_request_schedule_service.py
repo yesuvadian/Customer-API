@@ -1152,7 +1152,73 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     TestRequestSchedule.request_category == cat_enum
                 )
 
-        return query.all()
+        schedules = query.all()
+        today = datetime.now(timezone.utc)
+
+        result = []
+        for s in schedules:
+            # Build base dict from ORM object (scalar columns only)
+            s_dict: dict = {
+                "id": str(s.id),
+                "equipment_id": str(s.equipment_id) if s.equipment_id else None,
+                "organization_id": str(s.organization_id) if s.organization_id else None,
+                "test_type": (
+                    {"id": s.test_type.id, "name": s.test_type.name}
+                    if s.test_type else None
+                ),
+                "title": s.title,
+                "frequency": s.frequency.value if s.frequency else None,
+                "is_active": s.is_active,
+                "is_deleted": s.is_deleted,
+                "next_run_date": s.next_run_date.isoformat() if s.next_run_date else None,
+                "start_date": s.start_date.isoformat() if s.start_date else None,
+                "end_date": s.end_date.isoformat() if s.end_date else None,
+                "request_category": s.request_category.value if s.request_category else None,
+                "cts": s.cts.isoformat() if s.cts else None,
+            }
+
+            # Most recent ticket created from this schedule
+            ticket = (
+                self.db.query(TestingRequest)
+                .filter(
+                    TestingRequest.source_schedule_id == s.id,
+                    TestingRequest.is_schedule_template == False,
+                )
+                .order_by(TestingRequest.requested_date.desc())
+                .first()
+            )
+
+            if ticket:
+                is_completed = ticket.status == TestingRequestStatus.completed
+                due = ticket.due_date
+                if due and due.tzinfo is None:
+                    due = due.replace(tzinfo=timezone.utc)
+                is_overdue = bool(due and due < today and not is_completed)
+
+                ref = ticket.assigned_at or ticket.requested_date
+                if ref:
+                    ref_utc = ref if ref.tzinfo else ref.replace(tzinfo=timezone.utc)
+                    days_in_stage = (today - ref_utc).days
+                else:
+                    days_in_stage = 0
+
+                s_dict["current_ticket"] = {
+                    "id": str(ticket.id),
+                    "request_number": ticket.request_number,
+                    "status": ticket.status.value,
+                    "current_status_code": ticket.current_status_code,
+                    "due_date": ticket.due_date.isoformat() if ticket.due_date else None,
+                    "requested_date": ticket.requested_date.isoformat() if ticket.requested_date else None,
+                    "days_in_stage": days_in_stage,
+                    "is_overdue": is_overdue,
+                    "is_completed": is_completed,
+                }
+            else:
+                s_dict["current_ticket"] = None
+
+            result.append(s_dict)
+
+        return result
 
     # ============================================================
     # GET OPERATIONAL SCHEDULE
