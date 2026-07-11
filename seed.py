@@ -1744,16 +1744,6 @@ def seed_privileges(session, role_ids, module_ids):
 
 
     # -------------------------------------------------------
-    # REMOVE all Vendor privileges before re-seeding
-    # -------------------------------------------------------
-    vendor_role_id = role_ids.get("Vendor")
-    if vendor_role_id:
-        session.query(RoleModulePrivilege).filter(
-            RoleModulePrivilege.role_id == vendor_role_id
-        ).delete()
-        session.commit()
-
-    # -------------------------------------------------------
     # ALL MODULES
     # -------------------------------------------------------
     module_names = [
@@ -2212,12 +2202,22 @@ def seed_privileges(session, role_ids, module_ids):
         if not role_id or not module_id:
             continue
 
-        exists = session.query(RoleModulePrivilege).filter_by(
+        existing = session.query(RoleModulePrivilege).filter_by(
             role_id=role_id,
             module_id=module_id
         ).first()
 
-        if not exists:
+        if existing:
+            existing.can_view    = p.get("can_view",    False)
+            existing.can_add     = p.get("can_add",     False)
+            existing.can_edit    = p.get("can_edit",    False)
+            existing.can_delete  = p.get("can_delete",  False)
+            existing.can_search  = p.get("can_search",  False)
+            existing.can_import  = p.get("can_import",  False)
+            existing.can_export  = p.get("can_export",  False)
+            existing.can_approve = p.get("can_approve", False)
+            existing.can_assign  = p.get("can_assign",  False)
+        else:
             session.add(RoleModulePrivilege(
                 role_id=role_id,
                 module_id=module_id,
@@ -3230,9 +3230,9 @@ def migrate_equipment_register(session):
                 organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
                 department_id UUID NOT NULL REFERENCES public.org_departments(id) ON DELETE CASCADE,
                 equipment_type_id INTEGER NOT NULL REFERENCES public."CategoryMaster"(id),
-                voltage_class VARCHAR(10),
-                bay_number VARCHAR(10),
-                serial_in_bay VARCHAR(10),
+                voltage_class VARCHAR(50),
+                bay_number VARCHAR(255),
+                serial_in_bay VARCHAR(255),
                 nameplate_data JSONB,
                 status VARCHAR(20) NOT NULL DEFAULT 'active',
                 replaces_equipment_id UUID REFERENCES public.equipment(id),
@@ -4409,8 +4409,6 @@ def seed_sample_organization(session):
 
         if existing_role:
             role = existing_role
-            # Clear existing permissions
-            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
         else:
             # Create new role
             role = OrgRole(
@@ -4427,20 +4425,27 @@ def seed_sample_organization(session):
             session.add(role)
             session.flush()
 
-        # Add FULL permissions for EXACT modules
-        for module_id in TESTER_REQUIRED_MODULES:
-            perm = OrgRolePermission(
-                id=uuid.uuid4(),
-                org_role_id=role.id,
-                module_id=module_id,
-                can_view=True,
-                can_add=True,
-                can_edit=True,
-                can_delete=True,
-                can_approve=True,
-                can_assign=True
-            )
-            session.add(perm)
+        # Upsert FULL permissions for EXACT modules; remove stale entries
+        existing_perms = {
+            p.module_id: p
+            for p in session.query(OrgRolePermission).filter_by(org_role_id=role.id).all()
+        }
+        desired_module_ids = set(TESTER_REQUIRED_MODULES)
+        for module_id in desired_module_ids:
+            if module_id in existing_perms:
+                p = existing_perms[module_id]
+                p.can_view = p.can_add = p.can_edit = p.can_delete = p.can_approve = p.can_assign = True
+            else:
+                session.add(OrgRolePermission(
+                    id=uuid.uuid4(),
+                    org_role_id=role.id,
+                    module_id=module_id,
+                    can_view=True, can_add=True, can_edit=True,
+                    can_delete=True, can_approve=True, can_assign=True,
+                ))
+        for module_id, perm in existing_perms.items():
+            if module_id not in desired_module_ids:
+                session.delete(perm)
 
         tester_roles.append(role)
 
@@ -4722,27 +4727,48 @@ def seed_kptcl_organization(session):
             template = templates_by_name.get(role.name)
             if not template or not template.permissions_template:
                 continue
-            # Delete existing permissions and re-insert from template
-            session.query(OrgRolePermission).filter_by(org_role_id=role.id).delete()
+            # Upsert permissions from template; remove stale entries
+            existing_perms = {
+                p.module_id: p
+                for p in session.query(OrgRolePermission).filter_by(org_role_id=role.id).all()
+            }
+            desired_mids = set()
             for perm_data in template.permissions_template:
                 mid = perm_data.get("module_id")
                 if mid not in _valid_module_ids:
                     continue
-                session.add(OrgRolePermission(
-                    id=uuid.uuid4(),
-                    org_role_id=role.id,
-                    module_id=mid,
-                    can_view=perm_data.get("can_view", False),
-                    can_add=perm_data.get("can_add", False),
-                    can_edit=perm_data.get("can_edit", False),
-                    can_delete=perm_data.get("can_delete", False),
-                    can_approve=perm_data.get("can_approve", False),
-                    can_assign=perm_data.get("can_assign", False),
-                    can_export=perm_data.get("can_export", False),
-                    can_import=perm_data.get("can_import", False),
-                    cts=datetime.now(datetime.now().astimezone().tzinfo),
-                    mts=datetime.now(datetime.now().astimezone().tzinfo)
-                ))
+                desired_mids.add(mid)
+                if mid in existing_perms:
+                    p = existing_perms[mid]
+                    p.can_view   = perm_data.get("can_view",   False)
+                    p.can_add    = perm_data.get("can_add",    False)
+                    p.can_edit   = perm_data.get("can_edit",   False)
+                    p.can_delete = perm_data.get("can_delete", False)
+                    p.can_approve= perm_data.get("can_approve",False)
+                    p.can_assign = perm_data.get("can_assign", False)
+                    p.can_export = perm_data.get("can_export", False)
+                    p.can_import = perm_data.get("can_import", False)
+                    p.mts = datetime.now(datetime.now().astimezone().tzinfo)
+                else:
+                    now_ts = datetime.now(datetime.now().astimezone().tzinfo)
+                    session.add(OrgRolePermission(
+                        id=uuid.uuid4(),
+                        org_role_id=role.id,
+                        module_id=mid,
+                        can_view=perm_data.get("can_view", False),
+                        can_add=perm_data.get("can_add", False),
+                        can_edit=perm_data.get("can_edit", False),
+                        can_delete=perm_data.get("can_delete", False),
+                        can_approve=perm_data.get("can_approve", False),
+                        can_assign=perm_data.get("can_assign", False),
+                        can_export=perm_data.get("can_export", False),
+                        can_import=perm_data.get("can_import", False),
+                        cts=now_ts,
+                        mts=now_ts,
+                    ))
+            for mid, perm in existing_perms.items():
+                if mid not in desired_mids:
+                    session.delete(perm)
             synced_roles += 1
         session.commit()
         print(f"[OK] Synced permissions for {synced_roles} existing KPTCL roles")
@@ -5008,45 +5034,7 @@ def seed_kptcl_departments(session, org_id: str, excel_path: str = None):
     if not os.path.exists(excel_path):
         raise FileNotFoundError(f"Excel file not found: {excel_path}")
 
-    # Delete existing testing requests first (to avoid FK violation with equipment)
-    print(f"[INFO] Deleting existing testing requests for organization: {org.name}")
-    from models import TestingRequest
-    deleted_requests = session.query(TestingRequest).filter(
-        TestingRequest.organization_id == uuid.UUID(org_id)
-    ).delete()
-    session.commit()
-    print(f"[OK] Deleted {deleted_requests} testing requests")
-
-    # Delete annual audit inspections first (FK → equipment, observations cascade)
-    try:
-        from models import TAQCAnnualInspection
-        deleted_inspections = session.query(TAQCAnnualInspection).filter(
-            TAQCAnnualInspection.organization_id == uuid.UUID(org_id)
-        ).delete()
-        session.commit()
-        if deleted_inspections:
-            print(f"[OK] Deleted {deleted_inspections} annual audit inspections (and their observations)")
-    except Exception:
-        session.rollback()
-
-    # Delete existing equipment for this organization
-    print(f"[INFO] Deleting existing equipment for organization: {org.name}")
-    from models import Equipment
-    deleted_equipment = session.query(Equipment).filter(
-        Equipment.organization_id == uuid.UUID(org_id)
-    ).delete()
-    session.commit()
-    print(f"[OK] Deleted {deleted_equipment} equipment records")
-
-    # Delete existing departments for this organization
-    print(f"[INFO] Deleting existing departments for organization: {org.name}")
-    existing_depts = session.query(OrgDepartment).filter(
-        OrgDepartment.organization_id == uuid.UUID(org_id)
-    ).all()
-    for dept in existing_depts:
-        session.delete(dept)
-    session.commit()
-    print(f"[OK] Deleted {len(existing_depts)} existing departments")
+    print(f"[INFO] Upserting departments for organization: {org.name} (existing data preserved)")
 
     # Read Excel file
     try:
@@ -5339,6 +5327,30 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         status = status_map.get(raw_status, EquipmentStatus.active)
 
         from services.equipment_service import EquipmentService
+        from models import Equipment as EquipmentModel
+
+        serial = _clean_str(row.get("factory_serial_number"))
+        bay    = _clean_str(row.get("bay_name"))
+
+        # Skip if already exists — match by serial number or by dept+type+bay
+        existing = None
+        if serial:
+            existing = session.query(EquipmentModel).filter_by(
+                organization_id=uuid.UUID(org_id),
+                factory_serial_number=serial,
+            ).first()
+        if not existing and bay:
+            existing = session.query(EquipmentModel).filter_by(
+                organization_id=uuid.UUID(org_id),
+                department_id=dept_id,
+                equipment_type_id=equip_type_id,
+                bay_number=bay,
+            ).first()
+
+        if existing:
+            skipped += 1
+            continue
+
         try:
             EquipmentService.create_equipment(
                 db=session,
@@ -5346,9 +5358,9 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
                 department_id=dept_id,
                 equipment_type_id=equip_type_id,
                 voltage_class=voltage_class,
-                bay_number=_clean_str(row.get("bay_name")),
+                bay_number=bay,
                 manufacturer=_clean_str(row.get("manufacturer")),
-                factory_serial_number=_clean_str(row.get("factory_serial_number")),
+                factory_serial_number=serial,
                 year_of_manufacture=yom,
                 commissioned_date=doc_date,
                 phase=_clean_str(row.get("phase")),
@@ -12271,14 +12283,12 @@ def run_seed():
                 run as seed_testing_kit_run,
                 seed_module_and_privileges,
                 seed_kit_mappings,
-                seed_kit_equipment_records,
                 update_tester_assigned_email_template,
             )
             ensure_table()
             seed_testing_kit_run(session)
             seed_module_and_privileges()
             seed_kit_mappings(session)
-            seed_kit_equipment_records(session)
             update_tester_assigned_email_template()
         except Exception as _e:
             import traceback
