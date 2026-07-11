@@ -284,6 +284,7 @@ class TestScheduleDashboardService:
             freqs = freq_idx.get(eq.id, [])
             dominant_freq = max(set(freqs), key=freqs.count) if freqs else None
             dept_path = _dept_path(eq.department_id) if eq.department_id else []
+            eq_scheds_all = list(eq_scheds.values())
             rows.append({
                 "equipment_id":       str(eq.id),
                 "ueic":               eq.ueic,
@@ -298,6 +299,9 @@ class TestScheduleDashboardService:
                 "cells":              cells,
                 "equipment_type_name": type_name_map.get(eq.equipment_type_id, "Unknown") if eq.equipment_type_id else "Unknown",
                 "dominant_frequency":  dominant_freq,
+                "schedule_ids":        [str(s.id) for s in eq_scheds_all],
+                "all_paused":          all(not s.is_active for s in eq_scheds_all) if eq_scheds_all else False,
+                "any_active":          any(s.is_active for s in eq_scheds_all),
             })
 
         # 7. KPIs
