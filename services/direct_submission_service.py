@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from models import (
     NextActionType,
+    Organization,
     Recommendation,
     RecommendationType,
     RequestCategory,
@@ -84,15 +85,28 @@ class DirectSubmissionService:
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc)
 
-    def _generate_request_number(self, category: RequestCategory) -> str:
+    def _get_org_prefix(self, org_id) -> str:
+        if not org_id:
+            return "XX"
+        org = self.db.query(Organization).filter(Organization.id == org_id).first()
+        if org and org.code:
+            return org.code[:2].upper()
+        return "XX"
+
+    def _generate_request_number(self, category: RequestCategory, org_id=None) -> str:
         prefix = _PREFIX.get(category, "DS")
-        today = self._utc_now().strftime("%Y%m%d")
+        year = self._utc_now().strftime("%Y")
+        org_prefix = self._get_org_prefix(org_id)
+        pattern = f"{prefix}-{org_prefix}-{year}-%"
         count = (
             self.db.query(func.count(TestingRequest.id))
-            .filter(TestingRequest.request_number.like(f"{prefix}-{today}-%"))
+            .filter(
+                TestingRequest.organization_id == org_id,
+                TestingRequest.request_number.like(pattern),
+            )
             .scalar()
         )
-        return f"{prefix}-{today}-{(count + 1):04d}"
+        return f"{prefix}-{org_prefix}-{year}-{(count + 1):04d}"
 
     # ── main operation ────────────────────────────────────────────────────────
 
@@ -161,7 +175,7 @@ class DirectSubmissionService:
             request_type = category.value  # e.g. "taqc_inspection"
 
         req = TestingRequest(
-            request_number=self._generate_request_number(category),
+            request_number=self._generate_request_number(category, org_id=org_id),
             title=data.get("title") or f"{category.value.replace('_',' ').title()} Report",
             description=data.get("description"),
             request_category=category,

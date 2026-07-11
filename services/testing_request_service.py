@@ -52,14 +52,27 @@ class TestingRequestService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _generate_request_number(self) -> str:
-        today = UTCDateTimeMixin._utc_now().strftime("%Y%m%d")
+    def _generate_request_number(self, org_id=None, prefix: str = "TR") -> str:
+        year = UTCDateTimeMixin._utc_now().strftime("%Y")
+        org_prefix = self._get_org_prefix(org_id)
+        pattern = f"{prefix}-{org_prefix}-{year}-%"
         count = (
             self.db.query(func.count(TestingRequest.id))
-            .filter(TestingRequest.request_number.like(f"TR-{today}-%"))
+            .filter(
+                TestingRequest.organization_id == org_id,
+                TestingRequest.request_number.like(pattern),
+            )
             .scalar()
         )
-        return f"TR-{today}-{(count + 1):04d}"
+        return f"{prefix}-{org_prefix}-{year}-{(count + 1):04d}"
+
+    def _get_org_prefix(self, org_id) -> str:
+        if not org_id:
+            return "XX"
+        org = self.db.query(Organization).filter(Organization.id == org_id).first()
+        if org and org.code:
+            return org.code[:2].upper()
+        return "XX"
 
     def _resolve_is_cumulative(self, test_type_id) -> bool:
         """
@@ -154,7 +167,7 @@ class TestingRequestService:
         )
 
     def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
-        request_number = self._generate_request_number()
+        request_number = self._generate_request_number(org_id=data.get("organization_id"))
         test_type_id = data.get("test_type_id")
         is_cumulative = self._resolve_is_cumulative(test_type_id)
         is_calibration = self._resolve_is_calibration(test_type_id)
