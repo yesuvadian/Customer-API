@@ -437,6 +437,30 @@ def get_dropdown_values(master_desc: str, db: Session = Depends(get_db)):
 
 
 # ─── List testers (users with Tester role, optionally filtered by location) ───
+@router.get("/by-equipment")
+def get_by_equipment(
+    org_id: Optional[UUID] = None,
+    department_id: Optional[UUID] = None,
+    request_category: Optional[str] = None,
+    is_closed: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return testing requests grouped by equipment with alert bar status."""
+    eff_org_id = org_id or current_user.organization_id
+    if not eff_org_id:
+        raise HTTPException(status_code=400, detail="org_id required")
+    dept_ids = None
+    if department_id:
+        dept_ids = get_dept_subtree_ids(db, department_id, eff_org_id)
+    return TestingRequestService(db).get_by_equipment(
+        org_id=eff_org_id,
+        department_ids=dept_ids,
+        request_category=request_category,
+        is_closed=is_closed,
+    )
+
+
 @router.get("/testers")
 def list_testers(
     zone: Optional[str] = None,

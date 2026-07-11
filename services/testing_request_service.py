@@ -1412,6 +1412,187 @@ class TestingRequestService:
                 })
             return result
 
+    def get_by_equipment(
+        self,
+        org_id: UUID,
+        department_ids: Optional[List[UUID]] = None,
+        request_category: Optional[str] = None,
+        is_closed: Optional[bool] = None,
+    ) -> List[dict]:
+        """Return testing requests grouped by equipment with alert bar status."""
+        from datetime import timezone
+        from collections import defaultdict
+
+        today = datetime.now(timezone.utc)
+        _CLOSED_STATUSES = {
+            TestingRequestStatus.closed,
+            TestingRequestStatus.completed,
+            TestingRequestStatus.approved,
+            TestingRequestStatus.rejected,
+        }
+
+        query = (
+            self.db.query(TestingRequest)
+            .outerjoin(Equipment, TestingRequest.equipment_id == Equipment.id)
+            .filter(
+                TestingRequest.organization_id == org_id,
+                TestingRequest.is_schedule_template.is_(False),
+                TestingRequest.equipment_id.isnot(None),
+            )
+        )
+        if department_ids:
+            query = query.filter(TestingRequest.department_id.in_(department_ids))
+        if request_category:
+            from models import RequestCategory as RC
+            try:
+                query = query.filter(TestingRequest.request_category == RC(request_category))
+            except ValueError:
+                pass
+        if is_closed is not None:
+            completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                TrWfInstance.status.in_(["completed", "terminated"])
+            ).scalar_subquery()
+            if is_closed:
+                query = query.filter(
+                    or_(
+                        TestingRequest.status.in_(list(_CLOSED_STATUSES)),
+                        TestingRequest.id.in_(completed_wf_ids),
+                    )
+                )
+            else:
+                query = query.filter(
+                    TestingRequest.status.notin_(list(_CLOSED_STATUSES)),
+                    TestingRequest.id.notin_(completed_wf_ids),
+                )
+
+        all_reqs = query.order_by(TestingRequest.due_date.asc().nullslast()).all()
+
+        # group by equipment
+        groups: dict = defaultdict(list)
+        for r in all_reqs:
+            groups[r.equipment_id].append(r)
+
+        eq_ids = list(groups.keys())
+        equipment_map = {
+            e.id: e
+            for e in self.db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all()
+        }
+        type_ids = {e.equipment_type_id for e in equipment_map.values() if e.equipment_type_id}
+        type_map = {
+            c.id: c.name
+            for c in self.db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
+        } if type_ids else {}
+
+        # dept path for all unique dept_ids seen
+        dept_ids_seen = {r.department_id for r in all_reqs if r.department_id}
+        org_ids_seen  = {r.organization_id for r in all_reqs if r.organization_id}
+        from models import OrgDepartment
+        all_depts = (
+            self.db.query(OrgDepartment)
+            .filter(OrgDepartment.organization_id.in_(list(org_ids_seen)))
+            .all()
+        ) if org_ids_seen else []
+        dname_map  = {d.id: d.name for d in all_depts}
+        dparent_map = {d.id: d.parent_department_id for d in all_depts if d.parent_department_id}
+
+        def _dept_path(dept_id):
+            path, visited, cur = [], set(), dept_id
+            while cur and cur not in visited:
+                visited.add(cur)
+                if cur in dname_map:
+                    path.append(dname_map[cur])
+                cur = dparent_map.get(cur)
+            path.reverse()
+            return path
+
+        wf_status_catalog = {
+            s.status_code: {"label": s.status_name, "color": s.color}
+            for s in self.db.query(TrWfStatus).all()
+        }
+
+        def _ticket_dict(r: TestingRequest) -> dict:
+            eff = r.current_status_code or (
+                getattr(r.status, "value", str(r.status)) if r.status else "unknown"
+            )
+            meta = wf_status_catalog.get(eff) or _LEGACY_STATUS_CATALOG.get(eff) or {}
+            due = None
+            if r.due_date:
+                due = r.due_date if r.due_date.tzinfo else r.due_date.replace(tzinfo=timezone.utc)
+            ref = r.assigned_at or r.requested_date
+            if ref and not ref.tzinfo:
+                ref = ref.replace(tzinfo=timezone.utc)
+            days_in_stage = (today - ref).days if ref else 0
+            is_overdue = bool(due and due < today and r.status not in _CLOSED_STATUSES)
+            is_stuck   = not is_overdue and days_in_stage > 7
+            return {
+                "id": str(r.id),
+                "request_number": r.request_number,
+                "title": r.title,
+                "status": eff,
+                "status_label": meta.get("label", eff.replace("_", " ").title()),
+                "status_color": meta.get("color", "#9CA3AF"),
+                "due_date": due.isoformat() if due else None,
+                "is_overdue": is_overdue,
+                "is_stuck": is_stuck,
+                "days_in_stage": days_in_stage,
+                "is_closed": r.status in _CLOSED_STATUSES,
+            }
+
+        result = []
+        for eq_id, reqs in groups.items():
+            eq = equipment_map.get(eq_id)
+            if not eq:
+                continue
+            open_tickets = [r for r in reqs if r.status not in _CLOSED_STATUSES]
+            closed_count = len(reqs) - len(open_tickets)
+
+            def _due_utc(r):
+                if not r.due_date:
+                    return None
+                return r.due_date if r.due_date.tzinfo else r.due_date.replace(tzinfo=timezone.utc)
+
+            overdue = [r for r in open_tickets if _due_utc(r) and _due_utc(r) < today]
+            stuck_list = []
+            for r in open_tickets:
+                if r in overdue:
+                    continue
+                ref = r.assigned_at or r.requested_date
+                if ref:
+                    ref_utc = ref if ref.tzinfo else ref.replace(tzinfo=timezone.utc)
+                    if (today - ref_utc).days > 7:
+                        stuck_list.append(r)
+
+            bar_status = "overdue" if overdue else ("stuck" if stuck_list else "ok")
+            preview = sorted(
+                open_tickets,
+                key=lambda r: (
+                    0 if _due_utc(r) and _due_utc(r) < today else 1,
+                    _due_utc(r) or datetime(9999, 1, 1, tzinfo=timezone.utc),
+                )
+            )[:5]
+            dept_id = next((r.department_id for r in reqs), None)
+            result.append({
+                "equipment_id": str(eq_id),
+                "equipment_ueic": eq.ueic,
+                "equipment_type_name": type_map.get(eq.equipment_type_id) if eq.equipment_type_id else None,
+                "bay_number": eq.bay_number,
+                "manufacturer": eq.manufacturer,
+                "voltage_class": eq.voltage_class,
+                "department_path": _dept_path(dept_id) if dept_id else [],
+                "open_count": len(open_tickets),
+                "overdue_count": len(overdue),
+                "stuck_count": len(stuck_list),
+                "closed_count": closed_count,
+                "bar_status": bar_status,
+                "tickets": [_ticket_dict(r) for r in preview],
+            })
+
+        result.sort(key=lambda x: (
+            {"overdue": 0, "stuck": 1, "ok": 2}[x["bar_status"]],
+            -x["overdue_count"],
+        ))
+        return result
+
     def get_user_scope(
         self, user_id: UUID, org_id: Optional[UUID]
     ) -> tuple:

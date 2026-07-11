@@ -119,6 +119,31 @@ def get_category_wf_stages(
     ]
 
 
+@router.get("/by-equipment")
+def get_by_equipment(
+    category: str = Query("failure_registry", description="failure_registry | taqc_inspection"),
+    department_id: Optional[UUID] = Query(None),
+    is_closed: Optional[bool] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return direct submissions grouped by equipment with alert bar status."""
+    from services.testing_request_service import TestingRequestService
+    from utils.common_service import get_dept_subtree_ids
+    org_id = current_user.organization_id
+    if not org_id:
+        raise HTTPException(status_code=400, detail="User has no organization")
+    dept_ids = None
+    if department_id:
+        dept_ids = get_dept_subtree_ids(db, department_id, org_id)
+    return TestingRequestService(db).get_by_equipment(
+        org_id=org_id,
+        department_ids=dept_ids,
+        request_category=category,
+        is_closed=is_closed,
+    )
+
+
 @router.get("/")
 def list_direct_submissions(
     category: str = Query(
