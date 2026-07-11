@@ -5238,16 +5238,25 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         OrgDepartment.organization_id == uuid.UUID(org_id)
     ).all()
     dept_map = {d.name.strip().lower(): d.id for d in depts}
-    print(f"[INFO] {len(dept_map)} departments available for equipment lookup")
+    # Leaf departments (substations — no children) for smarter partial matching
+    all_dept_ids = {d.id for d in depts}
+    parent_ids = {d.parent_department_id for d in depts if d.parent_department_id}
+    leaf_dept_map = {d.name.strip().lower(): d.id for d in depts if d.id not in parent_ids}
+    print(f"[INFO] {len(dept_map)} departments available for equipment lookup ({len(leaf_dept_map)} leaf substations)")
 
     def _find_dept(name: str):
-        """Exact match first, then partial match (dept name contains query or vice versa)."""
+        """Exact match first (all depts), then partial match preferring leaf substations."""
         if not name:
             return None
         key = name.strip().lower()
+        # 1. Exact match anywhere
         if key in dept_map:
             return dept_map[key]
-        # Partial match: find a dept whose name contains the search term or vice versa
+        # 2. Partial match — leaf substations first
+        for dept_name, dept_id in leaf_dept_map.items():
+            if key in dept_name or dept_name in key:
+                return dept_id
+        # 3. Partial match — any dept (fallback)
         for dept_name, dept_id in dept_map.items():
             if key in dept_name or dept_name in key:
                 return dept_id
