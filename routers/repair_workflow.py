@@ -387,7 +387,8 @@ def submit_stage(
     """
     try:
         return RepairWorkflowService(db).submit_stage(
-            workflow_id, stage_id, payload.remarks, user.id
+            workflow_id, stage_id, payload.remarks, user.id,
+            form_data=payload.form_data,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

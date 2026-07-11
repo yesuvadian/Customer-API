@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from models import User
+from models import User, TrWfStatus, TrWfInstance, TrWfStage, TrWfDefinition, TestingRequest, RequestCategory
 from services.direct_submission_service import DirectSubmissionService
 
 router = APIRouter(
@@ -69,6 +69,79 @@ def create_direct_submission(
     """
     svc = DirectSubmissionService(db)
     return svc.create_direct_submission(body.model_dump(), current_user)
+
+
+@router.get("/wf-stages")
+def get_category_wf_stages(
+    category: str = Query(..., description="failure_registry | taqc_inspection"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return ordered WF stages for the workflow used by this direct-submission category."""
+    try:
+        cat = RequestCategory(category)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+
+    # Find the WF definition used by requests of this category
+    # Use request_type='pm' for failure_registry to target PM Workflow specifically
+    req_type = "pm" if cat == RequestCategory.failure_registry else cat.value
+
+    defn = (
+        db.query(TrWfDefinition)
+        .join(TrWfInstance, TrWfInstance.wf_definition_id == TrWfDefinition.id)
+        .join(TestingRequest, TestingRequest.wf_instance_id == TrWfInstance.id)
+        .filter(
+            TestingRequest.request_category == cat,
+            TestingRequest.request_type == req_type,
+        )
+        .first()
+    )
+    if not defn:
+        return []
+
+    stages = (
+        db.query(TrWfStage)
+        .filter(
+            TrWfStage.wf_definition_id == defn.id,
+            TrWfStage.is_active.is_(True),
+        )
+        .order_by(TrWfStage.sequence)
+        .all()
+    )
+    return [
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "sequence": s.sequence,
+        }
+        for s in stages
+    ]
+
+
+@router.get("/by-equipment")
+def get_by_equipment(
+    category: str = Query("failure_registry", description="failure_registry | taqc_inspection"),
+    department_id: Optional[UUID] = Query(None),
+    is_closed: Optional[bool] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return direct submissions grouped by equipment with alert bar status."""
+    from services.testing_request_service import TestingRequestService
+    from utils.common_service import get_dept_subtree_ids
+    org_id = current_user.organization_id
+    if not org_id:
+        raise HTTPException(status_code=400, detail="User has no organization")
+    dept_ids = None
+    if department_id:
+        dept_ids = get_dept_subtree_ids(db, department_id, org_id)
+    return TestingRequestService(db).get_by_equipment(
+        org_id=org_id,
+        department_ids=dept_ids,
+        request_category=category,
+        is_closed=is_closed,
+    )
 
 
 @router.get("/")

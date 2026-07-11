@@ -92,6 +92,7 @@ class TestScheduleDashboardService:
         voltage_class: Optional[str] = None,
         department_id: Optional[UUID] = None,
         search: Optional[str] = None,
+        request_category: str = "test",
     ) -> dict:
         """
         Returns:
@@ -143,13 +144,45 @@ class TestScheduleDashboardService:
             type_rows = self.db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
             type_name_map = {r.id: r.name for r in type_rows}
 
+        # 2c. Department name + ancestor path map
+        dept_ids_used = list({e.department_id for e in equipments if e.department_id})
+        dept_name_map: dict = {}   # id -> name
+        dept_parent_map: dict = {} # id -> parent_id
+        if dept_ids_used:
+            # Fetch all departments for the org once (needed to walk ancestry)
+            all_depts = (
+                self.db.query(OrgDepartment)
+                .filter(OrgDepartment.organization_id == org_id, OrgDepartment.is_active == True)
+                .all()
+            )
+            for d in all_depts:
+                dept_name_map[d.id] = d.name
+                if d.parent_department_id:
+                    dept_parent_map[d.id] = d.parent_department_id
+
+        def _dept_path(dept_id) -> list[str]:
+            """Walk up the tree and return names from root to leaf."""
+            path, visited = [], set()
+            cur = dept_id
+            while cur and cur not in visited:
+                visited.add(cur)
+                name = dept_name_map.get(cur)
+                if name:
+                    path.append(name)
+                cur = dept_parent_map.get(cur)
+            path.reverse()
+            return path
+
         # 3. All operational schedules for these equipment
+        _now = datetime.now(timezone.utc)
         schedules = (
             self.db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.equipment_id.in_(eq_ids),
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                TestRequestSchedule.request_category == request_category,
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
             )
             .all()
         )
@@ -209,6 +242,13 @@ class TestScheduleDashboardService:
                     continue
 
                 next_run = sched.next_run_date
+                # If next_run_date is beyond end_date, there are no more valid runs
+                if next_run and sched.end_date:
+                    end_naive = sched.end_date.date() if isinstance(sched.end_date, datetime) else sched.end_date
+                    next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
+                    if next_naive > end_naive:
+                        next_run = None
+
                 if next_run:
                     next_date = next_run.date() if isinstance(next_run, datetime) else next_run
                     days = (next_date - self._today).days
@@ -224,36 +264,85 @@ class TestScheduleDashboardService:
                 if _STATUS_PRIORITY[status] > _STATUS_PRIORITY[worst_status]:
                     worst_status = status
 
+                end_date_val = sched.end_date
+                end_date_str = None
+                if end_date_val:
+                    end_d = end_date_val.date() if isinstance(end_date_val, datetime) else end_date_val
+                    end_date_str = end_d.isoformat()
+
                 cells[str(tid)] = {
                     "next_due":      next_date.isoformat() if next_date else None,
                     "days_until_due": days,
                     "last_tested":   last_tested_str,
                     "status":        status,
                     "frequency":     sched.frequency.value if sched.frequency else None,
+                    "end_date":      end_date_str,
                 }
 
             health = _health_index(cells)
             # Dominant frequency: most common among this equipment's schedules
             freqs = freq_idx.get(eq.id, [])
             dominant_freq = max(set(freqs), key=freqs.count) if freqs else None
+            dept_path = _dept_path(eq.department_id) if eq.department_id else []
+            eq_scheds_all = list(eq_scheds.values())
             rows.append({
                 "equipment_id":       str(eq.id),
                 "ueic":               eq.ueic,
                 "voltage_class":      eq.voltage_class,
                 "manufacturer":       eq.manufacturer,
                 "year_of_manufacture":eq.year_of_manufacture,
+                "department_name":    dept_path[-1] if dept_path else None,
+                "department_path":    dept_path,
                 "model_number":       eq.model_number,
                 "overall_status":     _OVERALL_LABEL[worst_status],
                 "health_index":       health,
                 "cells":              cells,
                 "equipment_type_name": type_name_map.get(eq.equipment_type_id, "Unknown") if eq.equipment_type_id else "Unknown",
                 "dominant_frequency":  dominant_freq,
+                "schedule_ids":        [str(s.id) for s in eq_scheds_all],
+                "all_paused":          all(not s.is_active for s in eq_scheds_all) if eq_scheds_all else False,
+                "any_active":          any(s.is_active for s in eq_scheds_all),
             })
 
         # 7. KPIs
         kpis = self._compute_kpis(rows, columns)
 
-        return {"columns": columns, "kpis": kpis, "rows": rows}
+        # 8. Upcoming schedule counts per time window
+        # A schedule counts in the 30d bucket if it has a run within 30 days.
+        # It counts in the 180d bucket only if its end_date extends past 30 days
+        # (i.e. it still has runs in the 30–180d range).
+        # Same logic for 365d (end_date must extend past 180 days).
+        today_dt = self._today
+        d30 = d180 = d365 = 0
+        for s in schedules:
+            nr = s.next_run_date
+            if not nr:
+                continue
+            nr_date = nr.date() if isinstance(nr, datetime) else nr
+            days = (nr_date - today_dt).days
+            if days < 0:
+                continue  # overdue — not "upcoming"
+            # Clamp: if next_run is beyond end_date, no valid run at all
+            end_d = None
+            if s.end_date:
+                end_d = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
+                if nr_date > end_d:
+                    continue
+            # days_until_end: None means schedule runs indefinitely
+            days_until_end = (end_d - today_dt).days if end_d else None
+
+            if days <= 30:
+                d30 += 1
+            # Only count in 180d if schedule still has runs beyond 30 days
+            if days <= 180 and (days_until_end is None or days_until_end > 30):
+                d180 += 1
+            # Only count in 365d if schedule still has runs beyond 180 days
+            if days <= 365 and (days_until_end is None or days_until_end > 180):
+                d365 += 1
+
+        upcoming_counts = {"30": d30, "180": d180, "365": d365}
+
+        return {"columns": columns, "kpis": kpis, "rows": rows, "upcoming_counts": upcoming_counts}
 
     # ─────────────────────────────────────────────────────────────
     # Public — equipment detail (upcoming + recent)
@@ -275,12 +364,14 @@ class TestScheduleDashboardService:
         today = self._today
         cutoff = today + timedelta(days=60)
 
+        _now = datetime.now(timezone.utc)
         schedules = (
             self.db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.equipment_id == equipment_id,
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
             )
             .all()
         )
@@ -296,6 +387,12 @@ class TestScheduleDashboardService:
             next_run = s.next_run_date
             if not next_run:
                 continue
+            # Clamp: if next_run is beyond end_date, no more valid runs
+            if s.end_date:
+                end_naive = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
+                next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
+                if next_naive > end_naive:
+                    continue
             next_date = next_run.date() if isinstance(next_run, datetime) else next_run
             days = (next_date - today).days
             tt = tt_map.get(s.test_type_id)
@@ -345,6 +442,12 @@ class TestScheduleDashboardService:
         cells_for_health: dict[str, dict] = {}
         for s in all_scheds:
             next_run = s.next_run_date
+            # Clamp: if next_run is beyond end_date, treat as no upcoming run
+            if next_run and s.end_date:
+                end_naive = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
+                next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
+                if next_naive > end_naive:
+                    next_run = None
             if next_run:
                 nd = next_run.date() if isinstance(next_run, datetime) else next_run
                 days = (nd - today).days
@@ -384,7 +487,7 @@ class TestScheduleDashboardService:
     # Public — filter options
     # ─────────────────────────────────────────────────────────────
 
-    def get_filter_options(self, org_id: UUID) -> dict:
+    def get_filter_options(self, org_id: UUID, request_category: str = "test") -> dict:
         """
         Returns equipment types, voltage classes, and departments with
         equipment/schedule counts — drives the compliance tab filter UI.
@@ -443,6 +546,7 @@ class TestScheduleDashboardService:
 
         # Schedule count per department — org-level (equipment_id IS NULL)
         dept_sched_counts: dict = {}
+        _now_dept = datetime.now(timezone.utc)
         sched_dept_rows = (
             self.db.query(TestRequestSchedule.department_id, func.count(TestRequestSchedule.id))
             .filter(
@@ -450,7 +554,9 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.is_(None),
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                TestRequestSchedule.request_category == request_category,
                 TestRequestSchedule.department_id.isnot(None),
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now_dept)),
             )
             .group_by(TestRequestSchedule.department_id)
             .all()
@@ -466,7 +572,9 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.organization_id == org_id,
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
+                TestRequestSchedule.request_category == request_category,
                 Equipment.department_id.isnot(None),
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now_dept)),
             )
             .group_by(Equipment.department_id)
             .all()
@@ -566,14 +674,14 @@ class TestScheduleDashboardService:
         return visited
 
     def _compute_kpis(self, rows: list, columns: list) -> dict:
+        from models import TestingRequest
         today = self._today
-        month_start = today.replace(day=1)
+        month_start = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
 
-        total            = len(rows)
-        overdue          = 0
-        due_30           = 0
-        critical_alert   = 0
-        completed_month  = 0
+        total          = len(rows)
+        overdue        = 0
+        due_30         = 0
+        critical_alert = 0
 
         for row in rows:
             status = row["overall_status"]
@@ -582,26 +690,36 @@ class TestScheduleDashboardService:
                 critical_alert += 1
             elif status == "ALERT":
                 critical_alert += 1
-            if status in ("DUE", "ALERT", "OVERDUE"):
+            if status == "DUE":
                 due_30 += 1
 
-        # Completed this month: count completed TestingRequests across all equipment
-        # We can't do it cheaply here without an extra query; use due_30 proxy for now
-        # (callers can override with a real count from a separate query if needed)
-        completed_month = 0  # populated by router via separate query
+        # Count distinct equipment that had at least one completed test this month
+        eq_ids = [row["equipment_id"] for row in rows if row.get("equipment_id")]
+        completed_month = 0
+        if eq_ids:
+            completed_month = (
+                self.db.query(TestingRequest.equipment_id)
+                .filter(
+                    TestingRequest.equipment_id.in_(eq_ids),
+                    TestingRequest.status == "completed",
+                    TestingRequest.completed_at >= month_start,
+                )
+                .distinct()
+                .count()
+            )
 
         pct = lambda n: f"{round(n / total * 100, 1)}%" if total else "0%"
 
         return {
-            "total_transformers":  total,
-            "tests_due_30_days":   due_30,
-            "tests_due_pct":       pct(due_30),
-            "overdue_tests":       overdue,
-            "overdue_pct":         pct(overdue),
-            "critical_alert":      critical_alert,
-            "critical_pct":        pct(critical_alert),
+            "total_transformers":   total,
+            "tests_due_30_days":    due_30,
+            "tests_due_pct":        pct(due_30),
+            "overdue_tests":        overdue,
+            "overdue_pct":          pct(overdue),
+            "critical_alert":       critical_alert,
+            "critical_pct":         pct(critical_alert),
             "completed_this_month": completed_month,
-            "completed_pct":       "—",
+            "completed_pct":        pct(completed_month),
         }
 
     def _empty_kpis(self) -> dict:
@@ -621,6 +739,7 @@ class TestScheduleDashboardService:
         self,
         org_id: UUID,
         department_id: Optional[UUID] = None,
+        request_category: str = "test",
     ) -> dict:
         """
         Returns active schedules that are not linked to a specific equipment
@@ -634,6 +753,8 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.is_(None),
                 TestRequestSchedule.is_active.is_(True),
                 TestRequestSchedule.is_deleted.is_(False),
+                TestRequestSchedule.request_category == request_category,
+                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > datetime.now(timezone.utc))),
             )
         )
         if department_id:
@@ -666,6 +787,12 @@ class TestScheduleDashboardService:
         items = []
         for s in schedules:
             next_run = s.next_run_date
+            # Clamp: if next_run is beyond end_date, no more valid runs
+            if next_run and s.end_date:
+                end_naive = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
+                next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
+                if next_naive > end_naive:
+                    next_run = None
             if next_run:
                 next_date = next_run.date() if isinstance(next_run, datetime) else next_run
                 days = (next_date - self._today).days

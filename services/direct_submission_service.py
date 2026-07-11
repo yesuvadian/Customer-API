@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from models import (
     NextActionType,
+    Organization,
     Recommendation,
     RecommendationType,
     RequestCategory,
@@ -84,15 +85,28 @@ class DirectSubmissionService:
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc)
 
-    def _generate_request_number(self, category: RequestCategory) -> str:
+    def _get_org_prefix(self, org_id) -> str:
+        if not org_id:
+            return "XX"
+        org = self.db.query(Organization).filter(Organization.id == org_id).first()
+        if org and org.code:
+            return org.code[:2].upper()
+        return "XX"
+
+    def _generate_request_number(self, category: RequestCategory, org_id=None) -> str:
         prefix = _PREFIX.get(category, "DS")
-        today = self._utc_now().strftime("%Y%m%d")
+        year = self._utc_now().strftime("%Y")
+        org_prefix = self._get_org_prefix(org_id)
+        pattern = f"{prefix}-{org_prefix}-{year}-%"
         count = (
             self.db.query(func.count(TestingRequest.id))
-            .filter(TestingRequest.request_number.like(f"{prefix}-{today}-%"))
+            .filter(
+                TestingRequest.organization_id == org_id,
+                TestingRequest.request_number.like(pattern),
+            )
             .scalar()
         )
-        return f"{prefix}-{today}-{(count + 1):04d}"
+        return f"{prefix}-{org_prefix}-{year}-{(count + 1):04d}"
 
     # ── main operation ────────────────────────────────────────────────────────
 
@@ -154,18 +168,14 @@ class DirectSubmissionService:
                 pass
 
         # ── TestingRequest ────────────────────────────────────────────────────
-        # FR + next_action=Maintenance → PM Workflow; all others → Standard Test Workflow
+        # Failure Registry always uses PM Workflow
         if category == RequestCategory.failure_registry:
-            request_type = (
-                "pm"
-                if (_td.get("next_action") or "").lower() == "maintenance"
-                else "normal"
-            )
+            request_type = "pm"
         else:
             request_type = category.value  # e.g. "taqc_inspection"
 
         req = TestingRequest(
-            request_number=self._generate_request_number(category),
+            request_number=self._generate_request_number(category, org_id=org_id),
             title=data.get("title") or f"{category.value.replace('_',' ').title()} Report",
             description=data.get("description"),
             request_category=category,
@@ -338,6 +348,7 @@ class DirectSubmissionService:
                 detail=f"Invalid category: {category}",
             )
 
+        from models import TrWfStage as _WfStage
         query = (
             self.db.query(TestingRequest)
             .options(
@@ -346,6 +357,8 @@ class DirectSubmissionService:
                 joinedload(TestingRequest.organization),
                 joinedload(TestingRequest.department),
                 joinedload(TestingRequest.test_results),
+                joinedload(TestingRequest.wf_instance),
+                joinedload(TestingRequest.current_wf_stage).joinedload(_WfStage.status),
             )
             .filter(
                 TestingRequest.request_category == cat,
@@ -372,6 +385,7 @@ class DirectSubmissionService:
 
     def get_submission(self, request_id: UUID, user: User) -> dict:
         """Return single submission with its test result."""
+        from models import TrWfStage as _WfStage
         req = (
             self.db.query(TestingRequest)
             .options(
@@ -380,6 +394,8 @@ class DirectSubmissionService:
                 joinedload(TestingRequest.organization),
                 joinedload(TestingRequest.department),
                 joinedload(TestingRequest.test_results),
+                joinedload(TestingRequest.wf_instance),
+                joinedload(TestingRequest.current_wf_stage).joinedload(_WfStage.status),
             )
             .filter(
                 TestingRequest.id == request_id,
@@ -428,15 +444,25 @@ class DirectSubmissionService:
         is_fr = getattr(req.request_category, "value", None) == "failure_registry"
         form_data = req.form_data or {}
 
+        # Resolve test type: prefer the linked test_type relation; for FR (and any
+        # request where it is absent) fall back to form_data["test_types"] names.
+        test_type_name = req.test_type.name if req.test_type else None
+        if not test_type_name:
+            fd_types = form_data.get("test_types") or []
+            names = [t["name"] for t in fd_types if t.get("name")]
+            test_type_name = ", ".join(names) if names else None
+
         return {
             "id": str(req.id),
             "request_number": req.request_number,
             "title": req.title,
+            "test_type": test_type_name,
 
             "request_category": getattr(req.request_category, "value", None),
             "status": getattr(req.status, "value", None),
             "priority": req.priority,
 
+            "equipment_id": str(req.equipment_id) if req.equipment_id else None,
             "equipment_ueic": getattr(eq, "ueic", None),
             "equipment_type_name": eq_type_name,
             "equipment_manufacturer": getattr(eq, "manufacturer", None),
@@ -449,6 +475,16 @@ class DirectSubmissionService:
                 if req.originator else "-"
             ),
 
+            "current_status_code": (
+                req.current_status_code
+                or (req.wf_instance.current_status_code if req.wf_instance else None)
+                or (
+                    req.current_wf_stage.status.status_code
+                    if req.current_wf_stage and req.current_wf_stage.status
+                    else None
+                )
+            ),
+            "wf_stage_name": req.current_wf_stage.name if req.current_wf_stage else None,
             "cts": req.cts.isoformat() if req.cts else None,
             "notes": req.notes,
 

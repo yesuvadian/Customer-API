@@ -1123,6 +1123,7 @@ class TestingRequestResponse(BaseModel):
     organization_id: Optional[UUID] = None
     department_id: Optional[UUID] = None
     department_name: Optional[str] = None  # Computed field
+    department_path: Optional[List[str]] = None  # Full hierarchy: [Zone, Circle, ..., Substation]
 
     # Legacy location fields
     zone: Optional[str] = None
@@ -2634,6 +2635,7 @@ class RepairAssignRequest(BaseModel):
 
 class RepairSubmitRequest(BaseModel):
     remarks: Optional[str] = None
+    form_data: Optional[dict] = None
 
 
 class RepairCancelRequest(BaseModel):

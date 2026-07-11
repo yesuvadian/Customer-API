@@ -403,14 +403,28 @@ class TestingService:
                         transitions[0],  # fallback to first if no clear complete action
                     )
                     # Apply terminal WF status
+                    _term_code = None
                     if complete_t.terminal_status_id:
                         term_status = self.db.query(_TrWfStatus).filter(
                             _TrWfStatus.id == complete_t.terminal_status_id
                         ).first()
                         if term_status:
-                            request.current_status_code = term_status.status_code
-                            instance.current_stage_id = None
-                            instance.status = "completed"
+                            _term_code = term_status.status_code
+                    if not _term_code:
+                        # Fallback: last status in the WF definition by sequence
+                        _last_s = (
+                            self.db.query(_TrWfStatus)
+                            .filter(_TrWfStatus.wf_definition_id == instance.wf_definition_id)
+                            .order_by(_TrWfStatus.sequence.desc())
+                            .first()
+                        )
+                        if _last_s:
+                            _term_code = _last_s.status_code
+                    if _term_code:
+                        request.current_status_code = _term_code
+                        instance.current_status_code = _term_code
+                        instance.current_stage_id = None
+                        instance.status = "completed"
                     # Auto-approve the recommendation and dispatch
                     self.db.flush()
                     rec_obj.approval_status = "approved"
