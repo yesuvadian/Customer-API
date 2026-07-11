@@ -12283,14 +12283,12 @@ def run_seed():
                 run as seed_testing_kit_run,
                 seed_module_and_privileges,
                 seed_kit_mappings,
-                seed_kit_equipment_records,
                 update_tester_assigned_email_template,
             )
             ensure_table()
             seed_testing_kit_run(session)
             seed_module_and_privileges()
             seed_kit_mappings(session)
-            seed_kit_equipment_records(session)
             update_tester_assigned_email_template()
         except Exception as _e:
             import traceback
