@@ -385,6 +385,13 @@ class TestingRequestService:
 
         if category_filter:
             query = query.filter(TestingRequest.request_category == category_filter)
+        else:
+            # Exclude direct submissions (failure_registry, taqc_inspection) from
+            # the general TR list — they have their own /direct-submissions endpoint.
+            from models import RequestCategory as RC
+            query = query.filter(
+                TestingRequest.is_direct_submission.is_not(True)
+            )
         if originator_id:
             query = query.filter(TestingRequest.originator_id == originator_id)
         if tester_id:
