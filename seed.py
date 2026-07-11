@@ -5241,6 +5241,8 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
     print(f"[INFO] {len(dept_map)} departments available for equipment lookup")
 
     created = skipped = 0
+    missing_depts = set()
+    missing_types = set()
 
     def _safe_str(val):
         """Convert pandas NaN / float / None to a clean string."""
@@ -5258,7 +5260,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             if division_name:
                 dept_id = dept_map.get(division_name.lower())
             if not dept_id:
-                print(f"  [WARN] Department not found for substation: '{substation_name}' — skipping row")
+                missing_depts.add(substation_name)
                 skipped += 1
                 continue
             else:
@@ -5271,7 +5273,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             if equip_type_id:
                 break
         if not equip_type_id:
-            print(f"  [WARN] Equipment type not found: '{raw_type}' — skipping")
+            missing_types.add(raw_type)
             skipped += 1
             continue
 
@@ -5379,6 +5381,10 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             skipped += 1
 
     print(f"\n[OK] Equipment seeding complete: {created} created, {skipped} skipped")
+    if missing_depts:
+        print(f"  [WARN] {len(missing_depts)} unmatched substations: {sorted(missing_depts)}")
+    if missing_types:
+        print(f"  [WARN] {len(missing_types)} unmatched equipment types: {sorted(missing_types)}")
 
 
 # ----------------- Reporting Suite Seed -----------------
