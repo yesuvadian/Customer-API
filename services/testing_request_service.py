@@ -1010,6 +1010,7 @@ class TestingRequestService:
         org_id: Optional[UUID] = None,
         parent_id: Optional[UUID] = None,
         root_id: Optional[UUID] = None,
+        category: Optional[str] = None,
     ) -> list:
         """Return organisations (when org_id is None) or departments.
 
@@ -1069,13 +1070,24 @@ class TestingRequestService:
         for d in depts:
             subtree_ids = get_dept_subtree_ids(self.db, d.id)
 
-            # Total requests (exclude direct submissions — FR/TAQC)
+            # Build category filter clause
+            from models import RequestCategory as RC
+            if category:
+                try:
+                    _cat_filter = [TestingRequest.request_category == RC(category)]
+                except ValueError:
+                    _cat_filter = []
+            else:
+                # Default TR view: exclude direct submissions (FR/TAQC)
+                _cat_filter = [TestingRequest.is_direct_submission.is_not(True)]
+
+            # Total requests
             request_count = (
                 self.db.query(func.count(TestingRequest.id))
                 .filter(
                     TestingRequest.department_id.in_(subtree_ids),
                     TestingRequest.is_schedule_template.is_(False),
-                    TestingRequest.is_direct_submission.is_not(True),
+                    *_cat_filter,
                 )
                 .scalar()
             ) or 0
@@ -1086,7 +1098,7 @@ class TestingRequestService:
                 .filter(
                     TestingRequest.department_id.in_(subtree_ids),
                     TestingRequest.is_schedule_template.is_(False),
-                    TestingRequest.is_direct_submission.is_not(True),
+                    *_cat_filter,
                     TestingRequest.status.in_([
                         TestingRequestStatus.draft,
                         TestingRequestStatus.submitted,
@@ -1106,7 +1118,7 @@ class TestingRequestService:
                 .filter(
                     TestingRequest.department_id.in_(subtree_ids),
                     TestingRequest.is_schedule_template.is_(False),
-                    TestingRequest.is_direct_submission.is_not(True),
+                    *_cat_filter,
                     TestingRequest.status.in_([
                         TestingRequestStatus.approved,
                         TestingRequestStatus.completed,
