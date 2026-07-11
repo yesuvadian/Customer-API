@@ -591,6 +591,7 @@ class RepairWorkflowService:
         stage_id: UUID,
         remarks: Optional[str],
         user_id: UUID,
+        form_data: Optional[dict] = None,
     ) -> dict:
         """
         Stage actor submits the stage after filling the form.
@@ -615,6 +616,19 @@ class RepairWorkflowService:
         # Submitter must be the assigned user OR have can_edit for this stage
         if instance.assigned_user_id and str(instance.assigned_user_id) != str(user_id):
             self._check_stage_rbac(stage_id, user_id)
+
+        # Auto-save form data if submitted inline (user didn't explicitly save first)
+        if form_data:
+            data_row = self.db.query(RepairStageData).filter(
+                RepairStageData.stage_instance_id == instance.id
+            ).first()
+            if data_row:
+                data_row.form_data = form_data
+            else:
+                self.db.add(RepairStageData(
+                    stage_instance_id=instance.id,
+                    form_data=form_data,
+                ))
 
         # Validate required fields at submit time (not at save/draft time).
         # Use the same category-aware resolution as get_current_form so that

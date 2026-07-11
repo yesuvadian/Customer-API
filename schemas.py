@@ -2635,6 +2635,7 @@ class RepairAssignRequest(BaseModel):
 
 class RepairSubmitRequest(BaseModel):
     remarks: Optional[str] = None
+    form_data: Optional[dict] = None
 
 
 class RepairCancelRequest(BaseModel):
