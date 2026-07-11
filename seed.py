@@ -5334,15 +5334,24 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         serial = _clean_str(row.get("factory_serial_number"))
         bay    = _clean_str(row.get("bay_name"))
 
-        # Skip if already exists — serial number is the reliable unique key
+        # Skip if already exists
+        existing = None
         if serial:
             existing = session.query(EquipmentModel).filter_by(
                 organization_id=uuid.UUID(org_id),
                 factory_serial_number=serial,
             ).first()
-            if existing:
-                skipped += 1
-                continue
+        elif bay:
+            # No serial — fall back to dept+type+bay only when serial is absent
+            existing = session.query(EquipmentModel).filter_by(
+                organization_id=uuid.UUID(org_id),
+                department_id=dept_id,
+                equipment_type_id=equip_type_id,
+                bay_number=bay,
+            ).first()
+        if existing:
+            skipped += 1
+            continue
 
         try:
             EquipmentService.create_equipment(
