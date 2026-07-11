@@ -637,54 +637,56 @@ class WorkflowRoutingService:
             )
 
         # ── Notification ───────────────────────────────────────────────────
-        # Single tr_wf_status_changed event covers every stage transition.
-        # Recipients: @originator always + @assignee if set + active stage roles.
+        # Fire the appropriate notification for every stage transition.
+        # Rejection → request_rejected (has templates, notifies originator).
+        # All other transitions → notify_tr_wf_stage_changed (stage-advance event).
         try:
             from services.notification_service import NotificationService
+            _notif = NotificationService(self.db)
 
-            # Resolve human-readable status name from dynamic TrWfStatus row
-            status_name = (
-                to_stage.status.status_name
-                if to_stage and to_stage.status
-                else (to_status_code or "Updated")
-            )
-            equipment_label = (
-                getattr(testing_request.equipment, "ueic", None)
-                or (testing_request.equipment_type.name if testing_request.equipment_type else "Equipment")
-            )
+            # Resolve performer display name for context
+            _performer_name = ""
+            if performed_by_id:
+                from models import User as _User
+                _actor = self.db.query(_User).filter(_User.id == performed_by_id).first()
+                if _actor:
+                    _performer_name = (
+                        f"{_actor.firstname or ''} {_actor.lastname or ''}".strip()
+                        or _actor.email or ""
+                    )
 
-            # Collect active stage role names for the destination stage so those
-            # users are also notified (AEE R&D at L3, AE tester at L4, etc.)
-            stage_role_names: list = []
-            if to_stage:
-                stage_roles = (
-                    self.db.query(TrWfStageRole)
-                    .filter(TrWfStageRole.stage_id == to_stage.id)
-                    .all()
+            if transition.is_rejection:
+                _notif.notify_request_rejected(
+                    testing_request,
+                    rejected_by=_performer_name,
+                    reason=comment or "",
                 )
-                for sr in stage_roles:
-                    if sr.role and sr.role.name:
-                        stage_role_names.append(sr.role.name)
+            else:
+                # Collect next-stage role names so those users are notified
+                stage_role_names: list = []
+                if to_stage:
+                    _stage_roles = (
+                        self.db.query(TrWfStageRole)
+                        .filter(TrWfStageRole.stage_id == to_stage.id)
+                        .all()
+                    )
+                    for sr in _stage_roles:
+                        if sr.role and sr.role.name:
+                            stage_role_names.append(sr.role.name)
 
-            recipient_roles = ["@originator", "@assignee"] + stage_role_names
+                recipient_roles = ["@originator", "@assignee"] + stage_role_names
 
-            NotificationService(self.db).fire(
-                event_type="tr_wf_status_changed",
-                context={
-                    "request_number": getattr(testing_request, "request_number", ""),
-                    "equipment":      equipment_label,
-                    "status_name":    status_name,
-                    "stage_name":     to_stage.name if to_stage else "",
-                    "action_code":    action_code,
-                },
-                organization_id=testing_request.organization_id,
-                department_id=getattr(testing_request, "department_id", None),
-                source_id=testing_request.id,
-                source_type="testing_request",
-                status_from=from_status_code,
-                status_to=to_status_code,
-                recipient_roles_override=recipient_roles,
-            )
+                _notif.notify_tr_wf_stage_changed(
+                    testing_request,
+                    action_code=action_code,
+                    stage_name=to_stage.name if to_stage else "",
+                    status_code=to_status_code,
+                    performed_by=_performer_name,
+                    comment=comment,
+                    is_terminal=is_terminal,
+                    from_status_code=from_status_code,
+                    recipient_roles_override=recipient_roles,
+                )
         except Exception as _n_err:  # never let notification failure kill the workflow
             log.warning("TR-WF notification failed (non-fatal): %s", _n_err)
 

@@ -2768,6 +2768,60 @@ class NotificationService:
             status_to="rejected",
         )
 
+    def notify_tr_wf_stage_changed(
+        self,
+        request,
+        action_code: str,
+        stage_name: str,
+        status_code: Optional[str],
+        performed_by: str,
+        comment: Optional[str],
+        is_terminal: bool,
+        from_status_code: Optional[str],
+        recipient_roles_override: Optional[list] = None,
+    ) -> None:
+        """
+        Fired on every non-rejection TR workflow stage transition.
+        Uses event_type='tr_wf_status_changed'; falls back to 'request_submitted'
+        templates when no specific template exists, so notifications always fire.
+        """
+        equipment_label = (
+            request.equipment.ueic if request.equipment else
+            (request.equipment_type.name if request.equipment_type else "Equipment")
+        )
+        ctx = {
+            "request_number":  getattr(request, "request_number", ""),
+            "request.number":  getattr(request, "request_number", ""),
+            "equipment":       equipment_label,
+            "stage_name":      stage_name,
+            "action_code":     action_code,
+            "performed_by":    performed_by,
+            "comment":         comment or "",
+            "status_code":     status_code or "",
+            "is_terminal":     str(is_terminal),
+        }
+        common = dict(
+            context=ctx,
+            organization_id=getattr(request, "organization_id", None),
+            department_id=self._dept(request),
+            source_id=request.id,
+            source_type="testing_request",
+            severity="info",
+            workflow_type=self._workflow_type(request),
+            equipment_type=self._equipment_type(request),
+            test_type=self._test_type(request),
+            status_from=from_status_code,
+            status_to=status_code,
+            recipient_roles_override=recipient_roles_override,
+        )
+        # Try the specific event type first; if no templates exist fall back to
+        # request_submitted so the notification always reaches recipients.
+        templates = self._get_templates("tr_wf_status_changed", getattr(request, "organization_id", None))
+        if templates:
+            self.fire(event_type="tr_wf_status_changed", **common)
+        else:
+            self.fire(event_type="request_submitted", **common)
+
     def notify_tester_assigned(self, request) -> None:
         """Triggered when a tester is assigned to a testing request."""
         equipment_label = (
