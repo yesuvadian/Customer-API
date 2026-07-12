@@ -5238,9 +5238,33 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         OrgDepartment.organization_id == uuid.UUID(org_id)
     ).all()
     dept_map = {d.name.strip().lower(): d.id for d in depts}
-    print(f"[INFO] {len(dept_map)} departments available for equipment lookup")
+    # Leaf departments (substations — no children) for smarter partial matching
+    all_dept_ids = {d.id for d in depts}
+    parent_ids = {d.parent_department_id for d in depts if d.parent_department_id}
+    leaf_dept_map = {d.name.strip().lower(): d.id for d in depts if d.id not in parent_ids}
+    print(f"[INFO] {len(dept_map)} departments available for equipment lookup ({len(leaf_dept_map)} leaf substations)")
+
+    def _find_dept(name: str):
+        """Exact match first (all depts), then partial match preferring leaf substations."""
+        if not name:
+            return None
+        key = name.strip().lower()
+        # 1. Exact match anywhere
+        if key in dept_map:
+            return dept_map[key]
+        # 2. Partial match — leaf substations first
+        for dept_name, dept_id in leaf_dept_map.items():
+            if key in dept_name or dept_name in key:
+                return dept_id
+        # 3. Partial match — any dept (fallback)
+        for dept_name, dept_id in dept_map.items():
+            if key in dept_name or dept_name in key:
+                return dept_id
+        return None
 
     created = skipped = 0
+    missing_depts = set()
+    missing_types = set()
 
     def _safe_str(val):
         """Convert pandas NaN / float / None to a clean string."""
@@ -5251,18 +5275,15 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
 
     for _, row in df.iterrows():
         substation_name = _safe_str(row.get("substation"))
-        dept_id = dept_map.get(substation_name.lower())
+        dept_id = _find_dept(substation_name)
         if not dept_id:
             # Fallback: try parent division name from the row
             division_name = _safe_str(row.get("division"))
-            if division_name:
-                dept_id = dept_map.get(division_name.lower())
+            dept_id = _find_dept(division_name)
             if not dept_id:
-                print(f"  [WARN] Department not found for substation: '{substation_name}' — skipping row")
+                missing_depts.add(substation_name)
                 skipped += 1
                 continue
-            else:
-                print(f"  [INFO] Substation '{substation_name}' mapped to parent division '{division_name}'")
 
         raw_type = _safe_str(row.get("equipment_type"))
         equip_type_id = None
@@ -5271,7 +5292,7 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             if equip_type_id:
                 break
         if not equip_type_id:
-            print(f"  [WARN] Equipment type not found: '{raw_type}' — skipping")
+            missing_types.add(raw_type)
             skipped += 1
             continue
 
@@ -5331,22 +5352,32 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
 
         serial = _clean_str(row.get("factory_serial_number"))
         bay    = _clean_str(row.get("bay_name"))
+        phase_val = _clean_str(row.get("phase"))
+        mfr_val   = _clean_str(row.get("manufacturer"))
 
-        # Skip if already exists — match by serial number or by dept+type+bay
+        # Skip if already exists
         existing = None
         if serial:
             existing = session.query(EquipmentModel).filter_by(
                 organization_id=uuid.UUID(org_id),
                 factory_serial_number=serial,
             ).first()
-        if not existing and bay:
-            existing = session.query(EquipmentModel).filter_by(
+        elif bay:
+            # No serial — use dept+type+bay+phase+manufacturer+yom to distinguish
+            # rows with multiple equipment sets in the same bay (e.g. 3 phases × 2 vintages)
+            q = session.query(EquipmentModel).filter_by(
                 organization_id=uuid.UUID(org_id),
                 department_id=dept_id,
                 equipment_type_id=equip_type_id,
                 bay_number=bay,
-            ).first()
-
+            )
+            if phase_val:
+                q = q.filter(EquipmentModel.phase == phase_val)
+            if mfr_val:
+                q = q.filter(EquipmentModel.manufacturer == mfr_val)
+            if yom:
+                q = q.filter(EquipmentModel.year_of_manufacture == yom)
+            existing = q.first()
         if existing:
             skipped += 1
             continue
@@ -5379,6 +5410,10 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             skipped += 1
 
     print(f"\n[OK] Equipment seeding complete: {created} created, {skipped} skipped")
+    if missing_depts:
+        print(f"  [WARN] {len(missing_depts)} unmatched substations: {sorted(missing_depts)}")
+    if missing_types:
+        print(f"  [WARN] {len(missing_types)} unmatched equipment types: {sorted(missing_types)}")
 
 
 # ----------------- Reporting Suite Seed -----------------
