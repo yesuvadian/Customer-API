@@ -5352,6 +5352,8 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
 
         serial = _clean_str(row.get("factory_serial_number"))
         bay    = _clean_str(row.get("bay_name"))
+        phase_val = _clean_str(row.get("phase"))
+        mfr_val   = _clean_str(row.get("manufacturer"))
 
         # Skip if already exists
         existing = None
@@ -5361,13 +5363,21 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
                 factory_serial_number=serial,
             ).first()
         elif bay:
-            # No serial — fall back to dept+type+bay only when serial is absent
-            existing = session.query(EquipmentModel).filter_by(
+            # No serial — use dept+type+bay+phase+manufacturer+yom to distinguish
+            # rows with multiple equipment sets in the same bay (e.g. 3 phases × 2 vintages)
+            q = session.query(EquipmentModel).filter_by(
                 organization_id=uuid.UUID(org_id),
                 department_id=dept_id,
                 equipment_type_id=equip_type_id,
                 bay_number=bay,
-            ).first()
+            )
+            if phase_val:
+                q = q.filter(EquipmentModel.phase == phase_val)
+            if mfr_val:
+                q = q.filter(EquipmentModel.manufacturer == mfr_val)
+            if yom:
+                q = q.filter(EquipmentModel.year_of_manufacture == yom)
+            existing = q.first()
         if existing:
             skipped += 1
             continue
