@@ -296,6 +296,7 @@ def _enrich(req, dept_path_map: dict | None = None):
 def get_department_hierarchy(
     org_id: Optional[UUID] = None,
     parent_id: Optional[UUID] = None,
+    category: Optional[str] = Query(None, description="failure_registry | taqc_inspection — count only that category"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -311,15 +312,15 @@ def get_department_hierarchy(
 
     # When drilling into children, never restrict — parent_id is explicit
     if parent_id is not None:
-        return svc.get_department_hierarchy(org_id, parent_id)
+        return svc.get_department_hierarchy(org_id, parent_id, category=category)
 
     # For root-level fetch, scope to user's zone if dept-scoped
     if org_id is not None:
         is_admin, user_dept_id = get_user_dept_scope(db, current_user.id, org_id)
         if not is_admin and user_dept_id:
-            return svc.get_department_hierarchy(org_id, parent_id=None, root_id=user_dept_id)
+            return svc.get_department_hierarchy(org_id, parent_id=None, root_id=user_dept_id, category=category)
 
-    return svc.get_department_hierarchy(org_id, parent_id)
+    return svc.get_department_hierarchy(org_id, parent_id, category=category)
 
 
 @router.get("/department_root/{dept_id}")
