@@ -11941,6 +11941,8 @@ def run_seed():
             print("\n--- KPTCL Department Hierarchy Seeding ---")
             try:
                 seed_kptcl_departments(session, str(kptcl_org.id))
+                import subprocess, sys as _sys
+                subprocess.run([_sys.executable, "migrate_dept_descriptions.py"], check=False)
             except FileNotFoundError:
                 print("[WARN] KPTCL Excel file not found. Skipping department seeding.")
                 print("[INFO] You can seed KPTCL departments later with:")
@@ -14029,6 +14031,9 @@ def seed_kptcl_only(org_id: str):
         print("  KPTCL DEPARTMENT SEEDING")
         print("=" * 80 + "\n")
         seed_kptcl_departments(session, org_id)
+        print("\n--- Updating Department Descriptions ---")
+        import subprocess, sys as _sys
+        subprocess.run([_sys.executable, "migrate_dept_descriptions.py"], check=False)
         print("\n" + "=" * 80)
         print("  KPTCL EQUIPMENT SEEDING")
         print("=" * 80 + "\n")
@@ -14057,6 +14062,8 @@ if __name__ == "__main__":
                 print("\n[INFO] Seeding KPTCL departments + equipment...")
                 with get_db_session() as session:
                     seed_kptcl_departments(session, org_id)
+                    import subprocess
+                    subprocess.run([sys.executable, "migrate_dept_descriptions.py"], check=False)
                     seed_kptcl_equipment(session, org_id)
 
     except Exception as e:
