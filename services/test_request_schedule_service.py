@@ -916,7 +916,19 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     TestRequestSchedule.request_category == cat_enum
                 )
 
-        return query.all()
+        schedules = query.all()
+
+        result = []
+        for s in schedules:
+            d = {c.name: getattr(s, c.name) for c in s.__table__.columns}
+            d["equipment_type_name"] = (
+                s.equipment_type.name if s.equipment_type else None
+            )
+            d["test_type_name"] = (
+                s.test_type.name if s.test_type else None
+            )
+            result.append(d)
+        return result
 
     # ============================================================
     # LIST EQUIPMENT WITH SCHEDULES
