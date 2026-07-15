@@ -2004,30 +2004,77 @@ def bulk_import_testing_kits(
     return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
+
 @router.get("/testing-kits")
 def get_testing_kits(
     org_id: UUID = Query(..., description="Organization ID"),
-    department_id: Optional[UUID] = Query(None, description="Station dept to check first"),
-    equipment_type_id: Optional[int] = Query(None, description="Filter kits required for this equipment type"),
+    department_id: Optional[UUID] = Query(
+        None,
+        description="Station dept to check first",
+    ),
+    equipment_type_id: Optional[int] = Query(
+        None,
+        description="Filter kits required for this equipment type",
+    ),
+
+    # New filters
+    kit_type: Optional[str] = Query(
+        None,
+        description="Filter by Kit Type",
+    ),
+    manufacturer: Optional[str] = Query(
+        None,
+        description="Filter by Manufacturer",
+    ),
+    model_number: Optional[str] = Query(
+        None,
+        description="Filter by Model Number",
+    ),
+    serial_number: Optional[str] = Query(
+        None,
+        description="Filter by Serial Number",
+    ),
+
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """Return testing kits (equipment with type 'Testing Kit') available at a station."""
-    kit_master = db.query(CategoryMaster).filter(
-        CategoryMaster.name == "Testing Kit",
-        CategoryMaster.is_active == True,
-    ).first()
+
+    kit_master = (
+        db.query(CategoryMaster)
+        .filter(
+            CategoryMaster.name == "Testing Kit",
+            CategoryMaster.is_active == True,
+        )
+        .first()
+    )
+
     if not kit_master:
-        return {"at_station": [], "nearby": [], "all": []}
+        return {
+            "at_station": [],
+            "nearby": [],
+            "all": [],
+        }
 
     required_kit_type_ids: Optional[list] = None
+
     if equipment_type_id:
-        mappings = db.query(EquipmentTypeKitMapping).filter(
-            EquipmentTypeKitMapping.equipment_type_id == equipment_type_id,
-        ).all()
+        mappings = (
+            db.query(EquipmentTypeKitMapping)
+            .filter(
+                EquipmentTypeKitMapping.equipment_type_id == equipment_type_id,
+            )
+            .all()
+        )
+
         required_kit_type_ids = [m.kit_type_id for m in mappings]
+
         if not required_kit_type_ids:
-            return {"at_station": [], "nearby": [], "required_mappings": []}
+            return {
+                "at_station": [],
+                "nearby": [],
+                "required_mappings": [],
+            }
 
     def _kit_row(eq: Equipment, location_label: str) -> dict:
         _np = eq.nameplate_data or {}

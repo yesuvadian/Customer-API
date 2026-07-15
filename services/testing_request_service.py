@@ -56,15 +56,26 @@ class TestingRequestService:
         year = UTCDateTimeMixin._utc_now().strftime("%Y")
         org_prefix = self._get_org_prefix(org_id)
         pattern = f"{prefix}-{org_prefix}-{year}-%"
-        count = (
-            self.db.query(func.count(TestingRequest.id))
+        # Use MAX of existing suffix instead of COUNT so that manually deleted
+        # rows don't cause the next insert to collide on the unique constraint.
+        from sqlalchemy import cast, Integer
+        rows = (
+            self.db.query(TestingRequest.request_number)
             .filter(
                 TestingRequest.organization_id == org_id,
                 TestingRequest.request_number.like(pattern),
             )
-            .scalar()
+            .all()
         )
-        return f"{prefix}-{org_prefix}-{year}-{(count + 1):04d}"
+        max_seq = 0
+        for (rn,) in rows:
+            try:
+                seq = int(rn.rsplit("-", 1)[-1])
+                if seq > max_seq:
+                    max_seq = seq
+            except (ValueError, AttributeError):
+                pass
+        return f"{prefix}-{org_prefix}-{year}-{(max_seq + 1):04d}"
 
     def _get_org_prefix(self, org_id) -> str:
         if not org_id:

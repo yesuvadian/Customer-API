@@ -238,8 +238,25 @@ def _enrich(req, dept_path_map: dict | None = None):
             )
             if _inst2:
                 if _inst2.status in ("completed", "terminated"):
-                    req.wf_status_name  = "Completed"
-                    req.wf_status_color = "#16A34A"
+
+                    if req.current_status_code:
+                        _st = (
+                            req._sa_instance_state.session
+                            .query(_TrWfStatus)
+                            .filter(_TrWfStatus.status_code == req.current_status_code)
+                            .first()
+                        )
+
+                        if _st:
+                            req.wf_status_name = _st.status_name
+                            req.wf_status_color = _st.color
+                        else:
+                            req.wf_status_name = "Completed"
+                            req.wf_status_color = "#16A34A"
+
+                    else:
+                        req.wf_status_name = "Completed"
+                        req.wf_status_color = "#16A34A"
                 elif _inst2.current_stage_id:
                     _stage = (
                         req._sa_instance_state.session
