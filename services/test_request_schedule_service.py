@@ -927,6 +927,15 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             d["test_type_name"] = (
                 s.test_type.name if s.test_type else None
             )
+            # The model has no dedicated `kind` column — the frontend's
+            # Test/Maintenance grouping (and its own client-side filter by
+            # `kind`) relies on this key being present. Without it every
+            # schedule defaults to 'Test' on the client and maintenance
+            # schedules disappear from the list on reload/navigation even
+            # though they're still in the database. Derive it from the
+            # persisted request_category instead of leaving it unset.
+            cat = s.request_category.value if s.request_category else None
+            d["kind"] = "Maintenance" if cat == "maintenance" else "Test"
             result.append(d)
         return result
 
