@@ -462,9 +462,33 @@ class DirectSubmissionService:
             "status": getattr(req.status, "value", None),
             "priority": req.priority,
 
+            # Equipment details used by Failure Registry filters
             "equipment_id": str(req.equipment_id) if req.equipment_id else None,
             "equipment_ueic": getattr(eq, "ueic", None),
             "equipment_type_name": eq_type_name,
+
+            # Filter fields
+            "manufacturer": getattr(eq, "manufacturer", None),
+            "voltage_class": getattr(eq, "voltage_class", None),
+
+            # Commissioned Year
+            "commissioned_year": (
+                eq.commissioned_date.year
+                if eq and eq.commissioned_date
+                else None
+            ),
+
+            # Failure Year (derived from Failure Registry form)
+            "failure_year": (
+                int(form_data["failure_date"][:4])
+                if form_data.get("failure_date")
+                else None
+            ),
+
+            # Bay
+            "bay_number": getattr(eq, "bay_number", None),
+
+            # Keep for backward compatibility
             "equipment_manufacturer": getattr(eq, "manufacturer", None),
 
             "organization": getattr(req.organization, "name", None),

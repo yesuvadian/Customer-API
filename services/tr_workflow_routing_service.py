@@ -698,7 +698,8 @@ class WorkflowRoutingService:
             from models import TestingRequestStatus as _TRS, Recommendation as _Rec
             from datetime import datetime as _dt, timezone as _tz
             if transition.is_rejection:
-                testing_request.status = _TRS.closed
+                testing_request.status = _TRS.rejected
+                testing_request.completed_at = _dt.now(_tz.utc)
             else:
                 # Check for pending recommendation → dispatch (handles outcome)
                 rec = (
