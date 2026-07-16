@@ -3,7 +3,7 @@ Router: /org-test-templates
 
 Endpoints for managing per-org test templates (designer CRUD + provisioning).
 Protected by auth; privilege-check is handled by auth_privilege middleware
-against the "Test Template Management" module.
+against the "CM/PM Master Template" module.
 """
 import io
 import uuid as _uuid

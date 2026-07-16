@@ -1448,7 +1448,7 @@ def seed_modules(session):
         {"name": "Roles", "description": "Manage roles (Legacy)", "path": "roles", "group_name": "User & Access", "is_active": False},
         {"name": "App Modules", "description": "Manage application modules", "path": "modules", "group_name": "User & Access","is_active": False},
         {"name": "User Roles", "description": "Assign roles to users (Legacy)", "path": "roles", "group_name": "User & Access", "is_active": False},
-        {"name": "Role Permissions", "description": "Configure role-based privileges (Legacy)", "path": "role_module_privileges", "group_name": "User & Access", "is_active": False},
+        {"name": "Role Permission (Legacy)", "rename_from": "Role Permissions", "description": "Configure role-based privileges (Legacy)", "path": "role_module_privileges", "group_name": "User & Access", "is_active": False},
        {"name": "Login Sessions", "description": "Track user login sessions", "path": "user_sessions", "group_name": "User & Access", "is_active": False},
         {"name": "Countries", "description": "Manage country list", "path": "countries", "group_name": "Geography","is_active": False},
         {"name": "States", "description": "Manage state list", "path": "states", "group_name": "Geography","is_active": False},
@@ -1462,8 +1462,8 @@ def seed_modules(session):
         {"name": "Users", "description": "Manage users", "path": "users", "group_name": "User & Access","is_active": False},
         {"name": "Company Products", "description": "Company-specific product inventory", "path": "company_products", "group_name": "Inventory","is_active": False},
         {"name": "Plans", "description": "Manage subscription plans", "path": "plans", "group_name": "User & Access","is_active": False},
-         {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory","is_active": False},
-         {"name": "Assign User Roles",("description"): "Assign organization roles to users", "path":("user_roles"),("group_name"): ("User & Access"),("is_active"): (False)},
+         {"name": "Dashboard", "description": "Admin dashboard", "path": "dashboard", "group_name": "Inventory","is_active": True},
+         {"name": "User Role (Legacy)", "rename_from": "Assign User Roles", "description": "Assign organization roles to users", "path": "user_roles", "group_name": "User & Access", "is_active": False},
          {"name":("User Product Search"),("description"): ("Filtering user"),("path"): ("user_product_search"),("group_name"): ("User & Access"),("is_active"): (False)},
          {"name": "Bank Information", "description": "Company bank account information", "path": "company_bank_info", "group_name": "Company","is_active": False},
         {"name": "Bank Documents", "description": "Upload company bank documents", "path": "bank_documents", "group_name": "Company", "is_active": False},
@@ -1491,18 +1491,18 @@ def seed_modules(session):
 {"name": "Enquiry", "description": "Submit and manage enquiries", "path": "enquiry", "group_name": "Procurement","is_active": False},
 {"name": "Contact Us", "description": "Customer support", "path": "contact_us", "group_name": "Procurement", "is_active": False},
 # ✅ TESTING REQUEST SYSTEM MODULES
-{"name": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
-{"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing"},
-{"name": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
-{"name": "Test Request Approval", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing"},
-{"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing"},
+{"name": "CM Testing Request", "rename_from": "Testing Requests", "description": "Create and manage transformer testing requests", "path": "testing_requests", "group_name": "Testing"},
+{"name": "Testing", "description": "Perform tests and upload results", "path": "testing", "group_name": "Testing", "is_menu": False},
+{"name": "CM Recommendations", "rename_from": "Recommendations", "description": "Submit component recommendations", "path": "recommendations", "group_name": "Testing"},
+{"name": "Test Request Approval", "description": "Approve testing requests and assign testers", "path": "testing_request_approvals", "group_name": "Testing", "is_active": False},
+{"name": "Approvals", "description": "Review and approve recommendations", "path": "approvals", "group_name": "Testing", "is_active": False},
 # Removed: Validation Requests (not implemented)
 # Removed: Tester Mapping (no longer used)
-{"name": "Test Template Management", "description": "Design and customise per-org test form templates", "path": "test_templates", "group_name": "Testing"},
+{"name": "CM/PM Master Template", "rename_from": "Test Template Management", "description": "Design and customise per-org test form templates", "path": "test_templates", "group_name": "Testing"},
 # ✅ ORGANIZATION MANAGEMENT MODULES
 {"name": "Organizations", "description": "Manage organizations, departments, roles, and users", "path": "organizations", "group_name": "Organization"},
-{"name": "Organization User Roles", "description": "Assign organization-specific roles to users within your organization", "path": "org_user_roles", "group_name": "Organization"},
-{"name": "Organization Role Permissions", "description": "Configure permissions for organization roles", "path": "org_role_permissions", "group_name": "Organization"},
+{"name": "User Role", "rename_from": "Organization User Roles", "description": "Assign organization-specific roles to users within your organization", "path": "org_user_roles", "group_name": "Organization"},
+{"name": "Role Permission", "rename_from": "Organization Role Permissions", "description": "Configure permissions for organization roles", "path": "org_role_permissions", "group_name": "Organization"},
 # ✅ WORKFLOW MANAGEMENT MODULE
 {"name": "Workflows", "description": "Manage workflow definitions, states, transitions, and permissions", "path": "workflows", "group_name": "Administration", "is_menu": False},
 {"name": "Vendor Documents",
@@ -1510,34 +1510,35 @@ def seed_modules(session):
  "path": "vendor_documents",
  "group_name": "Organization","is_active": False},
 # ✅ EQUIPMENT ASSET REGISTER MODULE
-{"name": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
+{"name": "Equipment Registry", "rename_from": "Equipment", "description": "Equipment asset register with UEIC auto-generation", "path": "equipment", "group_name": "Testing"},
 # ✅ DASHBOARD KPI MODULES - Role-specific dashboards
-{"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing"},
+{"name": "EE TLSS Dashboard", "description": "Condition monitoring KPI dashboard — EE TLSS operational view", "path": "ee_tlss_dashboard", "group_name": "Testing", "is_active": False},
 {"name": "Asset Dashboard","description": "Asset Officer operational dashboard","path": "asset_dashboard","group_name": "Testing","is_menu": False},
-{"name": "Test Monitoring Status", "rename_from": "Test Coordinator Dashboard", "description": "Test Monitoring Status operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing"},
-{"name": "AE Dashboard",    "path": "ae_dashboard",    "description": "Field officer daily work overview — tests due, overdue maintenance, remedial actions", "group_name": "Testing", "is_menu": False},
-{"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False},
-{"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False},
-{"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False},
-{"name": "EE RT Dashboard",  "description": "EE RT relay testing & calibration dashboard — calibration compliance, overdue cals, expiring certs, FAIL count, open workflows", "path": "ee_rt_dashboard",  "group_name": "Testing", "is_menu": False},
-{"name": "SEE RT Dashboard", "description": "SEE RT circle-level calibration supervision dashboard — circle compliance, overdue, expiring, FAIL, open workflows", "path": "see_rt_dashboard", "group_name": "Testing", "is_menu": False},
-{"name": "CEE RT Dashboard", "description": "CEE RT RD zone-level calibration governance dashboard — zone compliance, relay assets, open workflows, FAIL count", "path": "cee_rt_dashboard", "group_name": "Testing", "is_menu": False},
+{"name": "Test Monitoring Status", "rename_from": "Test Coordinator Dashboard", "description": "Test Monitoring Status operational dashboard — test schedule monitoring, overdue tests, equipment health, and remedial actions", "path": "test_coordinator_dashboard", "group_name": "Testing", "is_active": False},
+{"name": "AE Dashboard",    "path": "ae_dashboard",    "description": "Field officer daily work overview — tests due, overdue maintenance, remedial actions", "group_name": "Testing", "is_menu": False, "is_active": False},
+{"name": "AEE Dashboard", "description": "Field-level supervisor dashboard — AEE operational view", "path": "aee_dashboard", "group_name": "Testing", "is_menu": False, "is_active": False},
+{"name": "SEE Dashboard", "description": "Circle-level supervisor dashboard — SEE operational view", "path": "see_dashboard", "group_name": "Testing", "is_menu": False, "is_active": False},
+{"name": "CEE Dashboard", "description": "Zone-level management dashboard — CEE operational view", "path": "cee_dashboard", "group_name": "Testing", "is_menu": False, "is_active": False},
+{"name": "EE RT Dashboard",  "description": "EE RT relay testing & calibration dashboard — calibration compliance, overdue cals, expiring certs, FAIL count, open workflows", "path": "ee_rt_dashboard",  "group_name": "Testing", "is_menu": False, "is_active": False},
+{"name": "SEE RT Dashboard", "description": "SEE RT circle-level calibration supervision dashboard — circle compliance, overdue, expiring, FAIL, open workflows", "path": "see_rt_dashboard", "group_name": "Testing", "is_menu": False, "is_active": False},
+{"name": "CEE RT Dashboard", "description": "CEE RT RD zone-level calibration governance dashboard — zone compliance, relay assets, open workflows, FAIL count", "path": "cee_rt_dashboard", "group_name": "Testing", "is_menu": False, "is_active": False},
 {"name": "Admin Dashboard", "description": "Organization admin dashboard with system-wide metrics", "path": "admin_dashboard", "group_name": "Testing", "is_menu": False},
-{"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing"},
+{"name": "Notifications", "description": "In-app notification centre — alerts, overdue reminders, approvals", "path": "notifications", "group_name": "Testing", "is_active": False},
 {"name": "Notification Center",    "description": "Notification Center — manage templates, routing rules and schedules", "path": "org_notification_center",    "group_name": "Organization", "is_menu": True},
 {"name": "Notification Templates", "description": "Configure email/SMS/in-app notification templates per event type", "path": "org_notification_templates", "group_name": "Organization", "is_menu": False},
 {"name": "Notification Routing",   "description": "Configure routing rules — which roles receive which notifications", "path": "org_notification_routing",   "group_name": "Organization", "is_menu": False},
 {"name": "Notification Schedules", "description": "Configure scheduled notification rules (due-date reminders, digests)", "path": "org_notification_schedules", "group_name": "Organization", "is_menu": False},
 {"name": "Reporting Center",       "description": "Reporting Center — define, run and schedule operational reports",   "path": "org_reporting_center",       "group_name": "Organization", "is_menu": True},
 # ✅ REPORTING SUITE MODULE
-{"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing"},
+{"name": "Reports", "description": "Generic report engine — 14 SRS operational reports with Excel/PDF export", "path": "reports", "group_name": "Testing", "is_active": False},
 # ✅ DIRECT SUBMISSION MODULES (Stage 2 & Stage 10 — no tester assignment)
 {"name": "Failure Registry",
  "description": "Stage 2 — Record equipment failure events (SRS Sec 3.3.3–3.3.4). "
                 "Accessible to: Field Staff, AEE, EE TLSS, TA&QC Officer.",
  "path": "failure_registry",
  "group_name": "Field Operations"},
-{"name": "TA&QC Inspections",
+{"name": "Annual Inspection & Audit Request",
+ "rename_from": "TA&QC Inspections",
  "description": "Stage 10 — TA&QC annual substation inspection observations with "
                 "severity classification and compliance tracking (SRS Sec 6). "
                 "Accessible to: TA&QC Officer.",
@@ -1546,66 +1547,76 @@ def seed_modules(session):
 {"name": "Annual Audits",
  "description": "Independent annual audit observation tickets with stage-wise assignment, compliance, review and closure.",
  "path": "annual_audits",
- "group_name": "Field Operations"},
+ "group_name": "Field Operations",
+ "is_active": False},
 {"name": "Procurement Approvals",
  "description": "Finance Approver queue — review and approve / reject replacement procurement "
                 "requests created after Technical Approver approves a 'replacement' recommendation. "
                 "Accessible to: Finance Approver role.",
  "path": "procurement_approvals",
- "group_name": "Field Operations"},
+ "group_name": "Field Operations",
+ "is_active": False},
 # ✅ TEST REGISTER MODULE (SRS §5.1.1)
 {"name": "Test Register",
  "description": "SRS §5.1.1 — Periodic test catalogue: defines what tests are mandatory, "
                 "how often, and by which role for each equipment type. "
                 "Accessible to: EE TLSS, Department Head, AEE Maintenance.",
  "path": "test_register",
- "group_name": "Condition Monitoring"},
+ "group_name": "Condition Monitoring",
+ "is_active": False},
 # ✅ WORKFLOW OPERATIONS DASHBOARD — unified view across all workflow types
-{"name": "Workflow Dashboard",
+{"name": "Work Flow Dashboard",
+ "rename_from": "Workflow Dashboard",
  "description": "Unified operations dashboard — dynamically shows counts, stage breakdown, "
                 "equipment at risk, and recent activity for all workflow types defined in "
                 "repair_workflow_definitions. New workflow types appear automatically.",
  "path": "workflow-dashboard",
  "group_name": "Field Operations"},
 # ✅ BREAKDOWN WORKFLOW MODULE  (renamed from "Repair Workflows" — path unchanged: repair-workflows)
-{"name": "Breakdown Workflows",
- "rename_from": "Repair Workflows",
+{"name": "Transformer Repair Work Flow",
+ "rename_from": "Breakdown Workflows",
  "description": "Unplanned breakdown repair lifecycle — 10-stage workflow from Failure Reporting to Commissioning. "
                 "Config (org-admin only): define stages, forms, roles, transitions. "
                 "Execution: stage-role RBAC driven; each stage locks to authorized roles only.",
  "path": "repair-workflows",
  "group_name": "Field Operations"},
 # ✅ OVERHAUL WORKFLOW MODULE
-{"name": "Overhaul Workflows",
+{"name": "Transformer Overhauling Workflow",
+ "rename_from": "Overhaul Workflows",
  "description": "Overhaul lifecycle — auto-triggered when cumulative ops count crosses threshold. "
                 "Stages: Trigger Review, Execution, Completion Upload, Officer Verification. "
                 "Stage-role RBAC driven; each stage locks to authorised roles only.",
  "path": "overhaul-workflows",
  "group_name": "Field Operations"},
 # ✅ CALIBRATION WORKFLOW MODULE
-{"name": "Calibration Workflows",
+{"name": "Relay Calibration Workflow",
+ "rename_from": "Calibration Workflows",
  "description": "Calibration lifecycle workflow — auto-triggered when a calibration result is Fail. "
                 "Stages: Due Review, Send to Lab, Certificate Upload, Officer Verification. "
                 "Stage-role RBAC driven; each stage locks to authorised roles only.",
  "path": "calibration-workflows",
  "group_name": "Field Operations"},
 # ✅ ANNUAL AUDIT WORKFLOW MODULE
-{"name": "Annual Audit Workflows",
+{"name": "Annual Inspection & Audit Workflow",
+ "rename_from": "Annual Audit Workflows",
  "description": "Annual audit 5-stage workflow: Observation Reporting to Closure. TA&QC Inspector executes; Reviewing Officer reviews compliance.",
  "path": "annual-audit-workflows",
  "group_name": "Field Operations"},
 # ✅ SURVEILLANCE WORKFLOW MODULE (SRS §7.3)
-{"name": "Surveillance Workflows",
+{"name": "Post Commissioning Workflow",
+ "rename_from": "Surveillance Workflows",
  "description": "24-month post-commissioning surveillance with quarterly testing (Q1-Q4) and final evaluation. "
                 "Tracks DGA, BDV, IR, Oil Quality tests at enhanced frequency with quality ratings.",
  "path": "surveillance-workflows",
  "group_name": "Field Operations"},
 # ✅ PRE-COMMISSION QAP MODULE
-{"name": "Pre-Commission Requests",
+{"name": "Pre Commissioning Inspection Request",
+ "rename_from": "Pre-Commission Requests",
  "description": "PCR approval queue — raise and approve pre-commission QAP requests before factory inspection begins.",
  "path": "precommission-requests",
  "group_name": "Field Operations"},
-{"name": "Pre-Commission Workflows",
+{"name": "Pre Commissioning Inspection Workflow",
+ "rename_from": "Pre-Commission Workflows",
  "description": "9-stage Manufacturing QAP workflow for 110kV/66kV Power Transformers per KPTCL QAP circular.",
  "path": "precommission-workflows",
  "group_name": "Field Operations"},
@@ -1615,31 +1626,35 @@ def seed_modules(session):
                 "quality ratings distribution, abnormal test rates, quarterly completion status, "
                 "and equipment health trends.",
  "path": "surveillance-dashboard",
- "group_name": "Field Operations"},
+ "group_name": "Field Operations",
+ "is_active": False},
 # ✅ AI ANALYTICS DASHBOARD MODULE
-{"name": "AI Analytics Dashboard",
+{"name": "AI Analytic Dashboard",
+ "rename_from": "AI Analytics Dashboard",
  "description": "Generic analytics engine dashboard — equipment health scores, trend analysis, "
                 "threshold breach forecasts, anomaly detection, and hierarchy roll-ups. "
                 "Department-scoped drill-down from zone → substation → individual equipment.",
  "path": "analytics-dashboard",
  "group_name": "Condition Monitoring"},
 # ✅ TEST SCHEDULE TEMPLATES MODULE (SRS §5.1.2)
-{"name": "Test Schedule Templates",
- "rename_from": "Schedule Templates",
+{"name": "CM Schedule Template",
+ "rename_from": "Test Schedule Templates",
  "description": "SRS §5.1.2 — Automated periodic test ticket generation: master test schedule templates "
                 "and operational schedules per equipment. Org-admin manages master set; "
                 "operational schedules auto-created on equipment commissioning.",
  "path": "testing_schedules",
  "group_name": "Condition Monitoring"},
 # ✅ MAINTENANCE SCHEDULE TEMPLATES MODULE
-{"name": "Maintenance Schedule Templates",
+{"name": "PM Schedule Template",
+ "rename_from": "Maintenance Schedule Templates",
  "description": "Automated periodic maintenance ticket generation: master maintenance schedule templates "
                 "and operational schedules per equipment. Mirrors test schedule structure but scoped "
                 "to maintenance request category.",
  "path": "maintenance_schedules",
  "group_name": "Condition Monitoring"},
 # ✅ SCHEDULE COMPLIANCE MODULE
-{"name": "Test Schedules",
+{"name": "CM Schedules",
+ "rename_from": "Test Schedules",
  "description": "Visual compliance tracker — shows per-equipment test schedule status "
                 "(overdue, due-imminent, due-soon, ok) with filter by equipment type, "
                 "substation, and compliance band. Accessible to EE TLSS, AEE, org-admin.",
@@ -1661,22 +1676,26 @@ def seed_modules(session):
  "group_name": "Condition Monitoring",
  "is_menu": True},
 # ✅ CONFIGURABLE TEST-REQUEST WORKFLOW ENGINE (tr_wf_*) MODULES
-{"name": "TR Approval Queue",
+{"name": "CM Test Request Approval",
+ "rename_from": "TR Approval Queue",
  "description": "Stage-aware testing request approval queue for L2 routing and L3 tester assignment (Configurable Workflow Engine).",
  "path": "tr-wf/approval-queue",
  "group_name": "Testing",
  "is_menu": True},
-{"name": "TR Result Review",
+{"name": "CM Test Result Review",
+ "rename_from": "TR Result Review",
  "description": "L3 reviewer queue — approve or reject test result recommendations routed via the Configurable Workflow Engine.",
  "path": "tr-wf/result-review",
  "group_name": "Testing",
  "is_menu": True},
-{"name": "TR Workflow Config",
+{"name": "CM Test Request Setup",
+ "rename_from": "TR Workflow Config",
  "description": "Admin: define workflow definitions, stages, statuses, roles and transitions for the Configurable Test-Request Workflow Engine.",
  "path": "config/tr-workflow",
  "group_name": "Administration",
  "is_menu": True},
-{"name": "TR Routing Config",
+{"name": "CM Request Routing",
+ "rename_from": "TR Routing Config",
  "description": "Admin: configure routing rules (equipment type, test type, request type) to map test requests to the correct workflow definition.",
  "path": "config/tr-routing",
  "group_name": "Administration",
@@ -1751,7 +1770,7 @@ def seed_privileges(session, role_ids, module_ids):
         "App Modules",
         "Countries", "States", "Cities", "Addresses", "Tax Information", "Tax Documents",
         "Product Categories", "Product Subcategories", "Products", "Users",
-        "Company Products", "Plans", "Dashboard", "Assign User Roles",
+        "Company Products", "Plans", "Dashboard", "User Role (Legacy)",
         "User Product Search", "Bank Information", "Bank Documents",
         "Divisions", "User Documents",
         "Company Product Certificates", "Company Product Supply References",
@@ -1762,15 +1781,15 @@ def seed_privileges(session, role_ids, module_ids):
         "Invoices", "Retainer Invoices", "Payments Made", "Statements",
         "Enquiry", "Contact Us", "RQ with Vendor",
         # ✅ TESTING REQUEST SYSTEM MODULES
-        "Testing Requests", "Testing", "Recommendations", "Approvals",
+        "CM Testing Request", "Testing", "CM Recommendations", "Approvals",
         # Removed: "Validation Requests" (not implemented)
-        "Test Template Management",
+        "CM/PM Master Template",
         # ✅ ORGANIZATION MANAGEMENT MODULE
         "Organizations",
         # ✅ WORKFLOW MANAGEMENT MODULE
         "Workflows","Vendor Documents",
         # ✅ EQUIPMENT ASSET REGISTER
-        "Equipment",
+        "Equipment Registry",
         # ✅ DASHBOARD KPI & NOTIFICATIONS
         "EE TLSS Dashboard",
         "Notifications",
@@ -1881,7 +1900,7 @@ def seed_privileges(session, role_ids, module_ids):
     testing_privileges = [
         # ORIGINATOR — dashboard + procurement + testing requests (no Testing itself)
         {
-            "role": "Asset Data Officer", "module": "Testing Requests",
+            "role": "Asset Data Officer", "module": "CM Testing Request",
             "can_view": True, "can_add": True, "can_edit": True,
             "can_delete": True, "can_search": True, "can_assign": True
         },
@@ -1901,14 +1920,14 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Asset Data Officer","module": "Contact Us",          "can_view": True},
 
         # FIELD TESTER — view Testing Requests, full on Testing
-        {"role": "Test Engineer", "module": "Testing Requests", "can_view": True},
+        {"role": "Test Engineer", "module": "CM Testing Request", "can_view": True},
         {
             "role": "Test Engineer", "module": "Testing",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
         },
 
         # LAB TESTER — same as Field Tester
-        {"role": "Test Engineer", "module": "Testing Requests", "can_view": True},
+        {"role": "Test Engineer", "module": "CM Testing Request", "can_view": True},
         {
             "role": "Test Engineer", "module": "Testing",
             "can_view": True, "can_add": True, "can_edit": True, "can_search": True
@@ -1919,7 +1938,7 @@ def seed_privileges(session, role_ids, module_ids):
             "role": "Test & Work Coordinator", "module": "Testing Request Approvals",
             "can_view": True, "can_approve": True, "can_assign": True
         },
-        {"role": "Test & Work Coordinator", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Test & Work Coordinator", "module": "CM Testing Request", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "Test & Work Coordinator", "module": "Dashboard", "can_view": True},
 
         # DOC-VIEWER — view only for Vendor Documents
@@ -1931,8 +1950,8 @@ def seed_privileges(session, role_ids, module_ids):
 
         # DEPARTMENT HEAD — approve on Recommendations + Approvals
         {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
-        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "Reviewing Officer", "module": "Recommendations",
+        {"role": "Reviewing Officer", "module": "CM Testing Request", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Reviewing Officer", "module": "CM Recommendations",
          "can_view": True, "can_approve": True},
         {"role": "Reviewing Officer", "module": "Approvals",
          "can_view": True, "can_approve": True},
@@ -1960,26 +1979,26 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Asset Data Officer","module": "Tester Mapping", "can_view": True},
 
         # TEST TEMPLATE MANAGEMENT — Admin full (via bulk), Originator view-only
-        {"role": "Asset Data Officer","module": "Test Template Management", "can_view": True},
+        {"role": "Asset Data Officer","module": "CM/PM Master Template", "can_view": True},
 
         # ✅ EQUIPMENT ASSET REGISTER — role-based access
         {
-            "role": "Asset Data Officer", "module": "Equipment",
+            "role": "Asset Data Officer", "module": "Equipment Registry",
             "can_view": True, "can_add": True, "can_edit": True,
             "can_search": True
         },
-        {"role": "Test Engineer", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Test Engineer", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Test & Work Coordinator", "module": "Equipment", "can_view": True, "can_search": True},
-        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Test Engineer", "module": "Equipment Registry", "can_view": True, "can_search": True},
+        {"role": "Test Engineer", "module": "Equipment Registry", "can_view": True, "can_search": True},
+        {"role": "Test & Work Coordinator", "module": "Equipment Registry", "can_view": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "Equipment Registry", "can_view": True, "can_search": True},
 
         # ✅ SRS DESIGNATION ROLES — Permissions per role hierarchy
         # AEE Maintenance — Field supervisor
         {"role": "Maintenance Officer", "module": "Dashboard", "can_view": True},
-        {"role": "Maintenance Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True, "can_assign": True},
+        {"role": "Maintenance Officer", "module": "CM Testing Request", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True, "can_assign": True},
         {"role": "Maintenance Officer", "module": "Testing", "can_view": True, "can_add": True},
         {"role": "Maintenance Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "Maintenance Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Maintenance Officer", "module": "Equipment Registry", "can_view": True, "can_search": True},
         {"role": "Maintenance Officer", "module": "Notifications", "can_view": True},
         {"role": "Maintenance Officer", "module": "Reports", "can_view": True, "can_export": True},
 
@@ -1987,9 +2006,9 @@ def seed_privileges(session, role_ids, module_ids):
         # NOTE: Does NOT have Testing Request Approvals access (not applicable for this role)
         {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
         {"role": "Reviewing Officer", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "CM Testing Request", "can_view": True, "can_add": True, "can_edit": True},
         {"role": "Reviewing Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
-        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "Equipment Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Reviewing Officer", "module": "Notifications", "can_view": True},
         {"role": "Reviewing Officer", "module": "Reports", "can_view": True, "can_export": True},
         {"role": "Reviewing Officer", "module": "Request Quote", "can_view": True},
@@ -1999,10 +2018,10 @@ def seed_privileges(session, role_ids, module_ids):
         # SEE W&M — Circle supervisor (equivalent to Test Assigner in SRS)
         {"role": "Supervisory Officer", "module": "Dashboard", "can_view": True},
         {"role": "Supervisory Officer", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Supervisory Officer", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Supervisory Officer", "module": "CM Testing Request", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "Supervisory Officer", "module": "Testing", "can_view": True},
         {"role": "Supervisory Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "Supervisory Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer", "module": "Equipment Registry", "can_view": True, "can_search": True},
         {"role": "Supervisory Officer", "module": "Notifications", "can_view": True},
         {"role": "Supervisory Officer", "module": "Reports", "can_view": True, "can_export": True},
         {"role": "Supervisory Officer", "module": "Request Quote", "can_view": True, "can_add": True},
@@ -2011,30 +2030,30 @@ def seed_privileges(session, role_ids, module_ids):
 
         # EE RT — Research & Testing engineer
         {"role": "Reviewing Officer", "module": "Dashboard", "can_view": True},
-        {"role": "Reviewing Officer", "module": "Testing Requests", "can_view": True, "can_add": True, "can_approve": True, "can_assign": True},
+        {"role": "Reviewing Officer", "module": "CM Testing Request", "can_view": True, "can_add": True, "can_approve": True, "can_assign": True},
         {"role": "Reviewing Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True},
         {"role": "Reviewing Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "Reviewing Officer", "module": "Test Template Management", "can_view": True, "can_edit": True},
-        {"role": "Reviewing Officer", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer", "module": "CM/PM Master Template", "can_view": True, "can_edit": True},
+        {"role": "Reviewing Officer", "module": "Equipment Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Reviewing Officer", "module": "Reports", "can_view": True, "can_export": True},
 
         # SEE RT — Senior Research & Testing
         {"role": "Supervisory Officer", "module": "Dashboard", "can_view": True},
-        {"role": "Supervisory Officer", "module": "Testing Requests", "can_view": True},
+        {"role": "Supervisory Officer", "module": "CM Testing Request", "can_view": True},
         {"role": "Supervisory Officer", "module": "Testing", "can_view": True, "can_add": True, "can_edit": True, "can_export": True},
         {"role": "Supervisory Officer", "module": "Testing Request Approvals", "can_view": True, "can_approve": True, "can_assign": True},
-        {"role": "Supervisory Officer", "module": "Test Template Management", "can_view": True, "can_edit": True},
-        {"role": "Supervisory Officer", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer", "module": "CM/PM Master Template", "can_view": True, "can_edit": True},
+        {"role": "Supervisory Officer", "module": "Equipment Registry", "can_view": True, "can_search": True},
         {"role": "Supervisory Officer", "module": "Reports", "can_view": True, "can_export": True},
         {"role": "Supervisory Officer", "module": "Vendor Directory", "can_view": True},
 
         # CEE Transmission Zone — Zone management
         {"role": "Senior Management Approver", "module": "Dashboard", "can_view": True},
         {"role": "Senior Management Approver", "module": "EE TLSS Dashboard", "can_view": True},
-        {"role": "Senior Management Approver", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Senior Management Approver", "module": "CM Testing Request", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "Senior Management Approver", "module": "Testing", "can_view": True},
         {"role": "Senior Management Approver", "module": "Testing Request Approvals", "can_view": True, "can_approve": True},
-        {"role": "Senior Management Approver", "module": "Equipment", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "Equipment Registry", "can_view": True, "can_search": True},
         {"role": "Senior Management Approver", "module": "Notifications", "can_view": True},
         {"role": "Senior Management Approver", "module": "Reports", "can_view": True, "can_export": True},
         {"role": "Senior Management Approver", "module": "Request Quote", "can_view": True, "can_approve": True},
@@ -2044,11 +2063,11 @@ def seed_privileges(session, role_ids, module_ids):
 
         # CEE RT&R&D — Research & Development chief
         {"role": "Senior Management Approver", "module": "Dashboard", "can_view": True},
-        {"role": "Senior Management Approver", "module": "Testing Requests", "can_view": True, "can_approve": True, "can_assign": True},
+        {"role": "Senior Management Approver", "module": "CM Testing Request", "can_view": True, "can_approve": True, "can_assign": True},
         {"role": "Senior Management Approver", "module": "Testing", "can_view": True},
         {"role": "Senior Management Approver", "module": "Testing Request Approvals", "can_view": True},
-        {"role": "Senior Management Approver", "module": "Test Template Management", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True},
-        {"role": "Senior Management Approver", "module": "Equipment", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "CM/PM Master Template", "can_view": True, "can_add": True, "can_edit": True, "can_delete": True},
+        {"role": "Senior Management Approver", "module": "Equipment Registry", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
         {"role": "Senior Management Approver", "module": "Reports", "can_view": True, "can_export": True},
         {"role": "Senior Management Approver", "module": "Vendor Directory", "can_view": True},
 
@@ -2092,13 +2111,13 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Test Engineer",              "module": "Failure Registry", "can_view": True, "can_add": True},
 
         # ✅ TA&QC INSPECTIONS — Stage 10 (SRS Sec 6)
-        {"role": "Asset Data Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "Reviewing Officer",                   "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "Supervisory Officer",                  "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "Senior Management Approver",             "module": "TA&QC Inspections", "can_view": True, "can_add": True, "can_approve": True},
-        {"role": "Reviewing Officer",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
-        {"role": "Supervisory Officer",                 "module": "TA&QC Inspections", "can_view": True, "can_search": True},
-        {"role": "Senior Management Approver",   "module": "TA&QC Inspections", "can_view": True, "can_search": True},
+        {"role": "Asset Data Officer",                  "module": "Annual Inspection & Audit Request", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",                   "module": "Annual Inspection & Audit Request", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Supervisory Officer",                  "module": "Annual Inspection & Audit Request", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Senior Management Approver",             "module": "Annual Inspection & Audit Request", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Reviewing Officer",                 "module": "Annual Inspection & Audit Request", "can_view": True, "can_search": True},
+        {"role": "Supervisory Officer",                 "module": "Annual Inspection & Audit Request", "can_view": True, "can_search": True},
+        {"role": "Senior Management Approver",   "module": "Annual Inspection & Audit Request", "can_view": True, "can_search": True},
 
         # ✅ REPAIR WORKFLOWS — Transformer repair lifecycle (10 stages)
         # Stage-level RBAC is enforced in the service layer via RepairStageRole.
@@ -2106,32 +2125,32 @@ def seed_privileges(session, role_ids, module_ids):
         # Config endpoints (PUT /repair-workflows/config/*) require is_org_admin.
 
         # All stage-acting roles: can view + add (save data) + approve (advance/reject)
-        {"role": "Maintenance Officer",         "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "TRC Member",              "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Senior Management Approver",             "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Senior Management Approver",   "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Vendor",                  "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Inspection Engineer",     "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Finance Officer",         "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "QA Team",                 "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Reviewing Officer",                   "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_approve": True},
-        {"role": "Supervisory Officer",                  "module": "Breakdown Workflows", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Maintenance Officer",         "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "TRC Member",              "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",             "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",   "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Vendor",                  "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Inspection Engineer",     "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Finance Officer",         "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "QA Team",                 "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Reviewing Officer",                   "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_approve": True},
+        {"role": "Supervisory Officer",                  "module": "Transformer Repair Work Flow", "can_view": True, "can_add": True, "can_approve": True},
 
         # Supervisory roles: view + export only (no stage actions)
-        {"role": "Reviewing Officer",                 "module": "Breakdown Workflows", "can_view": True, "can_export": True},
-        {"role": "Supervisory Officer",                 "module": "Breakdown Workflows", "can_view": True, "can_export": True},
+        {"role": "Reviewing Officer",                 "module": "Transformer Repair Work Flow", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",                 "module": "Transformer Repair Work Flow", "can_view": True, "can_export": True},
 
         # ✅ SURVEILLANCE WORKFLOWS — Post-commissioning 24-month monitoring (SRS §7.3)
         # Stage-level RBAC enforced via RepairStageRole (same as repair workflows).
         # Module-level privileges control nav visibility.
 
         # All surveillance-acting roles: can view + add (save quarterly review data) + approve (advance stages)
-        {"role": "Maintenance Officer",         "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Reviewing Officer",           "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Supervisory Officer",         "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Senior Management Approver",  "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "TRC Member",                  "module": "Surveillance Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Test Engineer",               "module": "Surveillance Workflows", "can_view": True, "can_add": True},
+        {"role": "Maintenance Officer",         "module": "Post Commissioning Workflow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Reviewing Officer",           "module": "Post Commissioning Workflow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Supervisory Officer",         "module": "Post Commissioning Workflow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver",  "module": "Post Commissioning Workflow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "TRC Member",                  "module": "Post Commissioning Workflow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Test Engineer",               "module": "Post Commissioning Workflow", "can_view": True, "can_add": True},
 
         # ✅ SURVEILLANCE DASHBOARD — Analytics and metrics
         # All roles that can view surveillance workflows can also view the dashboard
@@ -2143,39 +2162,39 @@ def seed_privileges(session, role_ids, module_ids):
         {"role": "Test Engineer",               "module": "Surveillance Dashboard", "can_view": True},
 
         # ✅ AI ANALYTICS DASHBOARD — all operational roles
-        {"role": "Admin",                             "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
-        {"role": "Test Engineer",                     "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Reviewing Officer",                 "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
-        {"role": "Supervisory Officer",               "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
-        {"role": "Senior Management Approver",        "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
-        {"role": "Maintenance Officer",               "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Asset Data Officer",                "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Inspection Engineer",               "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Auditor",                           "module": "AI Analytics Dashboard", "can_view": True, "can_export": True},
-        {"role": "TRC Member",                        "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Test & Work Coordinator",           "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Transformer Repair Coordinator",    "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "QA Team",                           "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Finance Officer",                   "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Procurement Officer",               "module": "AI Analytics Dashboard", "can_view": True},
-        {"role": "Operator",                          "module": "AI Analytics Dashboard", "can_view": True},
+        {"role": "Admin",                             "module": "AI Analytic Dashboard", "can_view": True, "can_export": True},
+        {"role": "Test Engineer",                     "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Reviewing Officer",                 "module": "AI Analytic Dashboard", "can_view": True, "can_export": True},
+        {"role": "Supervisory Officer",               "module": "AI Analytic Dashboard", "can_view": True, "can_export": True},
+        {"role": "Senior Management Approver",        "module": "AI Analytic Dashboard", "can_view": True, "can_export": True},
+        {"role": "Maintenance Officer",               "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Asset Data Officer",                "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Inspection Engineer",               "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Auditor",                           "module": "AI Analytic Dashboard", "can_view": True, "can_export": True},
+        {"role": "TRC Member",                        "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Test & Work Coordinator",           "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Transformer Repair Coordinator",    "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "QA Team",                           "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Finance Officer",                   "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Procurement Officer",               "module": "AI Analytic Dashboard", "can_view": True},
+        {"role": "Operator",                          "module": "AI Analytic Dashboard", "can_view": True},
 
         # ✅ PRE-COMMISSION QAP — Request tickets (approval queue)
         # Asset Data Officer creates PCR tickets; approvers approve/reject.
-        {"role": "Asset Data Officer",         "module": "Pre-Commission Requests", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
-        {"role": "Reviewing Officer",          "module": "Pre-Commission Requests", "can_view": True, "can_add": True, "can_approve": True, "can_search": True},
-        {"role": "Supervisory Officer",        "module": "Pre-Commission Requests", "can_view": True, "can_approve": True, "can_search": True},
-        {"role": "Senior Management Approver", "module": "Pre-Commission Requests", "can_view": True, "can_approve": True, "can_search": True},
-        {"role": "Transformer Repair Coordinator", "module": "Pre-Commission Requests", "can_view": True, "can_search": True},
+        {"role": "Asset Data Officer",         "module": "Pre Commissioning Inspection Request", "can_view": True, "can_add": True, "can_edit": True, "can_search": True},
+        {"role": "Reviewing Officer",          "module": "Pre Commissioning Inspection Request", "can_view": True, "can_add": True, "can_approve": True, "can_search": True},
+        {"role": "Supervisory Officer",        "module": "Pre Commissioning Inspection Request", "can_view": True, "can_approve": True, "can_search": True},
+        {"role": "Senior Management Approver", "module": "Pre Commissioning Inspection Request", "can_view": True, "can_approve": True, "can_search": True},
+        {"role": "Transformer Repair Coordinator", "module": "Pre Commissioning Inspection Request", "can_view": True, "can_search": True},
 
         # ✅ PRE-COMMISSION QAP — 9-stage workflow execution
         # Reviewing Officer is the primary stage actor (fills QAP forms, advances stages).
         # Coordinator handles stage assignment. Senior Management Approver escalation.
-        {"role": "Reviewing Officer",          "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Senior Management Approver", "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
-        {"role": "Supervisory Officer",        "module": "Pre-Commission Workflows", "can_view": True, "can_export": True},
-        {"role": "Asset Data Officer",         "module": "Pre-Commission Workflows", "can_view": True},
-        {"role": "Transformer Repair Coordinator", "module": "Pre-Commission Workflows", "can_view": True, "can_add": True, "can_assign": True},
+        {"role": "Reviewing Officer",          "module": "Pre Commissioning Inspection Workflow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Senior Management Approver", "module": "Pre Commissioning Inspection Workflow", "can_view": True, "can_add": True, "can_edit": True, "can_approve": True},
+        {"role": "Supervisory Officer",        "module": "Pre Commissioning Inspection Workflow", "can_view": True, "can_export": True},
+        {"role": "Asset Data Officer",         "module": "Pre Commissioning Inspection Workflow", "can_view": True},
+        {"role": "Transformer Repair Coordinator", "module": "Pre Commissioning Inspection Workflow", "can_view": True, "can_add": True, "can_assign": True},
 
         # ✅ AE DASHBOARD — Test Engineer (AE_JE)
         {"role": "Test Engineer",              "module": "AE Dashboard",  "can_view": True},
@@ -3451,30 +3470,30 @@ def seed_role_templates(session):
     procurement_modules = [modules_by_name[n] for n in procurement_module_names if n in modules_by_name]
 
     # Org-management modules
-    org_module_names = ["Organizations", "Organization User Roles", "Organization Role Permissions"]
+    org_module_names = ["Organizations", "User Role", "Role Permission"]
     org_modules = [modules_by_name[n] for n in org_module_names if n in modules_by_name]
 
     # Testing-specific modules (by name, so we can pick individual ones)
-    testing_requests_module  = [mid for mid in [modules_by_name.get("Testing Requests")] if mid]
+    testing_requests_module  = [mid for mid in [modules_by_name.get("CM Testing Request")] if mid]
     testing_module           = [mid for mid in [modules_by_name.get("Testing")] if mid]
     testing_request_approvals_module = [mid for mid in [modules_by_name.get("Testing Request Approvals")] if mid]
-    recommendations_module   = [mid for mid in [modules_by_name.get("Recommendations")] if mid]
+    recommendations_module   = [mid for mid in [modules_by_name.get("CM Recommendations")] if mid]
     approvals_module         = [mid for mid in [modules_by_name.get("Approvals")] if mid]
     workflows_module          = [mid for mid in [modules_by_name.get("Workflows")] if mid]
-    workflow_dashboard_module       = [mid for mid in [modules_by_name.get("Workflow Dashboard")] if mid]
-    breakdown_workflows_module      = [mid for mid in [modules_by_name.get("Breakdown Workflows")] if mid]
-    overhaul_workflows_module       = [mid for mid in [modules_by_name.get("Overhaul Workflows")] if mid]
-    calibration_workflows_module    = [mid for mid in [modules_by_name.get("Calibration Workflows")] if mid]
-    annual_audit_workflows_module   = [mid for mid in [modules_by_name.get("Annual Audit Workflows")] if mid]
-    surveillance_workflows_module        = [mid for mid in [modules_by_name.get("Surveillance Workflows")] if mid]
+    workflow_dashboard_module       = [mid for mid in [modules_by_name.get("Work Flow Dashboard")] if mid]
+    breakdown_workflows_module      = [mid for mid in [modules_by_name.get("Transformer Repair Work Flow")] if mid]
+    overhaul_workflows_module       = [mid for mid in [modules_by_name.get("Transformer Overhauling Workflow")] if mid]
+    calibration_workflows_module    = [mid for mid in [modules_by_name.get("Relay Calibration Workflow")] if mid]
+    annual_audit_workflows_module   = [mid for mid in [modules_by_name.get("Annual Inspection & Audit Workflow")] if mid]
+    surveillance_workflows_module        = [mid for mid in [modules_by_name.get("Post Commissioning Workflow")] if mid]
     surveillance_dashboard_module        = [mid for mid in [modules_by_name.get("Surveillance Dashboard")] if mid]
-    precommission_requests_module        = [mid for mid in [modules_by_name.get("Pre-Commission Requests")] if mid]
-    precommission_workflows_module       = [mid for mid in [modules_by_name.get("Pre-Commission Workflows")] if mid]
-    schedule_compliance_module          = [mid for mid in [modules_by_name.get("Test Schedules")] if mid]
-    test_schedule_templates_module      = [mid for mid in [modules_by_name.get("Test Schedule Templates")] if mid]
-    maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("Maintenance Schedule Templates")] if mid]
+    precommission_requests_module        = [mid for mid in [modules_by_name.get("Pre Commissioning Inspection Request")] if mid]
+    precommission_workflows_module       = [mid for mid in [modules_by_name.get("Pre Commissioning Inspection Workflow")] if mid]
+    schedule_compliance_module          = [mid for mid in [modules_by_name.get("CM Schedules")] if mid]
+    test_schedule_templates_module      = [mid for mid in [modules_by_name.get("CM Schedule Template")] if mid]
+    maintenance_schedule_templates_module = [mid for mid in [modules_by_name.get("PM Schedule Template")] if mid]
     procurement_approvals_module = [mid for mid in [modules_by_name.get("Procurement Approvals")] if mid]
-    taqc_inspections_module      = [mid for mid in [modules_by_name.get("TA&QC Inspections")] if mid]
+    taqc_inspections_module      = [mid for mid in [modules_by_name.get("Annual Inspection & Audit Request")] if mid]
     failure_registry_module      = [mid for mid in [modules_by_name.get("Failure Registry")] if mid]
 
     dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
@@ -3505,7 +3524,7 @@ def seed_role_templates(session):
 
     # Super Admin modules: everything the Excel column lists
     vendor_documents_module = [mid for mid in [modules_by_name.get("Vendor Documents")] if mid]
-    equipment_module = [mid for mid in [modules_by_name.get("Equipment")] if mid]
+    equipment_module = [mid for mid in [modules_by_name.get("Equipment Registry")] if mid]
 
     super_admin_modules = list({
         *dashboard_module,
@@ -3856,7 +3875,7 @@ def seed_role_templates(session):
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
-                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _readwrite([modules_by_name["CM Test Request Approval"]] if "CM Test Request Approval" in modules_by_name else []) +
                 _full([modules_by_name["Testing"]] if "Testing" in modules_by_name else [])
             ),
         },
@@ -3870,7 +3889,7 @@ def seed_role_templates(session):
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
-                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
+                _readwrite([modules_by_name["CM Test Request Approval"]] if "CM Test Request Approval" in modules_by_name else []) +
                 _full([modules_by_name["Testing"]] if "Testing" in modules_by_name else [])
             ),
         },
@@ -3884,8 +3903,8 @@ def seed_role_templates(session):
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
-                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
-                _readwrite([modules_by_name["TR Result Review"]] if "TR Result Review" in modules_by_name else [])
+                _readwrite([modules_by_name["CM Test Request Approval"]] if "CM Test Request Approval" in modules_by_name else []) +
+                _readwrite([modules_by_name["CM Test Result Review"]] if "CM Test Result Review" in modules_by_name else [])
             ),
         },
 
@@ -3898,8 +3917,8 @@ def seed_role_templates(session):
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
-                _readwrite([modules_by_name["TR Approval Queue"]] if "TR Approval Queue" in modules_by_name else []) +
-                _readwrite([modules_by_name["TR Result Review"]] if "TR Result Review" in modules_by_name else [])
+                _readwrite([modules_by_name["CM Test Request Approval"]] if "CM Test Request Approval" in modules_by_name else []) +
+                _readwrite([modules_by_name["CM Test Result Review"]] if "CM Test Result Review" in modules_by_name else [])
             ),
         },
 
@@ -3946,7 +3965,7 @@ def seed_role_templates(session):
             "is_dept_admin": False,
             "auto_provision": True,
             "permissions_template": (
-                _approve([modules_by_name["Document Support Queue"]] if "Document Support Queue" in modules_by_name else []) +
+                _approve([modules_by_name["Support Queue"]] if "Support Queue" in modules_by_name else []) +
                 _readonly([modules_by_name["Notifications"]] if "Notifications" in modules_by_name else [])
             ),
         },
@@ -3961,7 +3980,7 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": (
                 _approve([modules_by_name["Document Support"]] if "Document Support" in modules_by_name else []) +
-                _approve([modules_by_name["Document Support Queue"]] if "Document Support Queue" in modules_by_name else []) +
+                _approve([modules_by_name["Support Queue"]] if "Support Queue" in modules_by_name else []) +
                 _readonly([modules_by_name["Notifications"]] if "Notifications" in modules_by_name else [])
             ),
         },
@@ -4370,7 +4389,7 @@ def seed_sample_organization(session):
 
     # Dynamically resolve module IDs so they survive any drop-reseed sequence
     _tester_module_names = [
-        "Testing Requests",
+        "CM Testing Request",
         "Testing",
         "Testing Request Approvals",
         # Removed "Tester Mapping" - no longer used
@@ -6949,11 +6968,11 @@ _MASTER_SCHEDULE_SEED = {
 
 def seed_schedule_module_permissions(session):
     """
-    Ensure 'Test Schedule Templates' and 'Maintenance Schedule Templates' modules
+    Ensure 'CM Schedule Template' and 'PM Schedule Template' modules
     exist and all is_org_admin OrgRoles across every organisation have full access
     to both. Idempotent.
     """
-    MODULE_NAMES = ["Test Schedule Templates", "Maintenance Schedule Templates"]
+    MODULE_NAMES = ["CM Schedule Template", "PM Schedule Template"]
     total_granted = 0
 
     admin_roles = session.query(OrgRole).filter_by(is_org_admin=True, is_active=True).all()
@@ -6994,7 +7013,7 @@ def seed_schedule_module_permissions(session):
 
 def seed_schedule_compliance_module_permissions(session, org=None):
     """
-    Grant 'Test Schedules' module access to OrgRoles belonging to *org*.
+    Grant 'CM Schedules' module access to OrgRoles belonging to *org*.
     This module is KPTCL-specific — pass the KPTCL Organization object.
     Idempotent — inserts missing rows and updates existing ones.
 
@@ -7002,9 +7021,9 @@ def seed_schedule_compliance_module_permissions(session, org=None):
       is_org_admin roles              → full access (all flags)
       Named field / supervisory roles → can_view only
     """
-    mod = session.query(Module).filter_by(name="Test Schedules").first()
+    mod = session.query(Module).filter_by(name="CM Schedules").first()
     if not mod:
-        print("[WARN] 'Test Schedules' module not found — run seed_modules first.")
+        print("[WARN] 'CM Schedules' module not found — run seed_modules first.")
         return 0
 
     if org is None:
@@ -7096,7 +7115,14 @@ def seed_schedule_compliance_module_permissions(session, org=None):
 def seed_approval_role_permissions(session):
     """
     Ensure 'Technical Approver' and 'Org Admin' roles have can_view + can_approve
-    on the 'Approvals' and 'Testing Request Approvals' modules across every org.
+    on the 'CM Test Request Approval' and 'CM Test Result Review' modules
+    (Configurable Workflow Engine) across every org.
+
+    NOTE: previously targeted the legacy 'Approvals' / 'Testing Request Approvals'
+    modules (paths 'approvals' / 'testing_request_approvals'). Those are retired
+    from the portal drawer and deactivated — approval/review now routes through
+    the TR workflow engine's 'tr-wf/approval-queue' / 'tr-wf/result-review'
+    modules instead, so this function grants on those going forward.
 
     Idempotent — inserts missing rows and updates existing ones so re-running
     seed.py always brings permissions to the correct state.
@@ -7107,24 +7133,24 @@ def seed_approval_role_permissions(session):
              can_view, can_add, can_edit, can_delete,
              can_approve, can_assign, can_export, can_import)
         VALUES
-            (gen_random_uuid(), '<tech_approver_role_id>', <approvals_mod_id>,
+            (gen_random_uuid(), '<tech_approver_role_id>', <approval_queue_mod_id>,
              true, false, false, false, true, true, true, false),
-            (gen_random_uuid(), '<tech_approver_role_id>', <tr_approvals_mod_id>,
+            (gen_random_uuid(), '<tech_approver_role_id>', <result_review_mod_id>,
              true, false, false, false, true, true, true, false),
-            (gen_random_uuid(), '<org_admin_role_id>',    <approvals_mod_id>,
+            (gen_random_uuid(), '<org_admin_role_id>',    <approval_queue_mod_id>,
              true, false, false, false, true, true, true, false),
-            (gen_random_uuid(), '<org_admin_role_id>',    <tr_approvals_mod_id>,
+            (gen_random_uuid(), '<org_admin_role_id>',    <result_review_mod_id>,
              true, false, false, false, true, true, true, false)
         ON CONFLICT (org_role_id, module_id) DO NOTHING;
     """
-    approvals_mod = session.query(Module).filter_by(path="approvals", is_active=True).first()
-    tr_approvals_mod = session.query(Module).filter_by(path="testing_request_approvals", is_active=True).first()
+    approvals_mod = session.query(Module).filter_by(path="tr-wf/approval-queue", is_active=True).first()
+    tr_approvals_mod = session.query(Module).filter_by(path="tr-wf/result-review", is_active=True).first()
 
     if not approvals_mod:
-        print("[WARN] seed_approval_role_permissions: 'Approvals' module not found — skipping")
+        print("[WARN] seed_approval_role_permissions: 'CM Test Request Approval' module not found — skipping")
         return 0
     if not tr_approvals_mod:
-        print("[WARN] seed_approval_role_permissions: 'Testing Request Approvals' module not found — skipping")
+        print("[WARN] seed_approval_role_permissions: 'CM Test Result Review' module not found — skipping")
         return 0
 
     target_role_names = ["Reviewing Officer", "System Administrator"]
@@ -7201,18 +7227,18 @@ def seed_missing_role_permissions(session, org=None):
 
     mods = {
         "Procurement Approvals":    _get_mod("Procurement Approvals"),
-        "TA&QC Inspections":        _get_mod("TA&QC Inspections"),
+        "Annual Inspection & Audit Request":        _get_mod("Annual Inspection & Audit Request"),
         "Failure Registry":         _get_mod("Failure Registry"),
         "Dashboard":                _get_mod("Dashboard"),
-        "Testing Requests":         _get_mod("Testing Requests"),
+        "CM Testing Request":         _get_mod("CM Testing Request"),
         "Testing":                  _get_mod("Testing"),
-        "Equipment":                _get_mod("Equipment"),
-        "Recommendations":          _get_mod("Recommendations"),
+        "Equipment Registry":                _get_mod("Equipment Registry"),
+        "CM Recommendations":          _get_mod("CM Recommendations"),
         "Approvals":                _get_mod("Approvals"),
-        "Breakdown Workflows":      _get_mod("Breakdown Workflows"),
-        "Calibration Workflows":    _get_mod("Calibration Workflows"),
-        "Annual Audit Workflows":   _get_mod("Annual Audit Workflows"),
-        "Surveillance Workflows":   _get_mod("Surveillance Workflows"),
+        "Transformer Repair Work Flow":      _get_mod("Transformer Repair Work Flow"),
+        "Relay Calibration Workflow":    _get_mod("Relay Calibration Workflow"),
+        "Annual Inspection & Audit Workflow":   _get_mod("Annual Inspection & Audit Workflow"),
+        "Post Commissioning Workflow":   _get_mod("Post Commissioning Workflow"),
         "Surveillance Dashboard":   _get_mod("Surveillance Dashboard"),
     }
     missing_mods = [k for k, v in mods.items() if v is None]
@@ -7226,28 +7252,28 @@ def seed_missing_role_permissions(session, org=None):
             ("Dashboard",             True, False, False, False, False, False),
         ],
         "TA&QC Inspector": [
-            ("TA&QC Inspections",       True, True,  True,  False, False, True),
-            ("Annual Audit Workflows",  True, True,  True,  False, False, True),
+            ("Annual Inspection & Audit Request",       True, True,  True,  False, False, True),
+            ("Annual Inspection & Audit Workflow",  True, True,  True,  False, False, True),
             ("Failure Registry",        True, False, False, False, False, False),
             ("Dashboard",               True, False, False, False, False, False),
         ],
         "Test Engineer": [
-            ("Testing Requests", True, False, False, False, False, False),
+            ("CM Testing Request", True, False, False, False, False, False),
             ("Testing",          True, True,  True,  False, False, True),
-            ("Equipment",        True, False, False, False, False, False),
-            ("Surveillance Workflows",   True, True,  True,  False, False, False),
+            ("Equipment Registry",        True, False, False, False, False, False),
+            ("Post Commissioning Workflow",   True, True,  True,  False, False, False),
             ("Surveillance Dashboard",   True, False, False, False, False, False),
         ],
         "Reviewing Officer": [
-            ("Recommendations",       True, False, False, True, True, True),
+            ("CM Recommendations",       True, False, False, True, True, True),
             ("Approvals",             True, False, False, True, True, True),
-            ("Equipment",             True, False, False, False, False, False),
-            ("Breakdown Workflows",      True, False, False, True, True, True),
-            ("Calibration Workflows",    True, False, False, True, True, True),
-            ("Annual Audit Workflows",   True, False, False, True, True, True),
-            ("Surveillance Workflows",   True, True,  True,  True, True, True),
+            ("Equipment Registry",             True, False, False, False, False, False),
+            ("Transformer Repair Work Flow",      True, False, False, True, True, True),
+            ("Relay Calibration Workflow",    True, False, False, True, True, True),
+            ("Annual Inspection & Audit Workflow",   True, False, False, True, True, True),
+            ("Post Commissioning Workflow",   True, True,  True,  True, True, True),
             ("Surveillance Dashboard",   True, False, False, False, False, True),
-            ("Testing Requests",         True, False, False, False, False, False),
+            ("CM Testing Request",         True, False, False, False, False, False),
             ("Failure Registry",      True, False, False, False, False, False),
             ("Dashboard",             True, False, False, False, False, False),
         ],

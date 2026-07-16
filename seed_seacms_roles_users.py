@@ -394,7 +394,7 @@ ROLE_DEFS = [
             ("testing_requests",           FULL),
             ("testing",                    FULL),
             ("test_register",              FULL),
-            ("/testing_kit_register",      FULL),
+            ("testing_kit_register",       FULL),
             ("testing_schedules",          FULL),
             ("maintenance_schedules",      FULL),
             ("schedule_compliance",        FULL),
