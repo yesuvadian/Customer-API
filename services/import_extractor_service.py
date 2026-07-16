@@ -18,6 +18,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from models import CategoryDetails, Equipment
+from category_labels import RequestCategoryLabels
 
 
 # ── UI category → DB category_type mapping ───────────────────────────────────
@@ -28,28 +29,28 @@ from models import CategoryDetails, Equipment
 CATEGORY_TYPE_MAP: dict[str, dict] = {
     "condition_monitoring": {
         "label": "Condition Monitoring",
-        "db_category_type": "test",
-        "request_category": "test",
+        "db_category_type": RequestCategoryLabels.TEST.key,
+        "request_category": RequestCategoryLabels.TEST.key,
     },
     "test": {
-        "label": "Test",
-        "db_category_type": "test",
-        "request_category": "test",
+        "label": RequestCategoryLabels.TEST.value,
+        "db_category_type": RequestCategoryLabels.TEST.key,
+        "request_category": RequestCategoryLabels.TEST.key,
     },
     "inspection": {
-        "label": "Inspection",
-        "db_category_type": "inspection",
-        "request_category": "inspection",
+        "label": RequestCategoryLabels.INSPECTION.value,
+        "db_category_type": RequestCategoryLabels.INSPECTION.key,
+        "request_category": RequestCategoryLabels.INSPECTION.key,
     },
     "maintenance": {
-        "label": "Maintenance",
-        "db_category_type": "maintenance",
-        "request_category": "maintenance",
+        "label": RequestCategoryLabels.MAINTENANCE.value,
+        "db_category_type": RequestCategoryLabels.MAINTENANCE.key,
+        "request_category": RequestCategoryLabels.MAINTENANCE.key,
     },
     "repair": {
-        "label": "Repair",
+        "label": RequestCategoryLabels.REPAIR_LIFECYCLE.value,
         "db_category_type": None,          # no category_type for repair in DB
-        "request_category": "repair_lifecycle",
+        "request_category": RequestCategoryLabels.REPAIR_LIFECYCLE.key,
     },
 }
 

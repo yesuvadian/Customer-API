@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 from sqlalchemy.orm import Session
+from category_labels import RequestCategoryLabels
 
 # Equipment masters that represent physical assets (excludes lifecycle /
 # audit / generic pseudo-masters that are not real equipment types).
@@ -42,11 +43,14 @@ EQUIPMENT_MASTERS = [
 
 REQUIRED_CATEGORY_TYPES = ["test", "maintenance", "inspection", "repair"]
 
+# NOTE: this script's local key is "repair", not the canonical "repair_lifecycle" —
+# a pre-existing naming quirk local to this seed script. Values are sourced from
+# RequestCategoryLabels so the display text stays consistent with the rest of the app.
 CATEGORY_LABELS = {
-    "test":        "Test",
-    "maintenance": "Maintenance",
-    "inspection":  "Inspection",
-    "repair":      "Repair",
+    "test":        RequestCategoryLabels.TEST.value,
+    "maintenance": RequestCategoryLabels.MAINTENANCE.value,
+    "inspection":  RequestCategoryLabels.INSPECTION.value,
+    "repair":      RequestCategoryLabels.REPAIR_LIFECYCLE.value,
 }
 
 

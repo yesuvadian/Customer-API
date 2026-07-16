@@ -9,6 +9,7 @@ from models import RepairWorkflow, TrWfInstance
 from auth_utils import get_current_user
 from database import get_db
 from models import User
+from category_labels import RequestCategoryLabels, RequestCategoryColors
 from schemas import (
     TestingRequestCreate,
     TestingRequestUpdate,
@@ -522,14 +523,25 @@ def create_testing_request(
 
 @router.get("/request-categories")
 def list_request_categories():
-    """Return all valid request categories with labels for Flutter dropdowns."""
+    """Return all valid request categories with labels/colors for Flutter dropdowns."""
+    _entries = [
+        ("test",             "Testing",           "science",        "Routine or scheduled equipment testing"),
+        ("maintenance",      "Maintenance",       "build",          "Preventive or corrective maintenance"),
+        ("inspection",       "Inspection",        "search",         "Visual or functional inspection"),
+        ("repair_lifecycle", "Repair / Lifecycle","engineering",    "Repair work or lifecycle assessment"),
+        ("failure_registry", "Failure Registry",  "report_problem", "Equipment failure registration and tracking"),
+        ("taqc_inspection",  "TA&QC Inspection",  "verified",       "Type approval and quality control inspection"),
+    ]
     return [
-        {"value": "test",             "label": "Testing",          "icon": "science",        "description": "Routine or scheduled equipment testing"},
-        {"value": "maintenance",      "label": "Maintenance",      "icon": "build",          "description": "Preventive or corrective maintenance"},
-        {"value": "inspection",       "label": "Inspection",       "icon": "search",         "description": "Visual or functional inspection"},
-        {"value": "repair_lifecycle", "label": "Repair / Lifecycle","icon": "engineering",   "description": "Repair work or lifecycle assessment"},
-        {"value": "failure_registry", "label": "Failure Registry", "icon": "report_problem", "description": "Equipment failure registration and tracking"},
-        {"value": "taqc_inspection",  "label": "TA&QC Inspection", "icon": "verified",       "description": "Type approval and quality control inspection"},
+        {
+            "value": value,
+            "label": label,
+            "short_label": RequestCategoryLabels.get(value),
+            "color": RequestCategoryColors.get(value),
+            "icon": icon,
+            "description": description,
+        }
+        for value, label, icon, description in _entries
     ]
 
 

@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session, joinedload
 from auth_utils import get_current_user
 from database import get_db
 from sqlalchemy import or_
+from category_labels import RequestCategoryLabels
 
 from models import (
     OrgRole,
@@ -1073,12 +1074,6 @@ def get_test_types(
         )
         query = query.filter(CategoryDetails.id.in_(enabled_ids))
     rows = query.order_by(CategoryDetails.name).all()
-    _type_label = {
-        "test": "Test",
-        "maintenance": "Maintenance",
-        "inspection": "Inspection",
-        "repair_lifecycle": "Repair",
-    }
     # Deduplicate by name — same activity may exist across multiple equipment types
     seen = set()
     result = []
@@ -1092,7 +1087,7 @@ def get_test_types(
             "name": r.name,
             "equipment_type_id": r.category_master_id,
             "category_type": r.category_type,
-            "category_type_label": _type_label.get(r.category_type or "", r.category_type or ""),
+            "category_type_label": RequestCategoryLabels.get(r.category_type, r.category_type or ""),
         })
     return result
 

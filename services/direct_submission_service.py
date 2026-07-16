@@ -23,6 +23,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+from category_labels import RequestCategoryFullLabels
 from models import (
     NextActionType,
     Organization,
@@ -176,7 +177,7 @@ class DirectSubmissionService:
 
         req = TestingRequest(
             request_number=self._generate_request_number(category, org_id=org_id),
-            title=data.get("title") or f"{category.value.replace('_',' ').title()} Report",
+            title=data.get("title") or f"{RequestCategoryFullLabels.get(category.value)} Report",
             description=data.get("description"),
             request_category=category,
             request_type=request_type,
@@ -218,7 +219,7 @@ class DirectSubmissionService:
             _norm_freq = _raw_freq.lower().replace("-", "_").replace(" ", "_").split("_every_")[0].split("_(")[0].strip("_")
             sched_freq = _WIZARD_FREQ.get(_norm_freq) or _WIZARD_FREQ.get(_raw_freq.lower()) or ScheduleFrequency.yearly
             repl_prods  = []
-            summary     = f"[Direct Submission] {category.value.replace('_',' ').title()} — {req.request_number}"
+            summary     = f"[Direct Submission] {RequestCategoryFullLabels.get(category.value)} — {req.request_number}"
             detailed    = data.get("remarks")
 
         rec = Recommendation(
@@ -264,7 +265,7 @@ class DirectSubmissionService:
             result = TestResult(
                 testing_request_id=req.id,
                 template_key=data.get("template_key", category.value),
-                test_name=data.get("title") or category.value.replace("_", " ").title(),
+                test_name=data.get("title") or RequestCategoryFullLabels.get(category.value),
                 test_category=category.value,
                 test_data=_td,
                 overall_result=data.get("overall_result") or "advisory",
@@ -294,7 +295,7 @@ class DirectSubmissionService:
                         "fr_number":  req.request_number,
                         "equipment":  equipment_label,
                         "originator": originator_label,
-                        "category":   "Failure Registry",
+                        "category":   RequestCategoryFullLabels.FAILURE_REGISTRY.value,
                     },
                     organization_id=req.organization_id,
                     department_id=getattr(req, "department_id", None),

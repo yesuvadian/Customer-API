@@ -37,6 +37,7 @@ from models import (
     OrgRole, OrgUserRole,
     TestSession,
 )
+from category_labels import RequestCategoryFullLabels
 from services.redis_cache import RedisCacheService
 
 logger = logging.getLogger(__name__)
@@ -485,7 +486,7 @@ class DashboardService:
         ).count()
         colour = "red" if high_priority > 0 else ("amber" if total_open > 0 else "green")
         return {
-            "label": "Failure Registry",
+            "label": RequestCategoryFullLabels.FAILURE_REGISTRY.value,
             "value": total_open,
             "display": str(total_open),
             "sub": f"{high_priority} high-priority · {resolved} resolved (30d)",
