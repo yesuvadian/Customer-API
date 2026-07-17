@@ -186,6 +186,7 @@ def get_workflow_dashboard(
     # ── 4. Equipment at risk (active workflows) ───────────────────────────────
     at_risk_rows = (
         db.query(
+            RepairWorkflow.id,
             RepairWorkflow.workflow_code,
             RepairWorkflow.workflow_number,
             RepairWorkflow.assignment_pending,
@@ -207,13 +208,14 @@ def get_workflow_dashboard(
     )
     equipment_at_risk = [
         {
+            "workflow_id":        str(wf_id),
             "workflow_code":      code,
             "workflow_number":    number,
             "equipment_ueic":     ueic,
             "current_stage":      stage,
             "assignment_pending": pending_flag,
         }
-        for code, number, pending_flag, ueic, stage in at_risk_rows
+        for wf_id, code, number, pending_flag, ueic, stage in at_risk_rows
     ]
 
     # ── 5. Recent activity (last 15 audit log entries) ────────────────────────
@@ -230,6 +232,7 @@ def get_workflow_dashboard(
     for log in activity_rows:
         wf = log.workflow
         recent_activity.append({
+            "workflow_id":     str(log.workflow_id) if log.workflow_id else None,
             "workflow_code":   wf.workflow_code if wf else None,
             "workflow_number": wf.workflow_number if wf else None,
             "equipment_ueic":  wf.equipment.ueic if wf and wf.equipment else None,
