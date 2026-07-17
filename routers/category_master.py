@@ -40,6 +40,25 @@ def create_category_master(
         created_by=current_user.id
     )
 
+@router.get(
+    "/masters/equipment",
+    response_model=List[CategoryMasterResponse]
+)
+def list_equipment_category_masters(
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    db: Session = Depends(get_db),
+):
+    return CategoryMasterService.get_equipment_master_categories(
+        db=db,
+        skip=skip,
+        limit=limit,
+        search=search,
+        is_active=is_active,
+    )
+
 # ============================================================
 # LIST MASTER CATEGORIES
 # ============================================================

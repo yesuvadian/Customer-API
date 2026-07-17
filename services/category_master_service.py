@@ -12,40 +12,62 @@ class CategoryMasterService:
         return db.query(CategoryMaster).filter(CategoryMaster.id == category_id).first()
 
     @classmethod
-    def get_master_categories(
+    def get_equipment_master_categories(
         cls,
         db: Session,
         skip: int = 0,
         limit: int = 100,
         search: str | None = None,
         is_active: bool | None = None,
-        description: str | None = None,
     ):
         """
-        Fetch master categories
-        - is_active = None → ALL categories
-        - is_active = True → only active
-        - is_active = False → only inactive
-        - description → filter by CategoryMaster.description (e.g. "Testing Equipment")
+        Returns only equipment master categories for CM/PM Template.
         """
 
-        query = db.query(CategoryMaster)
+        query = (
+            db.query(CategoryMaster)
+            .join(
+                CategoryDetails,
+                CategoryDetails.category_master_id == CategoryMaster.id,
+            )
+            .filter(
+                CategoryDetails.category_type.in_(
+                    [
+                        "nameplate",
+                        "test",
+                        "maintenance",
+                        "inspection",
+                        "repair",
+                    ]
+                )
+            )
+            .filter(
+                ~CategoryMaster.name.in_(
+                    [
+                        "Calibration Lifecycle",
+                        "Cumulative Lifecycle",
+                        "Annual Audit Categories",
+                        "Inspection Types",
+                        "Testing Priority",
+                    ]
+                )
+            )
+            .distinct()
+        )
 
-        # Filter by description (e.g. "Testing Equipment")
-        if description is not None:
-            query = query.filter(CategoryMaster.description == description)
-
-        # 🔍 Search filter
         if search:
-            query = query.filter(CategoryMaster.name.ilike(f"%{search}%"))
+            query = query.filter(
+                CategoryMaster.name.ilike(f"%{search}%")
+            )
 
-        # ✅ Apply filter ONLY when value is provided
         if is_active is not None:
-            query = query.filter(CategoryMaster.is_active == is_active)
+            query = query.filter(
+                CategoryMaster.is_active == is_active
+            )
 
         return (
             query
-            .order_by(desc(CategoryMaster.id))
+            .order_by(CategoryMaster.name)
             .offset(skip)
             .limit(limit)
             .all()
