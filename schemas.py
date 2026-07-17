@@ -2544,6 +2544,11 @@ class EquipmentRetireRequest(BaseModel):
     reason: str
 
 
+class EquipmentStatusUpdateRequest(BaseModel):
+    status: str  # active | under_repair | retired
+    reason: Optional[str] = None
+
+
 class EquipmentReplaceRequest(BaseModel):
     reason: str
     reason_type: str = "other"          # "recommendation_compliance" | "other"

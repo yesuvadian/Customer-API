@@ -571,7 +571,7 @@ class EquipmentService:
         equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
         if not equipment:
             raise HTTPException(status_code=404, detail="Equipment not found")
-        if equipment.status != EquipmentStatus.active:
+        if equipment.status not in (EquipmentStatus.active, EquipmentStatus.under_repair):
             raise HTTPException(
                 status_code=400,
                 detail=f"Equipment is already {equipment.status.value}",
@@ -580,6 +580,49 @@ class EquipmentService:
         equipment.status = EquipmentStatus.retired
         equipment.retired_date = datetime.now(timezone.utc)
         equipment.retirement_reason = reason
+        if modified_by:
+            equipment.modified_by = modified_by
+
+        db.flush()
+        return equipment
+
+    @classmethod
+    def set_equipment_status(
+        cls,
+        db: Session,
+        equipment_id: UUID,
+        new_status: str,
+        reason: Optional[str] = None,
+        modified_by: Optional[UUID] = None,
+    ) -> Equipment:
+        """Manually transition equipment status (active <-> under_repair, or either -> retired).
+
+        Retirement is terminal — once retired, equipment cannot be moved back to
+        active or under_repair.
+        """
+        valid_statuses = {"active", "under_repair", "retired"}
+        if new_status not in valid_statuses:
+            raise HTTPException(
+                status_code=422,
+                detail=f"status must be one of: {', '.join(sorted(valid_statuses))}",
+            )
+
+        if new_status == "retired":
+            if not reason or not reason.strip():
+                raise HTTPException(status_code=422, detail="Reason is required to retire equipment")
+            return cls.retire_equipment(db, equipment_id, reason, modified_by=modified_by)
+
+        equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        if not equipment:
+            raise HTTPException(status_code=404, detail="Equipment not found")
+
+        current = equipment.status.value if equipment.status else "active"
+        if current == "retired":
+            raise HTTPException(status_code=400, detail="Retired equipment cannot be reactivated")
+        if current == new_status:
+            raise HTTPException(status_code=400, detail=f"Equipment is already {new_status}")
+
+        equipment.status = EquipmentStatus(new_status)
         if modified_by:
             equipment.modified_by = modified_by
 
