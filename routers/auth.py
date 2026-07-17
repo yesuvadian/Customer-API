@@ -75,6 +75,18 @@ def get_me(
         primary_dept_id = roles[0].department_id
     if primary_dept_id is None and getattr(current_user, 'department_id', None):
         primary_dept_id = current_user.department_id
+    from models import Organization
+    from datetime import datetime, timezone
+    org = db.query(Organization).filter_by(id=current_user.organization_id).first()
+
+    days_remaining = None
+    alert_active = False
+    if org and org.is_trial and org.trial_end_date:
+        now = datetime.now(timezone.utc)
+        delta = (org.trial_end_date - now).days
+        days_remaining = max(0, delta)
+        alert_active = days_remaining <= 7
+
     return {
         "id": str(current_user.id),
         "email": current_user.email,
@@ -90,6 +102,12 @@ def get_me(
         "roles": role_names,
         "cts": current_user.cts,
         "mts": current_user.mts,
+        "is_trial": org.is_trial if org else False,
+        "trial_status": org.trial_status if org else None,
+        "days_remaining": days_remaining,
+        "trial_end_date": org.trial_end_date.isoformat() if org and org.trial_end_date else None,
+        "alert_active": alert_active,
+        "onboarding_complete": org.onboarding_complete if org else False,
     }
 
 

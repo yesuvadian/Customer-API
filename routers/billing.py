@@ -21,12 +21,14 @@ from datetime import datetime, timedelta, timezone
 
 import razorpay
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user, decode_access_token
 from database import get_db
 from models import BillingOrder, Organization, Plan
+from services.billing_invoice_pdf_service import generate_invoice_pdf
 
 RAZORPAY_KEY_ID     = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
@@ -53,9 +55,8 @@ def _activate_org(org: Organization, order: BillingOrder, db: Session) -> None:
     org.subscription_end_date = now + timedelta(days=order.duration_days)
     if order.plan_id:
         org.plan_id = order.plan_id
-    if not org.onboarding_complete:
-        org.onboarding_complete = True
-        org.onboarding_completed_at = now
+    org.onboarding_complete = True
+    org.onboarding_completed_at = now
     db.commit()
 
 
@@ -257,6 +258,97 @@ def billing_status(
             "billing_cycle": plan.billing_cycle,
         } if plan else None,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# GET /billing/orders  — payment history for the org
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.get("/orders")
+def billing_orders(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    orders = (
+        db.query(BillingOrder)
+        .filter_by(org_id=current_user.organization_id)
+        .order_by(BillingOrder.created_at.desc())
+        .all()
+    )
+    result = []
+    for o in orders:
+        plan = db.query(Plan).filter_by(id=o.plan_id).first() if o.plan_id else None
+        result.append({
+            "id": str(o.id),
+            "plan_name": plan.planname if plan else None,
+            "billing_cycle": plan.billing_cycle if plan else None,
+            "amount_paise": o.amount,
+            "currency": o.currency,
+            "status": o.status,
+            "razorpay_payment_id": o.razorpay_payment_id,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "paid_at": o.paid_at.isoformat() if o.paid_at else None,
+        })
+    return result
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# GET /billing/orders/{order_id}/invoice  — HTML invoice (browser prints as PDF)
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.get("/orders/{order_id}/invoice")
+def billing_invoice(
+    order_id: str,
+    request: Request,
+    token: str | None = None,
+    db: Session = Depends(get_db),
+):
+    # Accept auth from Bearer header OR ?token= query param (for direct browser download)
+    from models import User
+    raw_token = token
+    if not raw_token:
+        auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            raw_token = auth_header.split(" ", 1)[1]
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    payload = decode_access_token(raw_token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = db.query(User).filter_by(id=payload.get("sub")).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    order = db.query(BillingOrder).filter_by(id=order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if str(order.org_id) != str(user.organization_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if order.status != "paid":
+        raise HTTPException(status_code=400, detail="Invoice only available for paid orders")
+
+    org = db.query(Organization).filter_by(id=user.organization_id).first()
+    plan = db.query(Plan).filter_by(id=order.plan_id).first() if order.plan_id else None
+
+    invoice_no = f"INV-{str(order.id)[:8].upper()}"
+    paid_date = order.paid_at or order.created_at
+
+    pdf_bytes = generate_invoice_pdf(
+        invoice_no=invoice_no,
+        org_name=org.name if org else "—",
+        org_email=org.primary_email or "" if org else "",
+        plan_name=plan.planname if plan else "Subscription",
+        billing_cycle=plan.billing_cycle or "" if plan else "",
+        amount_paise=order.amount or 0,
+        paid_date=paid_date,
+        razorpay_payment_id=order.razorpay_payment_id or "",
+    )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{invoice_no}.pdf"'},
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────

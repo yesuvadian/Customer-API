@@ -1706,6 +1706,13 @@ def seed_modules(session):
  "path": "workflow-config",
  "group_name": "Administration",
  "is_menu": True},
+# ✅ SUBSCRIPTION & BILLING MODULE
+{"name": "Subscription & Billing",
+ "description": "Manage organization subscription plans, billing cycles, and payment history.",
+ "path": "subscription-billing",
+ "group_name": "Organisation",
+ "is_active": True,
+ "is_menu": True},
     ]
 
     module_ids = {}
@@ -1795,6 +1802,8 @@ def seed_privileges(session, role_ids, module_ids):
         "Notifications",
         # ✅ REPORTING SUITE
         "Reports",
+        # ✅ SUBSCRIPTION & BILLING
+        "Subscription & Billing",
     ]
 
     # -------------------------------------------------------
@@ -3470,7 +3479,7 @@ def seed_role_templates(session):
     procurement_modules = [modules_by_name[n] for n in procurement_module_names if n in modules_by_name]
 
     # Org-management modules
-    org_module_names = ["Organizations", "User Role", "Role Permission"]
+    org_module_names = ["Organizations", "User Role", "Role Permission", "Subscription & Billing"]
     org_modules = [modules_by_name[n] for n in org_module_names if n in modules_by_name]
 
     # Testing-specific modules (by name, so we can pick individual ones)
