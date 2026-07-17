@@ -22,6 +22,7 @@ from schemas import (
     EquipmentResponse,
     EquipmentChainRef,
     EquipmentRetireRequest,
+    EquipmentStatusUpdateRequest,
     EquipmentReplaceRequest,
     EquipmentCountResponse,
 )
@@ -2034,6 +2035,10 @@ def get_testing_kits(
         None,
         description="Filter by Serial Number",
     ),
+    status: Optional[str] = Query(
+        None,
+        description="Filter by status (active | under_repair | retired). Defaults to active.",
+    ),
 
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -2101,17 +2106,20 @@ def get_testing_kits(
         q = db.query(Equipment).filter(
             Equipment.organization_id == org_id,
             Equipment.equipment_type_id == kit_master.id,
-            Equipment.status == "active",
             Equipment.department_id.in_(dept_ids),
         )
+        if status:
+            q = q.filter(Equipment.status == status)
         return q.all()
 
     if not department_id:
-        all_kits = db.query(Equipment).filter(
+        q = db.query(Equipment).filter(
             Equipment.organization_id == org_id,
             Equipment.equipment_type_id == kit_master.id,
-            Equipment.status == "active",
-        ).all()
+        )
+        if status:
+            q = q.filter(Equipment.status == status)
+        all_kits = q.all()
         return {"all": [_kit_row(k, k.department.name if k.department else "") for k in all_kits]}
 
     # Recursively collect all descendant dept IDs so zone-level drill-down works
@@ -2338,6 +2346,50 @@ def retire_equipment(
         )
     except Exception as _n:
         print(f"[WARN] equipment_retired notification failed: {_n}")
+
+    return _to_response(db, equipment)
+
+
+@router.post("/{equipment_id}/status", response_model=EquipmentResponse)
+def set_equipment_status(
+    equipment_id: UUID,
+    data: EquipmentStatusUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Manually set equipment status (active | under_repair | retired)."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_edit")
+    existing = EquipmentService.get_equipment(db, equipment_id)
+    if not existing or existing.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
+    equipment = EquipmentService.set_equipment_status(
+        db=db,
+        equipment_id=equipment_id,
+        new_status=data.status,
+        reason=data.reason,
+        modified_by=current_user.id,
+    )
+    db.commit()
+    db.refresh(equipment)
+
+    if data.status == "retired":
+        try:
+            from services.notification_service import NotificationService
+            retired_by = (
+                f"{current_user.firstname or ''} {current_user.lastname or ''}".strip()
+                or current_user.email
+            )
+            NotificationService(db).notify_equipment_retired(
+                equipment,
+                retired_by=retired_by,
+                reason=data.reason or "",
+                organization_id=org_id,
+                department_id=equipment.department_id,
+            )
+        except Exception as _n:
+            print(f"[WARN] equipment_retired notification failed: {_n}")
 
     return _to_response(db, equipment)
 
