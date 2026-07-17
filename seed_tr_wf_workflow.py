@@ -58,10 +58,10 @@ def _resolve_org(session):
 def _resolve_module_ids(session):
     """Return {module_name: module_id} for the 4 tr_wf modules."""
     names = [
-        "TR Approval Queue",
-        "TR Result Review",
-        "TR Workflow Config",
-        "TR Routing Config",
+        "CM Test Request Approval",
+        "CM Test Result Review",
+        "CM Test Request Setup",
+        "CM Request Routing",
         "Testing",
     ]
     return {
@@ -345,20 +345,20 @@ def seed_tr_wf_workflow(session, org=None):
 
     # ── Module permissions ────────────────────────────────────────────────────
     if role_ee_tlss:
-        _grant_module(session, role_ee_tlss, mod_map, "TR Approval Queue", can_view=True, can_add=True, can_edit=True)
-        _grant_module(session, role_ee_tlss, mod_map, "TR Result Review",  can_view=True, can_edit=True)
-        _grant_module(session, role_ee_tlss, mod_map, "TR Workflow Config", can_view=True, can_add=True, can_edit=True)
-        _grant_module(session, role_ee_tlss, mod_map, "TR Routing Config",  can_view=True, can_add=True, can_edit=True)
+        _grant_module(session, role_ee_tlss, mod_map, "CM Test Request Approval", can_view=True, can_add=True, can_edit=True)
+        _grant_module(session, role_ee_tlss, mod_map, "CM Test Result Review",  can_view=True, can_edit=True)
+        _grant_module(session, role_ee_tlss, mod_map, "CM Test Request Setup", can_view=True, can_add=True, can_edit=True)
+        _grant_module(session, role_ee_tlss, mod_map, "CM Request Routing",  can_view=True, can_add=True, can_edit=True)
     if role_aee_maint:
-        _grant_module(session, role_aee_maint, mod_map, "TR Approval Queue", can_view=True, can_add=True, can_edit=True)
+        _grant_module(session, role_aee_maint, mod_map, "CM Test Request Approval", can_view=True, can_add=True, can_edit=True)
     if role_ae_je:
-        _grant_module(session, role_ae_je, mod_map, "TR Approval Queue", can_view=True, can_edit=True)
-    _grant_module(session, role_aee_rt,  mod_map, "TR Approval Queue",  can_view=True, can_add=True, can_edit=True)
-    _grant_module(session, role_aee_rd,  mod_map, "TR Approval Queue",  can_view=True, can_add=True, can_edit=True)
-    _grant_module(session, role_ae_rt,   mod_map, "TR Approval Queue",  can_view=True, can_edit=True)
-    _grant_module(session, role_ae_rd,   mod_map, "TR Approval Queue",  can_view=True, can_edit=True)
-    _grant_module(session, role_aee_rt,  mod_map, "TR Result Review",   can_view=True, can_edit=True)
-    _grant_module(session, role_aee_rd,  mod_map, "TR Result Review",   can_view=True, can_edit=True)
+        _grant_module(session, role_ae_je, mod_map, "CM Test Request Approval", can_view=True, can_edit=True)
+    _grant_module(session, role_aee_rt,  mod_map, "CM Test Request Approval",  can_view=True, can_add=True, can_edit=True)
+    _grant_module(session, role_aee_rd,  mod_map, "CM Test Request Approval",  can_view=True, can_add=True, can_edit=True)
+    _grant_module(session, role_ae_rt,   mod_map, "CM Test Request Approval",  can_view=True, can_edit=True)
+    _grant_module(session, role_ae_rd,   mod_map, "CM Test Request Approval",  can_view=True, can_edit=True)
+    _grant_module(session, role_aee_rt,  mod_map, "CM Test Result Review",   can_view=True, can_edit=True)
+    _grant_module(session, role_aee_rd,  mod_map, "CM Test Result Review",   can_view=True, can_edit=True)
     # AE-R&T and AE-R&D must have Testing module perms to appear in the tester picker
     _grant_module(session, role_ae_rt,   mod_map, "Testing",  can_view=True, can_add=True, can_edit=True, can_delete=True, can_approve=True, can_assign=True)
     _grant_module(session, role_ae_rd,   mod_map, "Testing",  can_view=True, can_add=True, can_edit=True, can_delete=True, can_approve=True, can_assign=True)

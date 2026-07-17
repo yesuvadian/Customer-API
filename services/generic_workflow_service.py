@@ -368,6 +368,14 @@ class GenericWorkflowService:
             if ts:
                 terminal_status_code = ts.status_code
 
+                # Only Reject should become Rejected.
+                # Cancel should remain Cancelled.
+                if (
+                    self.adapter.entity_type == "document_request"
+                    and action_code.lower() == "reject"
+                ):
+                    terminal_status_code = "ds_rejected"
+
         # Close current stage instance
         cur_stage_inst: Optional[TrWfStageInstance] = (
             self.db.query(TrWfStageInstance)

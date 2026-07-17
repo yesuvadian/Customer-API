@@ -42,7 +42,11 @@ from models import (
     RepairWorkflow,
     RepairWorkflowDefinition,
     OrgTestTemplate,
+    RequestCategory,
     TAQCObservation,
+    TestingRequest,
+    TestingRequestStatus,
+    TrWfInstance,
     User,
 )
 
@@ -963,6 +967,37 @@ class RepairWorkflowService:
             if rec:
                 rec.status = "CLOSED"
                 rec.closed_at = self._utc_now()
+
+        # Close the repair_lifecycle TestingRequest(s) tracking this workflow so
+        # they stop showing as "Pending L2 Approval" (or any other in-flight
+        # status) in the Testing Requests list once the workflow is cancelled.
+        # There is no direct FK from RepairWorkflow to its RL- TestingRequest,
+        # so match by equipment + category + non-terminal status.
+        linked_trs = self.db.query(TestingRequest).filter(
+            TestingRequest.equipment_id == workflow.equipment_id,
+            TestingRequest.request_category == RequestCategory.repair_lifecycle,
+            TestingRequest.status.notin_([
+                TestingRequestStatus.closed,
+                TestingRequestStatus.approved,
+                TestingRequestStatus.rejected,
+                TestingRequestStatus.outcome_active,
+                TestingRequestStatus.commissioned,
+            ]),
+        ).all()
+        for tr in linked_trs:
+            tr.status = TestingRequestStatus.closed
+            tr.current_status_code = "wf_cancelled"
+            tr.completed_at = self._utc_now()
+            tr.modified_by = user_id
+
+            if tr.wf_instance_id:
+                wf_instance = self.db.query(TrWfInstance).filter(
+                    TrWfInstance.id == tr.wf_instance_id
+                ).first()
+                if wf_instance and wf_instance.status == "active":
+                    wf_instance.status = "cancelled"
+                    wf_instance.current_status_code = "wf_cancelled"
+                    wf_instance.completed_at = self._utc_now()
 
         self.db.commit()
         self._log_audit(workflow_id, workflow.current_stage_id, "cancel", user_id, reason or "Workflow cancelled")

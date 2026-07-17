@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     Equipment,
+    RepairStageAuditLog,
     RepairWorkflow,
     RepairWorkflowDefinition,
     RepairStageDefinition,
@@ -147,6 +148,19 @@ def _on_repair_workflow_completed(
             surveillance_workflow.current_stage_instance_id = stages[0].id
             stages[0].status = 'in_progress'
             stages[0].started_at = start_date
+
+        # Audit log — every other workflow-creation path (BREAKDOWN, OVERHAUL,
+        # CALIBRATION, ANNUAL_AUDIT, PRE_COMMISSION) logs a "created" entry so
+        # it shows up in the workflow dashboard's Recent Activity feed; this
+        # auto-triggered surveillance workflow was missing that entirely.
+        db.add(RepairStageAuditLog(
+            workflow_id=surveillance_workflow.id,
+            stage_id=stages[0].stage_id if stages else None,
+            action="created",
+            performed_by=user_id,
+            note=f"Post-commissioning surveillance auto-started from completed repair {workflow.workflow_number}",
+            performed_at=start_date,
+        ))
 
         # Create test request schedules for all quarters
         # This will be picked up by the daily scheduler to create testing requests

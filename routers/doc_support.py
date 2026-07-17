@@ -260,6 +260,11 @@ def perform_action(
     # If a processor self-accepts (no user selected), auto-assign to themselves
     if action_code == "assign" and not assigned_user_id:
         assigned_user_id = str(current_user.id)
+
+    action_code = payload.get("action_code")
+
+    print(f"Document Support action = {action_code}")
+    
     instance = svc.transition(
         doc_id=doc_id,
         action_code=action_code,

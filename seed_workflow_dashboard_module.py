@@ -18,7 +18,7 @@ def run():
         else:
             mod = Module(
                 id=uuid.uuid4(),
-                name="Workflow Dashboard",
+                name="Work Flow Dashboard",
                 description=(
                     "Unified operations dashboard — dynamically shows counts, stage breakdown, "
                     "equipment at risk, and recent activity for all workflow types defined in "

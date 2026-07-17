@@ -70,10 +70,10 @@ class PreCommissionService:
         return pcr
 
     def _can_approve(self, user: User) -> bool:
-        """Check can_approve on the 'Pre-Commission Requests' module via OrgRolePermission."""
+        """Check can_approve on the 'Pre Commissioning Inspection Request' module via OrgRolePermission."""
         module = (
             self.db.query(Module)
-            .filter(Module.name == "Pre-Commission Requests")
+            .filter(Module.name == "Pre Commissioning Inspection Request")
             .first()
         )
         if not module:

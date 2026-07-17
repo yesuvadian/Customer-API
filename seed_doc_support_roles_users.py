@@ -91,6 +91,9 @@ def _get_or_create_module(session, name, path, description, group_name):
         session.flush()
         print(f"  [CREATE] Module: {path}")
     else:
+        if m.name != name:
+            print(f"  [RENAME] Module: {path} ({m.name!r} -> {name!r})")
+            m.name = name
         print(f"  [FOUND]  Module: {path} ({m.id})")
     return m
 
@@ -208,7 +211,7 @@ def seed_doc_support_roles_users(session=None):
         )
         ds_mgr_module = _get_or_create_module(
             session,
-            name="Document Support Queue",
+            name="Support Queue",
             path="document-support-queue",
             description="Manager and processor queue for Document Support Workflow.",
             group_name="Support",

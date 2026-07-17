@@ -43,7 +43,7 @@ ROLE_MODULE_PERMS = [
             "test_register":          dict(can_view=True, can_add=True, can_edit=True,
                                            can_delete=True, can_approve=True,
                                            can_assign=True, can_export=True, can_import=True),
-            "/testing_kit_register":  dict(can_view=True, can_add=True, can_edit=True,
+            "testing_kit_register":   dict(can_view=True, can_add=True, can_edit=True,
                                            can_delete=True, can_approve=True,
                                            can_assign=True, can_export=True, can_import=True),
             "testing_schedules":      dict(can_view=True, can_add=True, can_edit=True,
