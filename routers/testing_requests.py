@@ -217,7 +217,7 @@ def _enrich(req, dept_path_map: dict | None = None):
                 .filter(TrWfInstance.id == req.wf_instance_id)
                 .first()
             )
-            req.is_closed = bool(_inst and _inst.status in ("completed", "terminated"))
+            req.is_closed = bool(_inst and _inst.status in ("completed", "terminated", "cancelled"))
         else:
             req.is_closed = False
     except Exception:
@@ -238,7 +238,7 @@ def _enrich(req, dept_path_map: dict | None = None):
                 .first()
             )
             if _inst2:
-                if _inst2.status in ("completed", "terminated"):
+                if _inst2.status in ("completed", "terminated", "cancelled"):
 
                     if req.current_status_code:
                         _st = (
@@ -251,10 +251,16 @@ def _enrich(req, dept_path_map: dict | None = None):
                         if _st:
                             req.wf_status_name = _st.status_name
                             req.wf_status_color = _st.color
+                        elif _inst2.status == "cancelled":
+                            req.wf_status_name = "Cancelled"
+                            req.wf_status_color = "#6B7280"
                         else:
                             req.wf_status_name = "Completed"
                             req.wf_status_color = "#16A34A"
 
+                    elif _inst2.status == "cancelled":
+                        req.wf_status_name = "Cancelled"
+                        req.wf_status_color = "#6B7280"
                     else:
                         req.wf_status_name = "Completed"
                         req.wf_status_color = "#16A34A"

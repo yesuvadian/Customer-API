@@ -329,6 +329,7 @@ class TestScheduleDashboardService:
                 "voltage_class":      eq.voltage_class,
                 "manufacturer":       eq.manufacturer,
                 "year_of_manufacture":eq.year_of_manufacture,
+                "department_id":      str(eq.department_id) if eq.department_id else None,
                 "department_name":    dept_path[-1] if dept_path else None,
                 "department_path":    dept_path,
                 "model_number":       eq.model_number,
@@ -346,10 +347,14 @@ class TestScheduleDashboardService:
         kpis = self._compute_kpis(rows, columns)
 
         # 8. Upcoming schedule counts per time window
-        # A schedule counts in the 30d bucket if it has a run within 30 days.
-        # It counts in the 180d bucket only if its end_date extends past 30 days
-        # (i.e. it still has runs in the 30–180d range).
-        # Same logic for 365d (end_date must extend past 180 days).
+        # Each schedule is counted in exactly ONE band, based on how many days
+        # until its next run: 0–30 → "30", 31–180 → "180", 181+ → "365"
+        # (the 365d bucket is effectively "365 days or beyond" so every
+        # non-overdue schedule — including longer-cadence ones like triennial
+        # tests due 3 years out — is represented in exactly one bucket).
+        # (Previously each bucket re-counted everything due within its window,
+        # so a schedule due in 7 days was tallied under 30d AND 180d AND 365d —
+        # inflating the wider buckets instead of showing a clean breakdown.)
         today_dt = self._today
         d30 = d180 = d365 = 0
         for s in schedules:
@@ -371,17 +376,13 @@ class TestScheduleDashboardService:
             days = (nr_date - today_dt).days
             if days < 0:
                 continue  # overdue — not "upcoming"
-            # days_until_end: None means schedule runs indefinitely
-            days_until_end = (end_d - today_dt).days if end_d else None
 
             if days <= 30:
                 d30 += 1
-            # Only count in 180d if schedule still has runs beyond 30 days
-            if days <= 180 and (days_until_end is None or days_until_end > 30):
+            elif days <= 180:
                 d180 += 1
-            # Only count in 365d if schedule still has runs beyond 180 days
-            if days <= 365 and (days_until_end is None or days_until_end > 180):
-                d365 += 1
+            else:
+                d365 += 1  # 181 days and beyond, no upper bound
 
         upcoming_counts = {"30": d30, "180": d180, "365": d365}
 
