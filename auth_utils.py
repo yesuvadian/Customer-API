@@ -260,22 +260,40 @@ def login_user(db: Session, email: str, password: str):
                     if first_expiry:
                         org.trial_status = "expired"
                         db.commit()
-                    # Short-lived payment token (1 hr, scope=billing only)
                     payment_token = create_access_token(
                         {"org_id": str(org.id), "scope": "billing"},
                         expires_delta=timedelta(hours=1),
                     )
-                    # Send Razorpay payment link email on first expiry
                     if first_expiry:
                         try:
                             from services.billing_service import send_payment_link
                             send_payment_link(db, org)
                         except Exception as e:
                             print(f"[BILLING] Failed to send payment link: {e}")
-                    from fastapi.responses import JSONResponse
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="TRIAL_EXPIRED",
+                        headers={
+                            "X-Payment-Token": payment_token,
+                            "X-Org-Name": org.name,
+                        },
+                    )
+
+            if org and not org.is_trial and org.subscription_end_date:
+                if org.subscription_end_date < now:
+                    print(f"[SUBSCRIPTION-LOGIN] Subscription expired for {org.name}")
+                    payment_token = create_access_token(
+                        {"org_id": str(org.id), "scope": "billing"},
+                        expires_delta=timedelta(hours=1),
+                    )
+                    try:
+                        from services.billing_service import send_payment_link
+                        send_payment_link(db, org)
+                    except Exception as e:
+                        print(f"[BILLING] Failed to send renewal link: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="SUBSCRIPTION_EXPIRED",
                         headers={
                             "X-Payment-Token": payment_token,
                             "X-Org-Name": org.name,
@@ -398,14 +416,18 @@ def login_user(db: Session, email: str, password: str):
                 organization_name = org.name
                 days_remaining = None
                 alert_active = False
+                alert_row = db.query(SystemConfig).filter(SystemConfig.key == "trial_alert_days").first()
+                alert_days = int(alert_row.value) if alert_row else 7
                 if org.is_trial and org.trial_end_date:
                     delta = (org.trial_end_date - now).days
                     days_remaining = max(0, delta)
-                    alert_row = db.query(SystemConfig).filter(SystemConfig.key == "trial_alert_days").first()
-                    alert_days = int(alert_row.value) if alert_row else 7
+                    alert_active = days_remaining <= alert_days
+                elif not org.is_trial and org.subscription_end_date:
+                    delta = (org.subscription_end_date - now).days
+                    days_remaining = max(0, delta)
                     alert_active = days_remaining <= alert_days
                 effective_onboarding_complete = bool(org.onboarding_complete)
-                print(f"[DEBUG] org={org.name} is_trial={org.is_trial} raw_onboarding={org.onboarding_complete!r} effective={effective_onboarding_complete}")
+                print(f"[DEBUG] org={org.name} is_trial={org.is_trial} days_remaining={days_remaining} alert_active={alert_active} onboarding={effective_onboarding_complete}")
                 trial_info = {
                     "is_trial": org.is_trial,
                     "trial_status": org.trial_status,

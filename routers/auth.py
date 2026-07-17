@@ -81,9 +81,13 @@ def get_me(
 
     days_remaining = None
     alert_active = False
+    now = datetime.now(timezone.utc)
     if org and org.is_trial and org.trial_end_date:
-        now = datetime.now(timezone.utc)
         delta = (org.trial_end_date - now).days
+        days_remaining = max(0, delta)
+        alert_active = days_remaining <= 7
+    elif org and not org.is_trial and org.subscription_end_date:
+        delta = (org.subscription_end_date - now).days
         days_remaining = max(0, delta)
         alert_active = days_remaining <= 7
 
