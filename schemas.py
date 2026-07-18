@@ -1191,6 +1191,12 @@ class TestingRequestResponse(BaseModel):
     repair_status: Optional[str] = None
     repair_progress: Optional[int] = None
 
+    # ─────────────────────────────────────────────
+    # Equipment analytics (risk snapshot)
+    # ─────────────────────────────────────────────
+    risk_level: Optional[str] = None
+    critical_findings: Optional[List[dict]] = None
+
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None
