@@ -754,6 +754,185 @@ def _check_schedule_notifications():
                             f"[Notif] Recurring rule {event_type} failed for org {org_id}: {_e}"
                         )
 
+        # ── Pass 3: Schedule execution overdue ───────────────────────────────
+        #
+        # Checks TestRequestSchedule rows whose next_run_date has passed without
+        # a successful TestRequestScheduleLog entry for that period.
+        # Fires schedule_missed (1–6 days) or schedule_overdue_escalation (≥7 days).
+        try:
+            from models import TestRequestSchedule, TestRequestScheduleLog, ScheduleLogStatus
+            from datetime import datetime as _dt3
+
+            overdue_schedules = (
+                db.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.is_active.is_(True),
+                    TestRequestSchedule.is_deleted.is_(False),
+                    TestRequestSchedule.next_run_date < _dt3.combine(today, _dt3.min.time()),
+                )
+                .all()
+            )
+
+            # Build set of schedule_ids that already have a success log after next_run_date
+            executed_ids: set = set()
+            for sch in overdue_schedules:
+                success = (
+                    db.query(TestRequestScheduleLog.id)
+                    .filter(
+                        TestRequestScheduleLog.schedule_id == sch.id,
+                        TestRequestScheduleLog.status == ScheduleLogStatus.success,
+                        TestRequestScheduleLog.run_date >= sch.next_run_date,
+                    )
+                    .first()
+                )
+                if success:
+                    executed_ids.add(sch.id)
+
+            # Group by (org_id, dept_id, event_type) for digest
+            sch_digest: dict = _ddict(list)
+            for sch in overdue_schedules:
+                if sch.id in executed_ids:
+                    continue
+                days_missed = (today - sch.next_run_date.date()).days
+                event_type = "schedule_overdue_escalation" if days_missed >= 7 else "schedule_missed"
+                dept_id = getattr(sch, "department_id", None)
+                sch_digest[(sch.organization_id, dept_id, event_type)].append((sch, days_missed))
+
+            for (org_id, dept_id, event_type), group in sch_digest.items():
+                try:
+                    cooldown_days = 1
+                    cutoff_dt = _dt.combine(today - timedelta(days=cooldown_days - 1), _dt.min.time())
+                    already = (
+                        db.query(NotificationLog.id)
+                        .filter(
+                            NotificationLog.organization_id == org_id,
+                            NotificationLog.event_type == event_type,
+                            NotificationLog.cts >= cutoff_dt,
+                            NotificationLog.source_id.in_([s.id for s, _ in group]),
+                        )
+                        .first()
+                    )
+                    if already:
+                        continue
+
+                    first_sch, first_days = group[0]
+                    eq_obj = getattr(first_sch, "equipment", None)
+                    eq_label = getattr(eq_obj, "ueic", "") or getattr(eq_obj, "name", "") or ""
+                    dept_obj = getattr(first_sch, "department", None)
+                    dept_name = getattr(dept_obj, "name", "") or ""
+
+                    nsvc.fire(
+                        event_type=event_type,
+                        context={
+                            "schedule.title": first_sch.title or "",
+                            "equipment.ueic": eq_label,
+                            "equipment.department": dept_name,
+                            "next_run_date": str(first_sch.next_run_date.date()),
+                            "days_missed": str(first_days),
+                            "digest_count": str(len(group)),
+                        },
+                        organization_id=org_id,
+                        department_id=dept_id,
+                        source_id=first_sch.id,
+                        source_type="test_request_schedule",
+                        severity="critical" if event_type == "schedule_overdue_escalation" else "alert",
+                    )
+                    fired_total += len(group)
+                except Exception as _e:
+                    logger.warning(f"[Notif] Schedule digest fire failed for {event_type} org={org_id}: {_e}")
+
+        except Exception as _e3:
+            logger.warning(f"[Notif] Pass 3 (schedule overdue) error: {_e3}")
+
+        # ── Pass 4: Workflow stage SLA breach ────────────────────────────────
+        #
+        # Finds TrWfStageInstance rows that are still in_progress but have been
+        # running longer than their stage's default_duration_days.
+        # Fires wf_stage_overdue (alert 1–3 days, critical >3 days).
+        try:
+            from models import TrWfStageInstance, TrWfStage, TrWfInstance
+            from datetime import datetime as _dt4
+
+            stage_instances = (
+                db.query(TrWfStageInstance)
+                .join(TrWfStage, TrWfStageInstance.stage_id == TrWfStage.id)
+                .join(TrWfInstance, TrWfStageInstance.wf_instance_id == TrWfInstance.id)
+                .filter(
+                    TrWfStageInstance.status == "in_progress",
+                    TrWfStageInstance.started_at.isnot(None),
+                    TrWfStage.default_duration_days.isnot(None),
+                )
+                .all()
+            )
+
+            # Group overdue instances by (org_id, dept_id)
+            stage_digest: dict = _ddict(list)
+            for si in stage_instances:
+                stage = si.stage
+                if not stage or not stage.default_duration_days:
+                    continue
+                deadline = si.started_at.date() + timedelta(days=stage.default_duration_days)
+                if today <= deadline:
+                    continue
+                days_overdue = (today - deadline).days
+
+                wf_instance = si.wf_instance
+                tr = getattr(wf_instance, "testing_request", None)
+                if tr is None:
+                    continue
+                org_id = getattr(tr, "organization_id", None)
+                dept_id = getattr(tr, "department_id", None)
+                stage_digest[(org_id, dept_id)].append((si, stage, tr, days_overdue, deadline))
+
+            for (org_id, dept_id), group in stage_digest.items():
+                try:
+                    event_type = "wf_stage_overdue"
+                    cooldown_days = 1
+                    cutoff_dt = _dt.combine(today - timedelta(days=cooldown_days - 1), _dt.min.time())
+                    already = (
+                        db.query(NotificationLog.id)
+                        .filter(
+                            NotificationLog.organization_id == org_id,
+                            NotificationLog.event_type == event_type,
+                            NotificationLog.cts >= cutoff_dt,
+                            NotificationLog.source_id.in_([si.id for si, _, _, _, _ in group]),
+                        )
+                        .first()
+                    )
+                    if already:
+                        continue
+
+                    first_si, first_stage, first_tr, first_days, first_deadline = group[0]
+                    eq_obj = getattr(first_tr, "equipment", None)
+                    eq_label = getattr(eq_obj, "ueic", "") or ""
+                    dept_obj = getattr(first_tr, "department", None)
+                    dept_name = getattr(dept_obj, "name", "") or ""
+                    severity = "critical" if first_days > 3 else "alert"
+
+                    nsvc.fire(
+                        event_type=event_type,
+                        context={
+                            "stage.name": first_stage.name or "",
+                            "request.number": getattr(first_tr, "request_number", "") or "",
+                            "equipment.ueic": eq_label,
+                            "equipment.department": dept_name,
+                            "days_overdue": str(first_days),
+                            "deadline": str(first_deadline),
+                            "digest_count": str(len(group)),
+                        },
+                        organization_id=org_id,
+                        department_id=dept_id,
+                        source_id=first_si.id,
+                        source_type="tr_wf_stage_instance",
+                        severity=severity,
+                    )
+                    fired_total += len(group)
+                except Exception as _e:
+                    logger.warning(f"[Notif] Stage digest fire failed org={org_id}: {_e}")
+
+        except Exception as _e4:
+            logger.warning(f"[Notif] Pass 4 (stage SLA) error: {_e4}")
+
         if fired_total:
             logger.info(f"[Notif] Schedule job total fired={fired_total}")
 

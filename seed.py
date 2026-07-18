@@ -9802,6 +9802,43 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["report_name", "report_period", "download_url", "format"],
             default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
+        # ── Escalation Matrix ─────────────────────────────────────────────────
+        dict(
+            event_type="fr_overdue_escalation",
+            label="Failure Report Overdue Escalation",
+            group_name="Schedule Reminders",
+            description="Escalation fired when a Failure Registry request is more than 3 days overdue.",
+            context_vars=["equipment.ueic", "request.title", "request.due_date",
+                          "days_overdue", "equipment.department"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
+        ),
+        dict(
+            event_type="schedule_missed",
+            label="Schedule Execution Missed",
+            group_name="Schedule Reminders",
+            description="Fired when a test request schedule's next_run_date has passed without a successful execution.",
+            context_vars=["schedule.title", "equipment.ueic", "equipment.department",
+                          "next_run_date", "days_missed"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        dict(
+            event_type="schedule_overdue_escalation",
+            label="Schedule Overdue Escalation (>7 days)",
+            group_name="Schedule Reminders",
+            description="Escalation fired when a schedule execution is more than 7 days overdue.",
+            context_vars=["schedule.title", "equipment.ueic", "equipment.department",
+                          "next_run_date", "days_missed"],
+            default_roles=["EE_TLSS", "SEE_WM"],
+        ),
+        dict(
+            event_type="wf_stage_overdue",
+            label="Workflow Stage SLA Breach",
+            group_name="Stage Workflows",
+            description="Fired when a workflow stage remains in-progress beyond its configured default_duration_days.",
+            context_vars=["stage.name", "request.number", "equipment.ueic",
+                          "equipment.department", "days_overdue", "deadline"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
     ]
 
     # Guard: surface any default_roles value that isn't a known RoleTemplate name
