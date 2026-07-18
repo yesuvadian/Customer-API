@@ -11255,6 +11255,91 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    # ── Escalation Matrix Templates ───────────────────────────────────────────
+    _tmpl("fr_overdue_escalation",
+        _e(
+            "[ESCALATION] {{digest_count}} Failure Report(s) Critically Overdue — {{dept.name}}",
+            "<h3 style='color:darkred'>Escalation: Failure Reports Overdue — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> Failure Registry request(s) are overdue and have been escalated.</p>"
+            "{{digest_table}}"
+            "<p>Failure reports require prompt action. Please log in to SEACMS to review and resolve these immediately.</p>",
+            ["EE_TLSS", "Supervisory Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[SEACMS] ESCALATION: {{digest_count}} failure report(s) overdue in {{dept.name}}."
+            " Oldest: {{equipment.ueic}} ({{days_overdue}}d). Req: {{request.number}}.",
+            ["EE_TLSS", "Supervisory Officer"],
+        ),
+        _i(
+            "Escalation — {{digest_count}} failure report(s) overdue — {{dept.name}}",
+            "{{digest_count}} failure report(s) overdue in {{dept.name}}. Oldest: {{equipment.ueic}} {{days_overdue}} days overdue.",
+            ["EE_TLSS", "Supervisory Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("schedule_missed",
+        _e(
+            "[SCHEDULE MISSED] {{digest_count}} Schedule(s) Not Executed — {{dept.name}}",
+            "<h3 style='color:orange'>Schedule Execution Missed — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> test schedule(s) were not executed on their scheduled date.</p>"
+            "{{digest_table}}"
+            "<p>Please log in to SEACMS to review the affected schedules and trigger execution or reschedule.</p>",
+            ["AEE_MAINTENANCE", "Maintenance Officer", "Reviewing Officer"],
+        ),
+        _s(
+            "[SEACMS] MISSED: {{digest_count}} schedule(s) in {{dept.name}} not executed."
+            " Earliest: {{schedule.title}} due {{next_run_date}} ({{days_missed}}d ago).",
+            ["AEE_MAINTENANCE", "Maintenance Officer"],
+        ),
+        _i(
+            "{{digest_count}} schedule(s) missed — {{dept.name}}",
+            "{{digest_count}} schedule(s) were not executed in {{dept.name}}. Earliest: {{schedule.title}} ({{days_missed}} days ago).",
+            ["AEE_MAINTENANCE", "Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("schedule_overdue_escalation",
+        _e(
+            "[ESCALATION] {{digest_count}} Schedule(s) Critically Overdue — {{dept.name}}",
+            "<h3 style='color:darkred'>Escalation: Schedules Critically Overdue — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> test schedule(s) have not been executed for 7 or more days.</p>"
+            "{{digest_table}}"
+            "<p>This has been escalated to zone/circle management for immediate intervention.</p>",
+            ["EE_TLSS", "Supervisory Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[SEACMS] ESCALATION: {{digest_count}} schedule(s) critically overdue in {{dept.name}}."
+            " Oldest: {{schedule.title}} ({{days_missed}}d). Dept: {{equipment.department}}.",
+            ["EE_TLSS", "Supervisory Officer"],
+        ),
+        _i(
+            "Escalation — {{digest_count}} schedule(s) critically overdue — {{dept.name}}",
+            "{{digest_count}} schedule(s) critically overdue in {{dept.name}}. Oldest: {{schedule.title}} ({{days_missed}} days).",
+            ["EE_TLSS", "Supervisory Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("wf_stage_overdue",
+        _e(
+            "[STAGE SLA BREACH] {{digest_count}} Workflow Stage(s) Overdue — {{dept.name}}",
+            "<h3 style='color:red'>Workflow Stage SLA Breach — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> workflow stage(s) have exceeded their allocated duration.</p>"
+            "{{digest_table}}"
+            "<p>Please log in to SEACMS and advance or resolve the affected stages immediately.</p>",
+            ["AEE_MAINTENANCE", "Reviewing Officer", "Supervisory Officer"],
+        ),
+        _s(
+            "[SEACMS] SLA BREACH: {{digest_count}} stage(s) overdue in {{dept.name}}."
+            " Oldest: {{stage.name}} for {{request.number}} ({{days_overdue}}d). Deadline: {{deadline}}.",
+            ["AEE_MAINTENANCE", "Reviewing Officer"],
+        ),
+        _i(
+            "{{digest_count}} stage SLA breach(es) — {{dept.name}}",
+            "{{digest_count}} workflow stage(s) overdue in {{dept.name}}. Oldest: {{stage.name}} for {{request.number}} ({{days_overdue}} days past deadline).",
+            ["AEE_MAINTENANCE", "Reviewing Officer", "Supervisory Officer"],
+        ),
+    )
+
     # ── Upsert into DB ────────────────────────────────────────────────────────
     inserted = 0
     for tpl in _TEMPLATES:
@@ -11377,6 +11462,18 @@ def _seed_notification_schedule_rules(session) -> int:
             severity="critical",
             frequency="weekly",
             applicable_categories=[],
+            digest_columns=_DIGEST_COLS_OVERDUE,
+        ),
+
+        # ── Failure Registry escalation (tighter SLA — 3 days, weekly repeat) ────────
+        dict(
+            event_type="fr_overdue_escalation",
+            label="Failure Report Overdue Escalation (>3 days) — weekly repeat",
+            trigger_type="escalation",
+            offset_days=3,
+            severity="critical",
+            frequency="weekly",
+            applicable_categories=["failure_registry"],
             digest_columns=_DIGEST_COLS_OVERDUE,
         ),
 
@@ -11826,6 +11923,27 @@ def _seed_notification_routing_rules(session) -> int:
          [], [],
          ["inapp"],
          "TR Workflow Status Changed — In-app"),
+
+        # ── Escalation Matrix ─────────────────────────────────────────────────
+        ("fr_overdue_escalation",
+         [], [],
+         ["inapp"],
+         "Failure Report Overdue Escalation — In-app"),
+
+        ("schedule_missed",
+         [], [],
+         ["inapp"],
+         "Schedule Execution Missed — In-app"),
+
+        ("schedule_overdue_escalation",
+         [], [],
+         ["inapp"],
+         "Schedule Overdue Escalation — In-app"),
+
+        ("wf_stage_overdue",
+         [], [],
+         ["inapp"],
+         "Workflow Stage SLA Breach — In-app"),
     ]
 
     inserted = 0
