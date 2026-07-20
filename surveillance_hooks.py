@@ -58,12 +58,12 @@ def _on_repair_workflow_completed(
     """
     try:
         # Only create surveillance for repair-type workflows
-        # Check workflow_type field (case-insensitive: 'BREAKDOWN', 'OVERHAUL', 'REPAIR')
-        workflow_type_upper = (workflow.workflow_type or "").upper()
-        if workflow_type_upper not in ['REPAIR', 'BREAKDOWN', 'OVERHAUL']:
+        # workflow_code is the reliable identifier — must match repair_workflow_definitions
+        workflow_code_upper = (workflow.workflow_code or "").upper()
+        if workflow_code_upper not in ['BREAKDOWN', 'OVERHAUL']:
             logger.info(
-                "[SurveillanceHook] Skipping surveillance for workflow_type=%s (workflow_id=%s)",
-                workflow.workflow_type, workflow.id
+                "[SurveillanceHook] Skipping surveillance for workflow_code=%s (workflow_id=%s)",
+                workflow.workflow_code, workflow.id
             )
             return
 
@@ -422,7 +422,7 @@ def register_surveillance_hooks():
     # Listen for repair workflow completion (final stage, regardless of number)
     # workflow_code will be checked dynamically for 'repair' or 'breakdown'
     # Register for common repair workflow codes
-    for workflow_code in ['REPAIR', 'BREAKDOWN', 'OVERHAUL']:
+    for workflow_code in ['BREAKDOWN', 'OVERHAUL']:
         register(workflow_code, 'completed', _on_repair_workflow_completed)
 
     logger.info("[SurveillanceHook] Hooks registered for workflow completion events")
