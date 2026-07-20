@@ -520,21 +520,30 @@ def attribute_delay(
 # =============================================================================
 
 @router.get("/{workflow_id}/report/pdf")
-def download_qap_pdf(
+def download_workflow_pdf(
     workflow_id: UUID,
     db:   Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """
-    Generate and download a PDF QAP report for a completed PRE_COMMISSION workflow.
-    Replicates the KPTCL Manufacturing Quality Plan table format.
+    Generate and download a PDF report for any workflow type.
+    PRE_COMMISSION → KPTCL QAP format; all others → stage summary report.
     """
     try:
-        from services.precommission_report_service import PreCommissionReportService
-        pdf_bytes = PreCommissionReportService(db).generate_pdf(workflow_id)
-        # Build a meaningful filename
         wf = db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
-        filename = f"QAP_{(wf.workflow_number or str(workflow_id)).replace('/', '_')}.pdf"
+        if not wf:
+            raise ValueError("Workflow not found.")
+
+        if wf.workflow_code == "PRE_COMMISSION":
+            from services.precommission_report_service import PreCommissionReportService
+            pdf_bytes = PreCommissionReportService(db).generate_pdf(workflow_id)
+            prefix = "QAP"
+        else:
+            from services.repair_report_service import RepairWorkflowReportService
+            pdf_bytes = RepairWorkflowReportService(db).generate_pdf(workflow_id)
+            prefix = (wf.workflow_code or "WF").upper()
+
+        filename = f"{prefix}_{(wf.workflow_number or str(workflow_id)).replace('/', '_')}.pdf"
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
