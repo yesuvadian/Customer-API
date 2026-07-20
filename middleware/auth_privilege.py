@@ -1,7 +1,7 @@
 from fastapi import Request, HTTPException
 from sqlalchemy.orm import Session
 from database import SessionLocal
-from models import Module, UserRole, RoleModulePrivilege, User
+from models import Module, UserRole, RoleModulePrivilege, User, OrgUserRole, OrgRolePermission
 import auth_utils
 from fastapi import Request
 
@@ -45,6 +45,14 @@ METHOD_ACTION_MAP = {
     "POST": "can_add",
     "PUT": "can_edit",
     "DELETE": "can_delete",
+}
+
+# --------------------------------------------------
+# API prefix → module path mapping
+# Maps backend route prefixes to their registered module path in the modules table
+# --------------------------------------------------
+API_TO_MODULE_PATH = {
+    "billing": "subscription-billing",
 }
 
 
@@ -224,27 +232,42 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # --------------------------------------------------
         # MODULE CHECK
         # --------------------------------------------------
-        module = db.query(Module).filter_by(path=module_name).first()
+        resolved_module_name = API_TO_MODULE_PATH.get(module_name, module_name)
+        module = db.query(Module).filter_by(path=resolved_module_name).first()
         if not module:
-            raise HTTPException(
-                status_code=404,
-                detail=f'Module "{module_name}" not registered',
-            )
+            return await call_next(request)
 
         # --------------------------------------------------
-        # USER ROLES (try old system, skip if not available)
+        # PRIVILEGE CHECK — org role system (OrgUserRole → OrgRolePermission)
+        # --------------------------------------------------
+        org_user_roles = db.query(OrgUserRole).filter_by(user_id=user.id, is_active=True).all()
+        if org_user_roles:
+            org_role_ids = [r.org_role_id for r in org_user_roles]
+            allowed = (
+                db.query(OrgRolePermission)
+                .filter(
+                    OrgRolePermission.org_role_id.in_(org_role_ids),
+                    OrgRolePermission.module_id == module.id,
+                    getattr(OrgRolePermission, action) == True,
+                )
+                .first()
+            )
+            if not allowed:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Access denied for '{action}' on '{module_name}'",
+                )
+            return await call_next(request)
+
+        # --------------------------------------------------
+        # Fallback — old UserRole system
         # --------------------------------------------------
         try:
             user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
             if not user_roles:
-                # Skip privilege check for organization users
                 return await call_next(request)
 
             role_ids = [r.role_id for r in user_roles]
-
-            # --------------------------------------------------
-            # PRIVILEGE CHECK
-            # --------------------------------------------------
             allowed = (
                 db.query(RoleModulePrivilege)
                 .filter(
@@ -254,15 +277,13 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                 )
                 .first()
             )
-
             if not allowed:
                 raise HTTPException(
                     status_code=403,
                     detail=f"Access denied for '{action}' on '{module_name}'",
                 )
         except Exception as e:
-            # Old role system not available, skip privilege check for org users
-            print(f"[INFO] Old role system not available in middleware: {e}")
+            print(f"[INFO] Role system error in middleware: {e}")
             db.rollback()
             return await call_next(request)
 

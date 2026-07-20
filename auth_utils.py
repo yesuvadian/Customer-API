@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, Request, status
 from database import get_db
-from models import Module, PasswordHistory, PasswordResetToken, Plan, Role, RoleModulePrivilege, User, UserRole, UserSecurity, UserSession
+from models import BillingOrder, Module, OrgDepartment, PasswordHistory, PasswordResetToken, Plan, Role, RoleModulePrivilege, User, UserRole, UserSecurity, UserSession
 from security_utils import get_password_hash, verify_password
 from services import user_service
 from utils.common_service import UTCDateTimeMixin
@@ -223,6 +223,298 @@ def build_user_privileges(db: Session, user_id) -> dict:
 # Login User (primary login function)
 # ==============================
 
+def has_org_admin_role(user, db) -> bool:
+    """Return True if the user holds any active org-admin role in their organisation.
+    Role-based check — never tests usertype, per plan Decision 7."""
+    from models import OrgUserRole, OrgRole
+    return db.query(OrgUserRole).join(OrgRole).filter(
+        OrgUserRole.user_id == user.id,
+        OrgUserRole.is_active == True,
+        OrgRole.is_org_admin == True,
+        OrgRole.is_active == True,
+    ).first() is not None
+
+
+def check_active_billing(user, org, db):
+    """Mid-session billing guard for dept-level orgs.
+    Call on every authenticated request that touches org data.
+    No-ops for org-level orgs, super_admin, and org admins (Decision 7)."""
+    from datetime import datetime, timezone
+    from models import OrgDepartment
+
+    if not org or not org.billing_scope or org.billing_scope.code != "department_level":
+        return
+
+    if user.usertype == "super_admin" or user.department_id is None or has_org_admin_role(user, db):
+        return
+
+    now = datetime.now(timezone.utc)
+
+    # Active trial covers all access — no dept subscription required yet
+    if org.is_trial and org.trial_end_date and org.trial_end_date > now:
+        return
+
+    # Resolve billing unit: use denormalized field when recompute is not pending
+    if getattr(org, "billing_unit_recompute_pending", False):
+        from routers.billing import walk_up_tree
+        billing_unit = walk_up_tree(user.department_id, db, is_billing_unit=True)
+    else:
+        billing_unit = (
+            db.query(OrgDepartment).filter_by(id=user.billing_unit_id).first()
+            if user.billing_unit_id else None
+        )
+
+    if billing_unit:
+        if not billing_unit.subscription_end_date or billing_unit.subscription_end_date < now:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=403,
+                detail="SESSION_BILLING_EXPIRED",
+                headers={
+                    "X-Dept-Name": billing_unit.name or "",
+                    "X-Dept-Id":   str(billing_unit.id),
+                },
+            )
+        return
+
+    # User is above billing level — check if any billing unit is still active
+    any_active = db.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == org.id,
+        OrgDepartment.is_billing_unit == True,
+        OrgDepartment.subscription_end_date > now,
+    ).first()
+    if not any_active:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=403,
+            detail="SESSION_AWAITING_DEPT_PAYMENT",
+            headers={"X-Org-Name": org.name or ""},
+        )
+
+
+def _billing_token_ttl(db):
+    from models import SystemConfig
+    row = db.query(SystemConfig).filter_by(key="billing_payment_token_ttl_hours").first()
+    hours = int(row.value) if row else 1
+    return timedelta(hours=hours)
+
+
+def _get_billing_alert_days(db) -> int:
+    from models import SystemConfig
+    import json as _json
+    row = db.query(SystemConfig).filter_by(key="billing_subscription_reminder_days").first()
+    if row:
+        days = _json.loads(row.value)
+        return min(days) if days else 7
+    return 7
+
+
+def _build_dept_billing_fields(org, billing_unit, now, db=None):
+    """Billing fields appended to every login/me response."""
+    alert_days = _get_billing_alert_days(db) if db else 7
+    dept_days_remaining = None
+    dept_alert_active = False
+    if billing_unit and billing_unit.subscription_end_date:
+        delta = billing_unit.subscription_end_date - now
+        dept_days_remaining = max(0, delta.days)
+        dept_alert_active = delta.days <= alert_days
+    return {
+        "dept_billing_unit_id":       str(billing_unit.id)                if billing_unit else None,
+        "dept_billing_unit_name":     billing_unit.name                   if billing_unit else None,
+        "dept_subscription_end_date": billing_unit.subscription_end_date.isoformat()
+                                      if billing_unit and billing_unit.subscription_end_date else None,
+        "dept_days_remaining":        dept_days_remaining,
+        "dept_alert_active":          dept_alert_active,
+    }
+
+
+def _build_org_admin_billing_summary(org, db, now):
+    """dept_billing_summary for org admin in dept-level mode."""
+    from models import OrgDepartment
+    SUMMARY_PREVIEW_LIMIT = 10
+    billing_units = db.query(OrgDepartment).filter_by(
+        organization_id=org.id, is_billing_unit=True
+    ).all()
+
+    def dept_status(d):
+        if not d.subscription_end_date:
+            return "pending_payment"
+        if d.subscription_end_date < now:
+            return "expired"
+        return "active"
+
+    summary = [{
+        "dept_id":               str(d.id),
+        "dept_name":             d.name,
+        "subscription_end_date": d.subscription_end_date.isoformat() if d.subscription_end_date else None,
+        "status":                dept_status(d),
+        "days_remaining":        max(0, (d.subscription_end_date - now).days)
+                                 if d.subscription_end_date and d.subscription_end_date >= now else None,
+        "alert_active":          bool(d.subscription_end_date and
+                                      0 < (d.subscription_end_date - now).days <= _get_billing_alert_days(db)),
+    } for d in billing_units]
+
+    all_depts_inactive = all(
+        s["status"] in ("expired", "pending_payment") for s in summary
+    ) if summary else False
+
+    return {
+        "all_depts_inactive":              all_depts_inactive,
+        "dept_billing_summary":            summary[:SUMMARY_PREVIEW_LIMIT],
+        "dept_billing_summary_total":      len(summary),
+        "dept_billing_summary_has_more":   len(summary) > SUMMARY_PREVIEW_LIMIT,
+    }
+
+
+def _check_dept_level_billing(user, org, db, now):
+    """
+    Raise HTTPException if the user is blocked by dept-level billing rules.
+    Called during login and (optionally) /auth/me.
+    Returns quietly if the user may proceed.
+    """
+    from routers.billing import get_dept_depth, walk_up_tree
+
+    # Trial still active → skip all dept billing checks
+    if org.is_trial and org.trial_end_date and org.trial_end_date >= now:
+        return
+
+    # Trial expired in dept-level mode
+    if org.is_trial and org.trial_end_date and org.trial_end_date < now:
+        # Root users and org admins get the wizard token
+        if user.usertype == "super_admin" or user.department_id is None or has_org_admin_role(user, db):
+            payment_token = create_access_token(
+                {"org_id": str(org.id), "scope": "billing"},
+                expires_delta=_billing_token_ttl(db),
+            )
+            from models import OrgPlanPricing, BillingScope
+            dept_scope = db.query(BillingScope).filter_by(code="department_level").first()
+            dept_pricing_ready = False
+            if dept_scope:
+                dept_pricing_ready = db.query(OrgPlanPricing).filter_by(
+                    org_id=org.id, billing_scope_id=dept_scope.id
+                ).first() is not None
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="TRIAL_EXPIRED_ADMIN",
+                headers={
+                    "X-Payment-Token":      payment_token,
+                    "X-Org-Name":           org.name,
+                    "X-Billing-Mode":       org.billing_scope.code if org.billing_scope else "org_level",
+                    "X-Dept-Pricing-Ready": str(dept_pricing_ready).lower(),
+                },
+            )
+        # Regular user in dept-level mode — cannot act, message only
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="TRIAL_EXPIRED",
+            headers={"X-Org-Name": org.name, "X-Trial-Expired-Dept-Mode": "true"},
+        )
+
+    # Dept-level converted org: if trial deadline passed and no dept has paid, block root admin too
+    if not org.is_trial and org.trial_end_date and org.trial_end_date < now:
+        from models import OrgDepartment
+        any_active = db.query(OrgDepartment).filter(
+            OrgDepartment.organization_id == org.id,
+            OrgDepartment.is_billing_unit == True,
+            OrgDepartment.subscription_end_date > now,
+        ).first()
+        if not any_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="AWAITING_DEPT_PAYMENT",
+                headers={"X-Org-Name": org.name},
+            )
+
+    # Root users and org admins always pass dept billing checks
+    if user.usertype == "super_admin" or user.department_id is None or has_org_admin_role(user, db):
+        return
+
+    # Users above billing level
+    user_dept_depth = get_dept_depth(user.department_id, db)
+    billing_level = org.billing_hierarchy_level
+
+    if user_dept_depth is None or (billing_level and user_dept_depth < billing_level):
+        from models import OrgDepartment
+        any_active = db.query(OrgDepartment).filter(
+            OrgDepartment.organization_id == org.id,
+            OrgDepartment.is_billing_unit == True,
+            OrgDepartment.subscription_end_date > now,
+        ).first()
+        if not any_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="AWAITING_DEPT_PAYMENT",
+                headers={"X-Org-Name": org.name},
+            )
+        return  # at least one dept active → allow
+
+    # Regular user — find billing unit ancestor
+    billing_unit = walk_up_tree(user.department_id, db, is_billing_unit=True)
+
+    if billing_unit is None:
+        # No billing unit in ancestry → fall back to org-level subscription check
+        if org.subscription_end_date and org.subscription_end_date < now:
+            # Only root users (no department) can pay an org-level subscription
+            is_root_user = user.department_id is None
+            headers = {"X-Org-Name": org.name or ""}
+            if is_root_user:
+                payment_token = create_access_token(
+                    {"org_id": str(org.id), "scope": "billing"},
+                    expires_delta=_billing_token_ttl(db),
+                )
+                headers["X-Payment-Token"] = payment_token
+                if org.plan_id:
+                    headers["X-Plan-Id"] = str(org.plan_id)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="SUBSCRIPTION_EXPIRED",
+                headers=headers,
+            )
+        return  # allow
+
+    # NULL subscription_end_date = pending (never paid); or genuinely expired
+    if not billing_unit.subscription_end_date or billing_unit.subscription_end_date < now:
+        payment_token = create_access_token(
+            {"org_id": str(org.id), "dept_id": str(billing_unit.id), "scope": "billing"},
+            expires_delta=_billing_token_ttl(db),
+        )
+        is_expired = bool(billing_unit.subscription_end_date)
+        detail = "SUBSCRIPTION_EXPIRED_DEPT" if is_expired else "SUBSCRIPTION_PENDING_DEPT"
+        headers = {
+            "X-Payment-Token": payment_token,
+            "X-Org-Name":      org.name,
+            "X-Dept-Name":     billing_unit.name,
+            "X-Dept-Id":       str(billing_unit.id),
+        }
+        # Use plan from last paid order for this dept, then any dept in org, then org plan
+        dept_order = (
+            db.query(BillingOrder)
+            .filter(BillingOrder.department_id == billing_unit.id, BillingOrder.status == "paid")
+            .order_by(BillingOrder.paid_at.desc())
+            .first()
+        )
+        org_order = None
+        if not dept_order:
+            org_order = (
+                db.query(BillingOrder)
+                .filter(BillingOrder.org_id == org.id, BillingOrder.status == "paid")
+                .order_by(BillingOrder.paid_at.desc())
+                .first()
+            )
+        resolved_order = dept_order or org_order
+        plan_id = resolved_order.plan_id if resolved_order else org.plan_id
+        print(f"[BILLING-DEPT] detail={detail} dept={billing_unit.name} dept_order={dept_order} org_order={org_order} plan_id={plan_id}")
+        if plan_id:
+            headers["X-Plan-Id"] = str(plan_id)
+        print(f"[BILLING-DEPT] headers={headers}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=detail,
+            headers=headers,
+        )
+    # Subscription active — allow login
+
+
 def login_user(db: Session, email: str, password: str):
     try:
         print("[DEBUG] login_user called")
@@ -253,52 +545,87 @@ def login_user(db: Session, email: str, password: str):
                     detail="Your organisation has been disabled. Please contact support.",
                 )
             print(f"[TRIAL-LOGIN] org={org and org.name} is_trial={org and org.is_trial} trial_end={org and org.trial_end_date} now={now}")
+
+            # Dept-level mode: hand off ALL checks (trial + subscription) to dept path
+            is_dept_level = org and org.billing_scope and org.billing_scope.code == "department_level"
+
             if org and org.is_trial and org.trial_end_date:
                 print(f"[TRIAL-LOGIN] expired={org.trial_end_date < now}")
                 if org.trial_end_date < now:
-                    first_expiry = org.trial_status != "expired"
-                    if first_expiry:
-                        org.trial_status = "expired"
+                    if is_dept_level:
+                        # Dept-level trial expiry handled by _check_dept_level_billing below
+                        pass
+                    else:
+                        first_expiry = org.trial_status != "expired"
+                        if first_expiry:
+                            org.trial_status = "expired"
+                            db.commit()
+                        payment_token = create_access_token(
+                            {"org_id": str(org.id), "scope": "billing"},
+                            expires_delta=timedelta(hours=1),
+                        )
+                        if first_expiry:
+                            try:
+                                from services.billing_service import send_payment_link
+                                send_payment_link(db, org)
+                            except Exception as e:
+                                print(f"[BILLING] Failed to send payment link: {e}")
+                        is_root_user = user.department_id is None
+                        if is_root_user:
+                            raise HTTPException(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                detail="TRIAL_EXPIRED_ADMIN",
+                                headers={
+                                    "X-Payment-Token": payment_token,
+                                    "X-Org-Name": org.name,
+                                    "X-Billing-Mode": org.billing_scope.code if org.billing_scope else "org_level",
+                                },
+                            )
+                        else:
+                            raise HTTPException(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                detail="TRIAL_EXPIRED_NOTIFY",
+                                headers={"X-Org-Name": org.name},
+                            )
+
+            if org and not org.is_trial and org.subscription_end_date and not is_dept_level:
+                if org.subscription_end_date < now:
+                    print(f"[SUBSCRIPTION-LOGIN] Subscription expired for {org.name}")
+                    first_sub_expiry = org.subscription_status != "expired"
+                    if first_sub_expiry:
+                        org.subscription_status = "expired"
                         db.commit()
-                    payment_token = create_access_token(
-                        {"org_id": str(org.id), "scope": "billing"},
-                        expires_delta=timedelta(hours=1),
-                    )
-                    if first_expiry:
                         try:
                             from services.billing_service import send_payment_link
                             send_payment_link(db, org)
                         except Exception as e:
-                            print(f"[BILLING] Failed to send payment link: {e}")
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="TRIAL_EXPIRED",
-                        headers={
-                            "X-Payment-Token": payment_token,
-                            "X-Org-Name": org.name,
-                        },
-                    )
+                            print(f"[BILLING] Failed to send renewal link: {e}")
+                    is_root_user = user.department_id is None
+                    if is_root_user:
+                        # Root user can renew — give payment token and wizard
+                        payment_token = create_access_token(
+                            {"org_id": str(org.id), "scope": "billing"},
+                            expires_delta=timedelta(hours=1),
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="SUBSCRIPTION_EXPIRED",
+                            headers={
+                                "X-Payment-Token": payment_token,
+                                "X-Org-Name": org.name,
+                                "X-Billing-Mode": org.billing_scope.code if org.billing_scope else "org_level",
+                                "X-Plan-Id": str(org.plan_id) if org.plan_id else "",
+                            },
+                        )
+                    else:
+                        # Non-root user: cannot renew, show contact-admin message
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="SUBSCRIPTION_EXPIRED_NOTIFY",
+                            headers={"X-Org-Name": org.name},
+                        )
 
-            if org and not org.is_trial and org.subscription_end_date:
-                if org.subscription_end_date < now:
-                    print(f"[SUBSCRIPTION-LOGIN] Subscription expired for {org.name}")
-                    payment_token = create_access_token(
-                        {"org_id": str(org.id), "scope": "billing"},
-                        expires_delta=timedelta(hours=1),
-                    )
-                    try:
-                        from services.billing_service import send_payment_link
-                        send_payment_link(db, org)
-                    except Exception as e:
-                        print(f"[BILLING] Failed to send renewal link: {e}")
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="SUBSCRIPTION_EXPIRED",
-                        headers={
-                            "X-Payment-Token": payment_token,
-                            "X-Org-Name": org.name,
-                        },
-                    )
+            # Dept-level billing check runs AFTER password verify (Step 5)
 
         # Step 3: Security record
         security = db.query(UserSecurity).filter_by(user_id=user.id).first()
@@ -328,6 +655,9 @@ def login_user(db: Session, email: str, password: str):
             if locked_until and locked_until <= now:
                 security.login_locked_until = None
             db.commit()
+            # Dept-level billing check — only after password is confirmed correct
+            if is_dept_level:
+                _check_dept_level_billing(user, org, db, now)
         else:
             # ❌ Wrong password — increment attempts
             db.rollback()  # clear any dirty state before writing
@@ -405,7 +735,7 @@ def login_user(db: Session, email: str, password: str):
         from models import Organization, SystemConfig
 
         organization_name = None
-        trial_info = {}
+        trial_info = {"billing_mode": "org_level"}
 
         if user.organization_id:
             org = db.query(Organization).filter(
@@ -436,6 +766,36 @@ def login_user(db: Session, email: str, password: str):
                     "alert_active": alert_active,
                     "onboarding_complete": effective_onboarding_complete,
                 }
+
+                # Dept-level billing fields
+                billing_scope_code = org.billing_scope.code if org.billing_scope else "org_level"
+                trial_info["billing_mode"] = billing_scope_code
+                # Root users (no department_id) are org admins — see all dept billing
+                is_root_user = user.department_id is None
+
+                if billing_scope_code == "department_level":
+                    if is_root_user:
+                        trial_info.update(_build_org_admin_billing_summary(org, db, now))
+                    else:
+                        billing_unit = db.query(OrgDepartment).filter_by(id=user.billing_unit_id).first() if user.billing_unit_id else None
+                        if billing_unit is None:
+                            trial_info["billing_mode"] = "org_level"
+                        trial_info.update(_build_dept_billing_fields(org, billing_unit, now, db))
+                else:
+                    trial_info.update(_build_dept_billing_fields(org, None, now, db))
+
+                # billing_action: what the banner button should do
+                # root user → "upgrade" (manage billing)
+                # dept user + dept-level → "pay_now"
+                # dept user + org-level → null (contact admin)
+                if is_root_user:
+                    billing_action = "upgrade"
+                elif billing_scope_code == "department_level":
+                    billing_action = "pay_now"
+                else:
+                    billing_action = None
+                trial_info["billing_action"] = billing_action
+                print(f"[BILLING] user={user.email} scope={billing_scope_code} is_root={is_root_user} billing_action={billing_action}")
 
         # Create tokens
         access_token = create_access_token({"sub": str(user.id)})
@@ -481,6 +841,7 @@ def login_user(db: Session, email: str, password: str):
 
         print(f"[DEBUG] dashboard_type in result: {result['user'].get('dashboard_type')}")
         print(f"[DEBUG] onboarding_complete in result: {result['user'].get('onboarding_complete')}")
+        print(f"[BILLING-RESULT] billing_mode={result['user'].get('billing_mode')} dept_unit={result['user'].get('dept_billing_unit_name')} dept_end={result['user'].get('dept_subscription_end_date')}")
         return result
 
     except HTTPException:

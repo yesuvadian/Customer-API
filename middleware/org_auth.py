@@ -9,8 +9,8 @@ from uuid import UUID
 from typing import Optional
 
 from database import get_db
-from auth_utils import get_current_user
-from models import User, OrgUserRole, OrgRole
+from auth_utils import get_current_user, check_active_billing
+from models import User, OrgUserRole, OrgRole, Organization
 
 
 async def require_org_member(
@@ -20,13 +20,16 @@ async def require_org_member(
 ) -> User:
     """
     Verify that the current user belongs to the specified organization.
-    Raises 403 if user doesn't belong to the organization.
+    Also runs the mid-session dept-level billing guard.
+    Raises 403 if user doesn't belong to the organization or billing has lapsed.
     """
     if current_user.organization_id != org_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this organization"
         )
+    org = db.query(Organization).filter_by(id=org_id).first()
+    check_active_billing(current_user, org, db)
     return current_user
 
 

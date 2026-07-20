@@ -1533,13 +1533,26 @@ class Organization(Base):
     trial_start_date = Column(DateTime(timezone=True), nullable=True)
     trial_end_date = Column(DateTime(timezone=True), nullable=True)
     trial_status = Column(String(20), default="active")  # active | expired | converted
+    subscription_status = Column(String(20), nullable=True)  # None | expired
 
     # Onboarding
     onboarding_complete = Column(Boolean, default=False)
     onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Dept-level billing
+    billing_scope_id               = Column(UUID(as_uuid=True), ForeignKey("public.billing_scopes.id"), nullable=True)  # backfilled to org_level on migration; NULL only before first seed run
+    billing_hierarchy_level        = Column(Integer, nullable=True)
+    dept_level_labels              = Column(JSONB, nullable=True)
+    billing_reminder_days          = Column(JSONB, nullable=True)
+    billing_unit_recompute_pending = Column(Boolean, default=False, nullable=False)
+    billing_unit_recompute_status  = Column(String(50), nullable=True)
+    billing_unit_recompute_started = Column(DateTime(timezone=True), nullable=True)
+    billing_unit_recompute_error   = Column(Text, nullable=True)
+    billing_unit_recompute_retries = Column(Integer, default=0, nullable=False)
+
     # Relationships
     plan = relationship("Plan", back_populates="organizations", foreign_keys=[plan_id])
+    billing_scope = relationship("BillingScope", foreign_keys=[billing_scope_id], lazy="joined")
     users = relationship("User", back_populates="organization", foreign_keys=lambda: [User.organization_id])
     department_types = relationship("OrgDepartmentType", back_populates="organization", cascade="all, delete-orphan")
     departments = relationship("OrgDepartment", back_populates="organization", cascade="all, delete-orphan")
@@ -1600,6 +1613,10 @@ class OrgDepartment(Base):
     manager_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"))
 
     is_active = Column(Boolean, default=True)
+
+    # Dept-level billing
+    is_billing_unit      = Column(Boolean, default=False, nullable=False)
+    subscription_end_date = Column(DateTime(timezone=True), nullable=True)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -1999,6 +2016,9 @@ class User(Base):
     ),
     nullable=True,
 )
+    # Billing unit cache — UUID of the nearest is_billing_unit ancestor dept (NULL = no billing unit)
+    billing_unit_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+
     # ✅ Relationship: Plan → Users
     plan = relationship(
         "Plan",
@@ -4431,6 +4451,8 @@ class NotificationLog(Base):
     # EmailDispatcher.send() fetches these and attaches them as MIME parts.
     attachment_urls = Column(JSONB, nullable=False, server_default="[]")
 
+    idempotency_key = Column(String(255), nullable=True, index=True)
+
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -5564,26 +5586,100 @@ class BillingOrder(Base):
     __table_args__ = {"schema": "public"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=False)
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
+    org_id        = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id"), nullable=False)
+    plan_id       = Column(UUID(as_uuid=True), ForeignKey("public.plans.id"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
 
-    razorpay_order_id = Column(String(100), unique=True, nullable=True)    # set for in-app checkout
-    razorpay_payment_link_id = Column(String(100), nullable=True)          # set for email link flow
-    razorpay_payment_id = Column(String(100), nullable=True)
-    razorpay_signature = Column(String(255), nullable=True)
+    razorpay_order_id        = Column(String(100), unique=True, nullable=True)
+    razorpay_payment_link_id = Column(String(100), nullable=True)
+    razorpay_payment_id      = Column(String(100), nullable=True)
+    razorpay_signature       = Column(String(255), nullable=True)
 
-    amount = Column(Integer, nullable=False)       # in paise (INR)
-    currency = Column(String(10), default="INR")
+    amount        = Column(Integer, nullable=False)   # in paise (INR) — kept for legacy; prefer amount_paise
+    amount_paise  = Column(Integer, nullable=True)    # canonical paise field used by dept billing
+    currency      = Column(String(10), default="INR")
     duration_days = Column(Integer, default=365)
+    plan_name     = Column(String(100), nullable=True)
 
-    # pending | paid | failed
-    status = Column(String(20), default="pending")
+    # pending | paid | failed | cancelled
+    status              = Column(String(20), default="pending")
+    cancellation_reason = Column(String(255), nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    paid_at = Column(DateTime(timezone=True), nullable=True)
+    # Anomaly handling
+    anomaly_flag        = Column(Boolean, default=False, nullable=False)
+    anomaly_reason      = Column(String(100), nullable=True)
+    anomaly_resolution  = Column(String(255), nullable=True)
+    anomaly_resolved_at = Column(DateTime(timezone=True), nullable=True)
+    anomaly_resolved_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
 
-    org = relationship("Organization", foreign_keys=[org_id])
-    plan = relationship("Plan", foreign_keys=[plan_id])
+    paid_by_user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    verified_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    paid_at         = Column(DateTime(timezone=True), nullable=True)
+
+    org        = relationship("Organization", foreign_keys=[org_id])
+    plan       = relationship("Plan", foreign_keys=[plan_id])
+    department = relationship("OrgDepartment", foreign_keys=[department_id])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEPT-LEVEL BILLING — NEW TABLES
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BillingScope(Base):
+    __tablename__ = "billing_scopes"
+    __table_args__ = {"schema": "public"}
+
+    id   = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(String(50), unique=True, nullable=False)   # "org_level" | "department_level"
+    name = Column(String(100), nullable=False)
+
+
+class OrgPlanPricing(Base):
+    """Per-org pricing override set by super admin. Falls back to Plan.price_paise if absent."""
+    __tablename__ = "org_plan_pricing"
+    __table_args__ = (
+        UniqueConstraint("org_id", "plan_id", "billing_scope_id", name="uq_org_plan_pricing"),
+        {"schema": "public"},
+    )
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id           = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False)
+    plan_id          = Column(UUID(as_uuid=True), ForeignKey("public.plans.id", ondelete="CASCADE"), nullable=False)
+    billing_scope_id = Column(UUID(as_uuid=True), ForeignKey("public.billing_scopes.id", ondelete="RESTRICT"), nullable=False)
+    price_paise      = Column(Integer, nullable=False)
+    duration_days    = Column(Integer, nullable=True)   # NULL → use Plan.duration_days
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    org           = relationship("Organization", foreign_keys=[org_id])
+    plan          = relationship("Plan", foreign_keys=[plan_id])
+    billing_scope = relationship("BillingScope", foreign_keys=[billing_scope_id])
+
+
+class BillingAuditLog(Base):
+    """Immutable audit trail for all billing configuration and payment events."""
+    __tablename__ = "billing_audit_logs"
+    __table_args__ = {"schema": "public"}
+
+    id                     = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id                 = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_user_id          = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=False)
+    actor_name             = Column(String(255), nullable=False)
+    actor_usertype         = Column(String(50), nullable=False)
+    action                 = Column(String(100), nullable=False, index=True)
+    entity_type            = Column(String(100), nullable=True)
+    entity_id              = Column(UUID(as_uuid=True), nullable=True)
+    before_json            = Column(JSONB, nullable=True)
+    after_json             = Column(JSONB, nullable=True)
+    billing_order_id       = Column(UUID(as_uuid=True), ForeignKey("public.billing_orders.id", ondelete="SET NULL"), nullable=True)
+    billing_units_affected = Column(Integer, nullable=True)
+    notes                  = Column(String(1000), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    org           = relationship("Organization", foreign_keys=[org_id])
+    actor         = relationship("User", foreign_keys=[actor_user_id])
+    billing_order = relationship("BillingOrder", foreign_keys=[billing_order_id])
 
 
 # ═══════════════════════════════════════════════════════════════════════════

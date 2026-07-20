@@ -1212,29 +1212,20 @@ def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
 def seed_plans(session):
     plans_data = [
         {
-            "planname": "Basic",
-            "plan_description": "Up to 5 users, core features",
-            "plan_limit": 5,
+            "planname": "Monthly",
+            "plan_description": "Monthly subscription",
+            "plan_limit": 0,
             "isactive": True,
             "price_paise": 99900,
             "billing_cycle": "monthly",
             "duration_days": 30,
         },
         {
-            "planname": "Standard",
-            "plan_description": "Up to 20 users, all features",
-            "plan_limit": 20,
+            "planname": "Yearly",
+            "plan_description": "Yearly subscription",
+            "plan_limit": 0,
             "isactive": True,
-            "price_paise": 249900,
-            "billing_cycle": "monthly",
-            "duration_days": 30,
-        },
-        {
-            "planname": "Premium",
-            "plan_description": "Unlimited users, priority support",
-            "plan_limit": 9999,
-            "isactive": True,
-            "price_paise": 2399900,
+            "price_paise": 999900,
             "billing_cycle": "yearly",
             "duration_days": 365,
         },
@@ -4141,7 +4132,7 @@ def seed_sample_organization(session):
 
     if not skip_org_creation:
         # Get a basic plan if available
-        basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+        basic_plan = session.query(Plan).filter_by(planname="Monthly").first()
         plan_id = basic_plan.id if basic_plan else None
 
         # Create organization
@@ -4808,7 +4799,7 @@ def seed_kptcl_organization(session):
         return existing_org
 
     # Get a basic plan if available
-    basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+    basic_plan = session.query(Plan).filter_by(planname="Monthly").first()
     plan_id = basic_plan.id if basic_plan else None
 
     # Create KPTCL organization
@@ -12042,6 +12033,11 @@ def run_seed():
         seed_user_roles(session, role_ids)
         assign_viewer_role_to_new_users(session, new_user_ids, role_ids)
         seed_plans(session)
+        seed_billing_dept_phase1(session)
+        from seed_billing_scope import seed_billing_scopes
+        seed_billing_scopes(session)
+        from seed_subscription_billing_module import run as seed_subscription_billing_module
+        seed_subscription_billing_module(session)
 
         # Geography
         seed_country_india
@@ -14211,6 +14207,16 @@ Department-filter validation matrix:
     tester.north should NOT see tester.south's requests
     tester.south should NOT see tester.mysuru's requests
 """)
+
+
+def seed_billing_dept_phase1(session):
+    """Run billing dept Phase 1 DDL migration + seed (BillingScope, SystemConfig, org backfill).
+    Intentionally NOT wrapped in try/except — schema failures must block the seed."""
+    print("\n" + "=" * 80)
+    print("  BILLING DEPT — PHASE 1 SEED")
+    print("=" * 80)
+    from migrate_billing_dept import run as billing_migration
+    billing_migration(session)
 
 
 def seed_kptcl_only(org_id: str):

@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
-load_dotenv()  # ✅ MUST be first before any other import
+load_dotenv()                              # load .env first
+load_dotenv(".env.local", override=True)   # .env.local overrides .env
 
 import os
 import logging
@@ -265,7 +266,7 @@ def _check_trial_expiry():
     from datetime import datetime, timezone
     db = SessionLocal()
     try:
-        from models import Organization, SystemConfig, User
+        from models import Organization, OrgRole, OrgUserRole, SystemConfig, User
         from utils.email_service import EmailService
         import os
 
@@ -290,12 +291,16 @@ def _check_trial_expiry():
                 logger.info(f"[Trial] Expired org={org.id} name={org.name}")
 
             elif delta <= alert_days:
-                # Send alert email to org admin
-                admin = db.query(User).filter(
-                    User.organization_id == org.id,
-                    User.isactive == True,
-                    User.usertype == "org_admin",
+                # Send alert email to org admin (role-based lookup)
+                admin_role_user = db.query(OrgUserRole).join(OrgRole).filter(
+                    OrgUserRole.organization_id == org.id,
+                    OrgUserRole.is_active == True,
+                    OrgRole.is_org_admin == True,
+                    OrgRole.is_active == True,
                 ).first()
+                admin = db.query(User).filter_by(
+                    id=admin_role_user.user_id, isactive=True
+                ).first() if admin_role_user else None
                 if admin:
                     try:
                         email_svc.send_trial_expiry_alert(
@@ -1125,6 +1130,168 @@ scheduler.add_job(
     id="scheduled_report_job",
 )
 
+
+# ── Billing: subscription-expiry notification job (08:00 UTC) ─────────────────
+def _billing_notification_job():
+    """
+    Daily job: renewal-reminder and expiry notifications for dept subscriptions.
+    Uses NotificationService.fire() so templates + routing rules control channels.
+    """
+    db = SessionLocal()
+    try:
+        from datetime import date, timedelta
+        from models import OrgDepartment, Organization, User
+        from services.notification_service import NotificationService
+
+        today = date.today()
+        thresholds = [7, 3, 1]
+        fired = 0
+
+        for days_ahead in thresholds:
+            target_date = today + timedelta(days=days_ahead)
+            expiring = db.query(OrgDepartment).filter(
+                OrgDepartment.is_billing_unit == True,
+                OrgDepartment.subscription_end_date != None,
+                OrgDepartment.subscription_end_date >= target_date,
+                OrgDepartment.subscription_end_date < target_date + timedelta(days=1),
+            ).all()
+            for dept in expiring:
+                org = db.query(Organization).filter_by(id=dept.organization_id).first()
+                if not org:
+                    continue
+                admins = db.query(User).filter(
+                    User.organization_id == org.id,
+                    User.usertype == "org_admin",
+                    User.is_active == True,
+                ).all()
+                for admin in admins:
+                    try:
+                        NotificationService(db).fire(
+                            event_type="billing_renewal_reminder",
+                            context={
+                                "dept_name": dept.name,
+                                "org_name": org.name,
+                                "days_remaining": str(days_ahead),
+                            },
+                            organization_id=org.id,
+                            source_id=dept.id,
+                            source_type="OrgDepartment",
+                            severity="warning",
+                            extra_recipients=[admin],
+                            extra_data={"dept_id": str(dept.id), "days_remaining": days_ahead},
+                        )
+                        fired += 1
+                    except Exception as notify_err:
+                        logger.warning(f"[Billing] Renewal notify failed for admin {admin.id}: {notify_err}")
+
+        # Notify for depts that expired yesterday
+        expired_yesterday = db.query(OrgDepartment).filter(
+            OrgDepartment.is_billing_unit == True,
+            OrgDepartment.subscription_end_date != None,
+            OrgDepartment.subscription_end_date >= today - timedelta(days=1),
+            OrgDepartment.subscription_end_date < today,
+        ).all()
+        for dept in expired_yesterday:
+            org = db.query(Organization).filter_by(id=dept.organization_id).first()
+            if not org:
+                continue
+            admins = db.query(User).filter(
+                User.organization_id == org.id,
+                User.usertype == "org_admin",
+                User.is_active == True,
+            ).all()
+            for admin in admins:
+                try:
+                    NotificationService(db).fire(
+                        event_type="billing_subscription_expired",
+                        context={
+                            "dept_name": dept.name,
+                            "org_name": org.name,
+                        },
+                        organization_id=org.id,
+                        source_id=dept.id,
+                        source_type="OrgDepartment",
+                        severity="critical",
+                        extra_recipients=[admin],
+                        extra_data={"dept_id": str(dept.id), "days_remaining": 0},
+                    )
+                    fired += 1
+                except Exception as notify_err:
+                    logger.warning(f"[Billing] Expiry notify failed for admin {admin.id}: {notify_err}")
+
+        if fired:
+            logger.info(f"[Billing] Notification job fired {fired} notification(s)")
+    except Exception as e:
+        logger.error(f"[Billing] Notification job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _billing_notification_job,
+    trigger="cron",
+    hour=8,
+    minute=0,
+    id="billing_notification_job",
+)
+
+
+# ── Billing: anomaly-nag job (09:00 UTC) ─────────────────────────────────────
+def _billing_anomaly_nag_job():
+    """
+    Daily job: remind super-admins of unresolved billing anomalies older than 24 h.
+    Uses NotificationService.fire() so templates + routing rules control channels.
+    """
+    db = SessionLocal()
+    try:
+        from datetime import datetime, timezone, timedelta
+        from models import BillingOrder, User
+        from services.notification_service import NotificationService
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        unresolved = db.query(BillingOrder).filter(
+            BillingOrder.anomaly_flag == True,
+            BillingOrder.anomaly_resolution == None,
+            BillingOrder.created_at <= cutoff,
+        ).all()
+
+        if not unresolved:
+            return
+
+        super_admins = db.query(User).filter(
+            User.usertype == "super_admin",
+            User.is_active == True,
+        ).all()
+
+        count = len(unresolved)
+        for admin in super_admins:
+            try:
+                NotificationService(db).fire(
+                    event_type="billing_anomaly_nag",
+                    context={"count": str(count)},
+                    organization_id=None,
+                    severity="warning",
+                    extra_recipients=[admin],
+                    extra_data={"count": count},
+                )
+            except Exception as notify_err:
+                logger.warning(f"[Billing] Anomaly nag failed for admin {admin.id}: {notify_err}")
+
+        logger.info(f"[Billing] Anomaly nag sent to {len(super_admins)} super-admin(s) — {count} unresolved")
+    except Exception as e:
+        logger.error(f"[Billing] Anomaly nag job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _billing_anomaly_nag_job,
+    trigger="cron",
+    hour=9,
+    minute=0,
+    id="billing_anomaly_nag_job",
+)
+
 # ── App Init ─────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Customer Portal API",
@@ -1201,7 +1368,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Payment-Token", "X-Org-Name"],
+    expose_headers=["X-Payment-Token", "X-Org-Name", "X-Dept-Name", "X-Dept-Id", "X-Plan-Id", "X-Trial-Expired-Dept-Mode", "X-Billing-Mode", "X-Dept-Pricing-Ready"],
 )
 
 # ── Global Middleware ─────────────────────────────────────────────────────────
@@ -1358,6 +1525,7 @@ app.include_router(file_upload_router.router)
 # Public (no-auth) routes
 app.include_router(public_reg_router)
 app.include_router(billing_router.router)         # Razorpay billing
+app.include_router(billing_router.admin_router)   # Billing admin endpoints (/admin/orgs/...)
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")
@@ -1431,6 +1599,23 @@ async def startup_event():
             )
     except Exception as _e:
         logger.warning(f"[Notif] Notification seed failed on startup (non-fatal): {_e}")
+
+    # Re-dispatch any billing unit recompute jobs that were pending at shutdown
+    try:
+        from routers.billing import run_billing_unit_recompute_job
+        _db = SessionLocal()
+        _stale = _db.query(Organization).filter(
+            Organization.billing_unit_recompute_pending == True
+        ).all()
+        _stale_ids = [str(o.id) for o in _stale]
+        _db.close()
+        for _oid in _stale_ids:
+            import threading
+            threading.Thread(target=run_billing_unit_recompute_job, args=(_oid,), daemon=True).start()
+        if _stale_ids:
+            logger.info(f"[Billing] Recovered {len(_stale_ids)} stale recompute job(s) on startup")
+    except Exception as _e:
+        logger.warning(f"[Billing] Stale recompute recovery failed on startup (non-fatal): {_e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

@@ -5,7 +5,7 @@ from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 
-from models import Organization, OrgRole, User, OrgUserRole, RoleTemplate, OrgRolePermission, Module
+from models import BillingScope, Organization, OrgRole, User, OrgUserRole, RoleTemplate, OrgRolePermission, Module
 from schemas import OrganizationCreate, OrganizationUpdate
 from security_utils import get_password_hash
 from utils.common_service import UTCDateTimeMixin
@@ -15,6 +15,10 @@ class OrganizationService(UTCDateTimeMixin):
     def __init__(self, db: Session):
         self.db = db
 
+    def _default_billing_scope_id(self) -> Optional[str]:
+        scope = self.db.query(BillingScope).filter_by(code="org_level").first()
+        return scope.id if scope else None
+
     def create_organization(
         self,
         org_data: OrganizationCreate,
@@ -22,6 +26,7 @@ class OrganizationService(UTCDateTimeMixin):
     ) -> Organization:
         """Create a new organization."""
         try:
+            trial_kwargs = self._apply_trial_defaults({})
             org = Organization(
                 name=org_data.name,
                 code=org_data.code,
@@ -35,8 +40,10 @@ class OrganizationService(UTCDateTimeMixin):
                 is_active=org_data.is_active,
                 settings=org_data.settings or {},
                 created_by=created_by,
+                billing_scope_id=self._default_billing_scope_id(),
                 cts=self._utc_now(),
-                mts=self._utc_now()
+                mts=self._utc_now(),
+                **trial_kwargs,
             )
             self.db.add(org)
             self.db.commit()
@@ -54,6 +61,19 @@ class OrganizationService(UTCDateTimeMixin):
                 detail="Failed to create organization"
             )
 
+    def _apply_trial_defaults(self, kwargs: dict) -> dict:
+        """Ensure every new org has trial fields set. Reads trial_duration_days from SystemConfig."""
+        if 'is_trial' not in kwargs or kwargs.get('is_trial') is None:
+            from models import SystemConfig
+            cfg = self.db.query(SystemConfig).filter_by(key='trial_duration_days').first()
+            trial_days = int(cfg.value) if cfg and cfg.value else 30
+            now = self._utc_now()
+            kwargs.setdefault('is_trial', True)
+            kwargs.setdefault('trial_start_date', now)
+            kwargs.setdefault('trial_end_date', now + timedelta(days=trial_days))
+            kwargs.setdefault('trial_status', 'active')
+        return kwargs
+
     def create_organization_with_admin(
         self,
         name: str,
@@ -70,11 +90,13 @@ class OrganizationService(UTCDateTimeMixin):
         Returns (organization, admin_user)
         """
         try:
+            org_kwargs = self._apply_trial_defaults(org_kwargs)
             # 1. Create organization
             org = Organization(
                 name=name,
                 code=code,
                 **org_kwargs,
+                billing_scope_id=self._default_billing_scope_id(),
                 cts=self._utc_now(),
                 mts=self._utc_now()
             )

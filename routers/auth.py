@@ -91,6 +91,23 @@ def get_me(
         days_remaining = max(0, delta)
         alert_active = days_remaining <= 7
 
+    from auth_utils import _build_dept_billing_fields, _build_org_admin_billing_summary
+    billing_scope_code = org.billing_scope.code if (org and org.billing_scope) else "org_level"
+    dept_billing: dict = {"billing_mode": billing_scope_code}
+
+    if org and billing_scope_code == "department_level":
+        is_root_user = current_user.department_id is None
+        if is_root_user:
+            dept_billing.update(_build_org_admin_billing_summary(org, db, now))
+        else:
+            from models import OrgDepartment
+            billing_unit = db.query(OrgDepartment).filter_by(id=current_user.billing_unit_id).first() if current_user.billing_unit_id else None
+            if billing_unit is None:
+                dept_billing["billing_mode"] = "org_level"
+            dept_billing.update(_build_dept_billing_fields(org, billing_unit, now, db))
+    else:
+        dept_billing.update(_build_dept_billing_fields(org, None, now, db))
+
     return {
         "id": str(current_user.id),
         "email": current_user.email,
@@ -112,6 +129,7 @@ def get_me(
         "trial_end_date": org.trial_end_date.isoformat() if org and org.trial_end_date else None,
         "alert_active": alert_active,
         "onboarding_complete": org.onboarding_complete if org else False,
+        **dept_billing,
     }
 
 

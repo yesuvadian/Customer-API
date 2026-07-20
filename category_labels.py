@@ -95,3 +95,49 @@ class RequestCategoryColors(LabelPairRegistry):
     REPAIR_LIFECYCLE = LabelPair("repair_lifecycle", "#2563EB")
     FAILURE_REGISTRY = LabelPair("failure_registry", "#EF5350")
     TAQC_INSPECTION = LabelPair("taqc_inspection", "#40C4FF")
+
+
+# ── Billing status labels, colors, and icons ──────────────────────────────────
+
+class BillingStatusLabels(LabelPairRegistry):
+    """Human-readable label per billing subscription status."""
+    ACTIVE          = LabelPair("active",          "Active")
+    EXPIRED         = LabelPair("expired",         "Expired")
+    PENDING_PAYMENT = LabelPair("pending_payment", "Pending Payment")
+    TRIAL           = LabelPair("trial",           "Trial")
+    TRIAL_EXPIRED   = LabelPair("trial_expired",   "Trial Expired")
+
+
+class BillingStatusColors(LabelPairRegistry):
+    """Canonical hex color per billing status — served via API so Flutter
+    never hardcodes color logic."""
+    ACTIVE          = LabelPair("active",          "#16A34A")   # green-600
+    EXPIRED         = LabelPair("expired",         "#DC2626")   # red-600
+    PENDING_PAYMENT = LabelPair("pending_payment", "#94A3B8")   # slate-400
+    TRIAL           = LabelPair("trial",           "#D97706")   # amber-600
+    TRIAL_EXPIRED   = LabelPair("trial_expired",   "#DC2626")   # red-600
+
+
+class BillingStatusIcons(LabelPairRegistry):
+    """Material icon name per billing status for Flutter Icon() widget."""
+    ACTIVE          = LabelPair("active",          "check_circle_outline")
+    EXPIRED         = LabelPair("expired",         "cancel_outlined")
+    PENDING_PAYMENT = LabelPair("pending_payment", "schedule")
+    TRIAL           = LabelPair("trial",           "hourglass_top")
+    TRIAL_EXPIRED   = LabelPair("trial_expired",   "hourglass_disabled")
+
+
+class BillingOrderStatusLabels(LabelPairRegistry):
+    """Human-readable label per billing order status."""
+    PENDING   = LabelPair("pending",   "Pending")
+    PAID      = LabelPair("paid",      "Paid")
+    FAILED    = LabelPair("failed",    "Failed")
+    CANCELLED = LabelPair("cancelled", "Cancelled")
+
+
+class BillingOrderStatusColors(LabelPairRegistry):
+    """Canonical hex color per billing order status."""
+    PENDING   = LabelPair("pending",   "#D97706")   # amber-600
+    PAID      = LabelPair("paid",      "#16A34A")   # green-600
+    FAILED    = LabelPair("failed",    "#DC2626")   # red-600
+    CANCELLED = LabelPair("cancelled", "#94A3B8")   # slate-400

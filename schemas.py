@@ -649,6 +649,21 @@ class UserResponse(BaseModel):
     alert_active: Optional[bool] = None
     onboarding_complete: Optional[bool] = None
 
+    # Banner action: "upgrade" | "pay_now" | null
+    billing_action: Optional[str] = None
+
+    # Dept-level billing fields
+    billing_mode: Optional[str] = "org_level"
+    dept_billing_unit_id: Optional[str] = None
+    dept_billing_unit_name: Optional[str] = None
+    dept_subscription_end_date: Optional[str] = None
+    dept_days_remaining: Optional[int] = None
+    dept_alert_active: Optional[bool] = None
+    all_depts_inactive: Optional[bool] = None
+    dept_billing_summary: Optional[list] = None
+    dept_billing_summary_total: Optional[int] = None
+    dept_billing_summary_has_more: Optional[bool] = None
+
     class Config:
         from_attributes = True
 
@@ -1759,6 +1774,8 @@ class OrgDepartmentOut(OrgDepartmentBase):
     id: UUID
     organization_id: UUID
     is_active: bool
+    is_billing_unit: bool = False
+    subscription_end_date: Optional[datetime] = None
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None
     cts: Optional[datetime] = None

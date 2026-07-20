@@ -51,6 +51,7 @@ def generate_invoice_pdf(
     amount_paise: int,
     paid_date: datetime,
     razorpay_payment_id: str,
+    dept_name: str | None = None,
 ) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(
@@ -88,7 +89,7 @@ def generate_invoice_pdf(
     # ── Billing info row ─────────────────────────────────────────────────
     info_table = Table(
         [[
-            [_p("BILLED TO", _label), _p(org_name, _val), _p(org_email, _val_s)],
+            [_p("BILLED TO", _label), _p(f"{org_name} — {dept_name}" if dept_name else org_name, _val), _p(org_email, _val_s)],
             [_p("INVOICE DATE", _label), _p(paid_str, _val)],
             [_p("PAYMENT ID", _label), _p(razorpay_payment_id or "—", _val_s)],
             [_p("STATUS", _label), _p("✓  PAID", _badge)],

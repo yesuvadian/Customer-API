@@ -17,7 +17,7 @@ from uuid import UUID
 
 from database import get_db
 from middleware.org_auth import require_org_member, require_org_admin, require_org_admin_or_dept_admin
-from models import OrgDepartment, User
+from models import BillingOrder, OrgDepartment, Organization, User
 from schemas import (
     OrgDepartmentCreate,
     OrgDepartmentUpdate,
@@ -61,7 +61,23 @@ def create_department(
         )
 
     service = OrgDepartmentService(db)
-    return service.create_department(dept_data, created_by=current_user.id)
+    new_dept = service.create_department(dept_data, created_by=current_user.id)
+
+    # Billing auto-registration: if org is in dept-level mode, auto-set is_billing_unit
+    # on depts that land exactly at billing_hierarchy_level depth, then recompute user cache
+    from routers.billing import get_dept_depth, run_billing_unit_recompute_job
+    org = db.query(Organization).filter_by(id=org_id).first()
+    if org and org.billing_scope and org.billing_scope.code == "department_level" and org.billing_hierarchy_level:
+        depth = get_dept_depth(new_dept.id, db)
+        if depth == org.billing_hierarchy_level:
+            dept_obj = db.query(OrgDepartment).filter_by(id=new_dept.id).first()
+            if dept_obj:
+                dept_obj.is_billing_unit = True
+                dept_obj.subscription_end_date = None
+                db.commit()
+                run_billing_unit_recompute_job(str(org_id))
+
+    return new_dept
 
 
 @router.get("/", response_model=List[OrgDepartmentOut])
@@ -134,6 +150,13 @@ def update_department(
             detail="Department not found in this organization"
         )
 
+    # Billing guard: block deactivation of active billing unit
+    if hasattr(dept_data, 'is_active') and dept_data.is_active is False and dept.is_billing_unit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This department is an active billing unit. Remove it as a billing unit before deactivating.",
+        )
+
     return service.update_department(dept_id, dept_data, modified_by=current_user.id)
 
 
@@ -156,6 +179,26 @@ def delete_department(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Department not found in this organization"
+        )
+
+    # Billing guard: block delete if dept is an active billing unit
+    if dept.is_billing_unit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This department is an active billing unit. Remove it as a billing unit before deleting.",
+        )
+
+    # Also block if dept has an unresolved anomalous paid order
+    unresolved = db.query(BillingOrder).filter(
+        BillingOrder.department_id == dept_id,
+        BillingOrder.status == "paid",
+        BillingOrder.anomaly_flag == True,
+        BillingOrder.anomaly_resolution == None,
+    ).first()
+    if unresolved:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This department has an unresolved anomalous payment. Resolve it in the billing audit log before deleting.",
         )
 
     service.delete_department(dept_id)
