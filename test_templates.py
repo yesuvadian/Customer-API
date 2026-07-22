@@ -2593,136 +2593,138 @@ TEST_TEMPLATES = {
     # overall_condition aggregates oil_test_results.condition via AGGREGATE_STATUS.
     # ────────────────────────────────────────────────────────────────────────────
     "transformer_oil_test": {
-        "key": "transformer_oil_test",
-        "name": "Transformer Oil Test",
-        "equipment_type": "Power Transformer",
-        "description": "Insulating oil sample analysis as per IS 1866:2017.",
-        "supports_multi_session": False,
-        "typical_session_interval_days": 365,
-        "typical_total_sessions": 1,
-        "context_bindings": {
-            "sub_station":         "equipment.department_name",
-            "make":                "equipment.manufacturer",
-            "serial_number":       "equipment.factory_serial_number",
-            "capacity_mva":        "nameplate.rated_mva",
-            "year_of_manufacture": "equipment.year_of_manufacture",
-            "vector_group":        "equipment.vector_group",
-            "transformer_voltage": "equipment.voltage_class",
+    "key": "transformer_oil_test",
+    "name": "Transformer Oil Test",
+    "equipment_type": "Power Transformer",
+    "description": "Insulating oil sample analysis as per IS 1866:2017.",
+    "supports_multi_session": False,
+    "typical_session_interval_days": 365,
+    "typical_total_sessions": 1,
+    "context_bindings": {
+        "sub_station":         "equipment.department_name",
+        "make":                "equipment.manufacturer",
+        "serial_number":       "equipment.factory_serial_number",
+        "capacity_mva":        "nameplate.rated_mva",
+        "year_of_manufacture": "equipment.year_of_manufacture",
+        "vector_group":        "equipment.vector_group",
+        "transformer_voltage": "equipment.voltage_class",
+    },
+    "sections": [
+        # ── Equipment Details (auto-filled) ──────────────────────────────
+        {
+            "title": "Equipment Details",
+            "collapsed": True,
+            "fields": [
+                {"key": "sub_station",          "label": "Sub Station",         "type": "readonly"},
+                {"key": "make",                "label": "Manufacturer",        "type": "readonly"},
+                {"key": "serial_number",        "label": "Serial Number",       "type": "readonly"},
+                {"key": "capacity_mva",         "label": "Rated MVA",           "type": "readonly"},
+                {"key": "year_of_manufacture",  "label": "Year of Manufacture", "type": "readonly"},
+                {"key": "vector_group",         "label": "Vector Group",        "type": "readonly"},
+                {"key": "transformer_voltage",  "label": "Voltage Class (kV)",  "type": "readonly"},
+            ],
         },
-        "sections": [
-            # ── Equipment Details (auto-filled) ──────────────────────────────
-            {
-                "title": "Equipment Details",
-                "collapsed": True,
-                "fields": [
-                    {"key": "sub_station",          "label": "Sub Station",         "type": "readonly"},
-                    {"key": "make",                "label": "Manufacturer",        "type": "readonly"},
-                    {"key": "serial_number",        "label": "Serial Number",       "type": "readonly"},
-                    {"key": "capacity_mva",         "label": "Rated MVA",           "type": "readonly"},
-                    {"key": "year_of_manufacture",  "label": "Year of Manufacture", "type": "readonly"},
-                    {"key": "vector_group",         "label": "Vector Group",        "type": "readonly"},
-                    {"key": "transformer_voltage",  "label": "Voltage Class (kV)",  "type": "readonly"},
-                ],
-            },
 
-            # ── Oil Test Results ─────────────────────────────────────────────
+        # ── Oil Test Results ─────────────────────────────────────────────
+        {
+            "title": "Oil Test Measurements",
+            "fields": [
             {
-                "title": "Oil Test Measurements",
-                "fields": [
-                {
-                    "key": "oil_test_results",
-                    "label": "Test Results as per IS 1866:2017",
-                    "type": "table",
-                    "allow_add_rows": False,
-                    "allow_delete_rows": False,
-                    "lock_default_rows": False,
-                    "columns": [
-                        {"key": "test_name",      "label": "Parameter",       "type": "readonly"},
-                        {"key": "unit",           "label": "Unit",            "type": "readonly"},
-                        {"key": "measured_value", "label": "Measured Value",  "type": "number"},
-                        {
-                            "key": "condition",
-                            "label": "Condition",
-                            "type": "calculated",
-                            "rule": {
-                                "type": "THRESHOLD",
-                                "config": {
-                                    "input_field": "measured_value",
-                                    "lookup_fields": [
-                                        "test_name",
-                                        {
-                                            "field": "$form.transformer_voltage",
-                                            "mapping": {
-                                                "11":  "<=72.5kV",
-                                                "33":  "<=72.5kV",
-                                                "66":  "<=72.5kV",
-                                                "110": "72.5-170kV",
-                                                "132": "72.5-170kV",
-                                                "220": ">170kV",
-                                                "400": ">170kV",
-                                            },
+                "key": "oil_test_results",
+                "label": "Test Results as per IS 1866:2017",
+                "type": "table",
+                "allow_add_rows": False,
+                "allow_delete_rows": False,
+                "lock_default_rows": False,
+                "columns": [
+                    {"key": "test_name",      "label": "Parameter",       "type": "readonly"},
+                    {"key": "unit",           "label": "Unit",            "type": "readonly"},
+                    {"key": "measured_value", "label": "Measured Value",  "type": "number"},
+                    {
+                        "key": "condition",
+                        "label": "Condition",
+                        "type": "calculated",
+                        "rule": {
+                            "type": "THRESHOLD",
+                            "config": {
+                                "input_field": "measured_value",
+                                "lookup_fields": [
+                                    "test_name",
+                                    {
+                                        "field": "$form.transformer_voltage",
+                                        "mapping": {
+                                            "11":  "<=72.5kV",
+                                            "33":  "<=72.5kV",
+                                            "66":  "<=72.5kV",
+                                            "110": "72.5-170kV",
+                                            "132": "72.5-170kV",
+                                            "220": ">170kV",
+                                            "400": ">170kV",
                                         },
-                                    ],
-                                    "thresholds": {
-                                        "Acidity": {
-                                            ">170kV":     {"Good": [0, 0.10], "Fair": [0.10, 0.15], "Poor": [0.15, None]},
-                                            "72.5-170kV": {"Good": [0, 0.10], "Fair": [0.10, 0.20], "Poor": [0.20, None]},
-                                            "<=72.5kV":   {"Good": [0, 0.15], "Fair": [0.15, 0.30], "Poor": [0.30, None]},
-                                        },
-                                        "Resistivity at 90C": {
-                                            ">170kV":     {"Poor": [0, 3],   "Fair": [3,   10],   "Good": [10,  None]},
-                                            "72.5-170kV": {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
-                                            "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
-                                        },
-                                        "Tan Delta at 90C": {
-                                            # IEC 60422:2013 / IS 1866:2017 — dimensionless ratio (not %)
-                                            ">170kV":     {"Good": [0, 0.010], "Fair": [0.010, 0.050], "Poor": [0.050, None]},
-                                            "72.5-170kV": {"Good": [0, 0.020], "Fair": [0.020, 0.100], "Poor": [0.100, None]},
-                                            "<=72.5kV":   {"Good": [0, 0.050], "Fair": [0.050, 0.200], "Poor": [0.200, None]},
-                                        },
-                                        "BDV Top (T)": {
-                                            ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
-                                            "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
-                                            "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
-                                        },
-                                        "BDV Bottom (B)": {
-                                            ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
-                                            "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
-                                            "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
-                                        },
-                                        "Interfacial Tension": {
-                                            ">170kV":     {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                            "72.5-170kV": {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                            "<=72.5kV":   {"Poor": [0, 20], "Fair": [20, 28], "Good": [28, None]},
-                                        },
-                                        "Flash Point": {
-                                            ">170kV":     {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                            "72.5-170kV": {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                            "<=72.5kV":   {"Poor": [0, 130], "Fair": [130, 140], "Good": [140, None]},
-                                        },
-                                        "Water Content": {
-                                            ">170kV":     {"Good": [0, 15], "Fair": [15, 20], "Poor": [20, None]},
-                                            "72.5-170kV": {"Good": [0, 20], "Fair": [20, 30], "Poor": [30, None]},
-                                            "<=72.5kV":   {"Good": [0, 30], "Fair": [30, 40], "Poor": [40, None]},
-                                        },
+                                    },
+                                ],
+                                "thresholds": {
+                                    "Acidity": {
+                                        ">170kV":     {"Good": [0, 0.10], "Fair": [0.10, 0.15], "Poor": [0.15, None]},
+                                        "72.5-170kV": {"Good": [0, 0.10], "Fair": [0.10, 0.20], "Poor": [0.20, None]},
+                                        "<=72.5kV":   {"Good": [0, 0.15], "Fair": [0.15, 0.30], "Poor": [0.30, None]},
+                                    },
+                                    "Resistivity at 90C": {
+                                        ">170kV":     {"Poor": [0, 3],   "Fair": [3,   10],   "Good": [10,  None]},
+                                        "72.5-170kV": {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
+                                        "<=72.5kV":   {"Poor": [0, 0.2], "Fair": [0.2, 3],    "Good": [3,   None]},
+                                    },
+                                    "Tan Delta at 90C": {
+                                        # IEC 60422:2013 / IS 1866:2017 — dimensionless ratio (not %)
+                                        ">170kV":     {"Good": [0, 0.010], "Fair": [0.010, 0.050], "Poor": [0.050, None]},
+                                        "72.5-170kV": {"Good": [0, 0.020], "Fair": [0.020, 0.100], "Poor": [0.100, None]},
+                                        "<=72.5kV":   {"Good": [0, 0.050], "Fair": [0.050, 0.200], "Poor": [0.200, None]},
+                                    },
+                                    "BDV Top (T)": {
+                                        ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
+                                        "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
+                                        "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
+                                    },
+                                    "BDV Bottom (B)": {
+                                        ">170kV":     {"Poor": [0, 50], "Fair": [50, 60], "Good": [60, None]},
+                                        "72.5-170kV": {"Poor": [0, 40], "Fair": [40, 50], "Good": [50, None]},
+                                        "<=72.5kV":   {"Poor": [0, 30], "Fair": [30, 40], "Good": [40, None]},
+                                    },
+                                    # ── UPDATED per screenshot: Good >25, Fair 20-25, Poor <20 ──
+                                    "Interfacial Tension": {
+                                        ">170kV":     {"Good": [25, None], "Fair": [20, 25], "Poor": [0, 20]},
+                                        "72.5-170kV": {"Good": [25, None], "Fair": [20, 25], "Poor": [0, 20]},
+                                        "<=72.5kV":   {"Good": [25, None], "Fair": [20, 25], "Poor": [0, 20]},
+                                    },
+                                    # ── UPDATED per PDF: flat 125°C minimum, OK/NOT OK only ──
+                                    "Flash Point": {
+                                        ">170kV":     {"OK": [125, None], "NOT OK": [0, 125]},
+                                        "72.5-170kV": {"OK": [125, None], "NOT OK": [0, 125]},
+                                        "<=72.5kV":   {"OK": [125, None], "NOT OK": [0, 125]},
+                                    },
+                                    "Water Content": {
+                                        ">170kV":     {"Good": [0, 15], "Fair": [15, 20], "Poor": [20, None]},
+                                        "72.5-170kV": {"Good": [0, 20], "Fair": [20, 30], "Poor": [30, None]},
+                                        "<=72.5kV":   {"Good": [0, 30], "Fair": [30, 40], "Poor": [40, None]},
                                     },
                                 },
                             },
                         },
-                        {"key": "remarks",        "label": "Remarks",         "type": "text"},
-                    ],
-                    "default_rows": [
-                        {"test_name": "Acidity",              "unit": "mg KOH/g"},
-                        {"test_name": "Resistivity at 90C",   "unit": "G ohm m"},
-                        {"test_name": "Tan Delta at 90C",     "unit": ""},
-                        {"test_name": "BDV Top (T)",          "unit": "kV"},
-                        {"test_name": "BDV Bottom (B)",       "unit": "kV"},
-                        {"test_name": "Interfacial Tension",  "unit": "mN/m"},
-                        {"test_name": "Flash Point",          "unit": "°C"},
-                        {"test_name": "Water Content",        "unit": "ppm"},
-                    ],
-                },
-            ],
+                    },
+                    {"key": "remarks",        "label": "Remarks",         "type": "text"},
+                ],
+                "default_rows": [
+                    {"test_name": "Acidity",              "unit": "mg KOH/g"},
+                    {"test_name": "Resistivity at 90C",   "unit": "G ohm m"},
+                    {"test_name": "Tan Delta at 90C",     "unit": ""},
+                    {"test_name": "BDV Top (T)",          "unit": "kV"},
+                    {"test_name": "BDV Bottom (B)",       "unit": "kV"},
+                    {"test_name": "Interfacial Tension",  "unit": "mN/m"},
+                    {"test_name": "Flash Point",          "unit": "°C"},
+                    {"test_name": "Water Content",        "unit": "ppm"},
+                ],
+            },
+        ],
         },
 
         # ── Dissolved Gas Analysis ───────────────────────────────────────────
@@ -2894,6 +2896,7 @@ TEST_TEMPLATES = {
         },
     ],
 },
+   
     # ────────────────────────────────────────────────────────────────────────────
     # Dissolved Gas Analysis — standalone (Power Transformer)
     # Independent DGA sampling — not tied to a full oil test.

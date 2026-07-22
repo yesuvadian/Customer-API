@@ -393,10 +393,12 @@ class EvaluationService:
                 return None
 
         # Band name → NORMAL / ALERT / CRITICAL (template bands are free-text)
+        # Full band-name phrases checked first (e.g. "not ok" must resolve to
+        # CRITICAL, not fall through to the "not" first-word default below).
         _cond_rank: dict = {
             "good": 0, "normal": 0, "pass": 0, "ok": 0,
             "fair": 1, "alert": 1, "warning": 1, "monitor": 1,
-            "poor": 2, "critical": 2, "abnormal": 2, "fail": 2,
+            "poor": 2, "critical": 2, "abnormal": 2, "fail": 2, "not ok": 2,
         }
 
         row_results: list = []
@@ -445,18 +447,51 @@ class EvaluationService:
                         # fallback: use first sub_key's bands
                         bands = first_val if isinstance(first_val, dict) else {}
 
-            # 5. Find which band the value falls into
-            row_status = NORMAL
-            row_breach_limit = None
+            # 5. Find which band the value falls into.
+            # Boundary rule (mirrors RuleEngine._threshold in rule_engine.dart —
+            # keep both in sync):
+            #   "<X"      -  strictly less than     -> upper edge EXCLUSIVE
+            #   "X - Y"   -  inclusive both ends     -> BOTH edges INCLUSIVE
+            #   ">Y"      -  strictly greater than   -> lower edge EXCLUSIVE
+            # Position is determined by sorting on the numeric lower bound
+            # (not band label / dict insertion order), so a value sitting
+            # exactly on a shared boundary lands in the bounded "X - Y" band
+            # rather than being pulled into the open-ended band next to it.
+            numeric_bands = []
             for band_name, band_range in bands.items():
                 if not isinstance(band_range, list) or len(band_range) < 2:
                     continue
-                lo, hi = band_range[0], band_range[1]
-                if lo is not None and value < lo:
+                numeric_bands.append((band_name, band_range[0], band_range[1]))
+            numeric_bands.sort(
+                key=lambda b: b[1] if b[1] is not None else float("-inf")
+            )
+
+            row_status = NORMAL
+            row_breach_limit = None
+            for idx, (band_name, lo, hi) in enumerate(numeric_bands):
+                is_first = idx == 0
+                is_last = idx == len(numeric_bands) - 1
+                last_exclusive = is_last and len(numeric_bands) > 2
+
+                if lo is None:
+                    min_ok = True
+                elif last_exclusive:
+                    min_ok = value > lo and not _epsilon_equals(value, lo)
+                else:
+                    min_ok = value > lo or _epsilon_equals(value, lo)
+
+                if hi is None:
+                    max_ok = True
+                elif is_first:
+                    max_ok = value < hi and not _epsilon_equals(value, hi)
+                else:
+                    max_ok = value < hi or _epsilon_equals(value, hi)
+
+                if not (min_ok and max_ok):
                     continue
-                if hi is not None and value >= hi:
-                    continue
-                rank = _cond_rank.get(band_name.lower().split()[0], 0)
+
+                band_key = band_name.lower().strip()
+                rank = _cond_rank.get(band_key, _cond_rank.get(band_key.split()[0], 0))
                 row_status = [NORMAL, ALERT, CRITICAL][min(rank, 2)]
                 # breach_limit: the boundary that was exceeded
                 if rank >= 1:
@@ -1012,3 +1047,14 @@ def _f(v) -> Optional[float]:
         return float(v)
     except (ValueError, TypeError):
         return None
+
+
+_EPS = 1e-9
+
+
+def _epsilon_equals(a: float, b: float) -> bool:
+    """Close-enough-to-equal check for boundary comparisons (mirrors
+    RuleEngine._epsilonEquals in lib/common/rule_engine.dart) so float
+    rounding on multi-decimal inputs (0.15 stored as 0.1499999...) doesn't
+    push a value to the wrong side of a threshold boundary."""
+    return abs(a - b) < _EPS
