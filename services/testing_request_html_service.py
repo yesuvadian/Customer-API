@@ -1,6 +1,7 @@
 import datetime
 from sqlalchemy.orm import Session, joinedload
 from models import TestingRequest, TestResult, OrgDepartment
+from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
 
 
 class TestingRequestHTMLService:
@@ -127,25 +128,22 @@ class TestingRequestHTMLService:
     # Public API
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _nameplate_header_html(self, req) -> str:
+    def _nameplate_header_html(self, req, result=None) -> str:
         eq = req.equipment
         np = (eq.nameplate_data or {}) if eq else {}
-        capacity = (
-            np.get('rated_mva') or np.get('capacity_mva') or np.get('mva_rating') or
-            np.get('rated_capacity') or np.get('capacity') or np.get('kva_rating') or ''
-        )
-        if capacity and 'MVA' not in str(capacity).upper() and 'KVA' not in str(capacity).upper():
-            capacity = str(capacity) + ' MVA'
+        fallback = result.test_data if result and result.test_data else {}
+        voltage  = (eq.voltage_class if eq else '') or '—'
+        capacity = resolve_capacity(np, fallback, blank='—')
+        v_ratio  = resolve_voltage_ratio(np, fallback, voltage_class=eq.voltage_class if eq else None, blank='—')
 
         station = (req.department.name if req.department else '') or '—'
         serial  = (eq.factory_serial_number if eq else '') or '—'
         make    = (eq.manufacturer if eq else '') or '—'
         yom     = str(eq.year_of_manufacture) if eq and eq.year_of_manufacture else '—'
-        voltage = (eq.voltage_class if eq else '') or '—'
+        ueic    = (eq.ueic if eq else '') or '—'
         doc     = '—'
         if eq and eq.commissioned_date:
             doc = eq.commissioned_date.strftime('%d-%b-%y')
-        capacity = str(capacity) if capacity else '—'
 
         ssmd = zone = '—'
         if req.department and req.department.parent_department_id:
@@ -177,6 +175,8 @@ class TestingRequestHTMLService:
             + _cell('Zone', zone)
             + _cell('Make', make)
             + _cell('YOM', yom)
+            + _cell('UEIC', ueic)
+            + _cell('Voltage Ratio', v_ratio)
             + '</div>'
         )
 
@@ -217,7 +217,7 @@ class TestingRequestHTMLService:
 
         now_str = datetime.datetime.now().strftime("%d %b %Y %H:%M")
 
-        nameplate_html = self._nameplate_header_html(req)
+        nameplate_html = self._nameplate_header_html(req, result)
 
         def _user_name(u) -> str:
             if not u:

@@ -9,6 +9,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from sqlalchemy.orm import Session, joinedload
 
 from models import TestingRequest, TestResult, User, OrgDepartment
+from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
 
 
 class TestingRequestPDFService:
@@ -71,24 +72,32 @@ class TestingRequestPDFService:
         story.append(Paragraph("Testing Request Form", title_style))
         story.append(Spacer(1, 0.1*inch))
 
+        # Latest test result — used both as a fallback source for nameplate
+        # fields the Equipment register never got populated with, and later
+        # for the "Test Data" section.
+        result = (
+            self.db.query(TestResult)
+            .filter(TestResult.testing_request_id == testing_request.id)
+            .order_by(TestResult.cts.desc())
+            .first()
+        )
+
         # Equipment Nameplate Header
         eq = testing_request.equipment
         np_data = (eq.nameplate_data or {}) if eq else {}
-        capacity = (
-            np_data.get('rated_mva') or np_data.get('capacity_mva') or
-            np_data.get('mva_rating') or np_data.get('capacity') or ''
+        voltage = (eq.voltage_class if eq else '') or '-'
+        capacity_str = resolve_capacity(np_data, result.test_data if result else {})
+        voltage_ratio = resolve_voltage_ratio(
+            np_data, result.test_data if result else {},
+            voltage_class=eq.voltage_class if eq else None,
         )
-        if capacity and 'MVA' not in str(capacity).upper() and 'KVA' not in str(capacity).upper():
-            capacity = str(capacity) + ' MVA'
         station = (testing_request.department.name if testing_request.department else '') or '-'
         serial  = (eq.factory_serial_number if eq else '') or '-'
         make    = (eq.manufacturer if eq else '') or '-'
         yom     = str(eq.year_of_manufacture) if eq and eq.year_of_manufacture else '-'
-        voltage = (eq.voltage_class if eq else '') or '-'
         doc_date = '-'
         if eq and eq.commissioned_date:
             doc_date = eq.commissioned_date.strftime('%d-%b-%y')
-        capacity_str = str(capacity) if capacity else '-'
 
         ssmd = zone = '-'
         if testing_request.department and testing_request.department.parent_department_id:
@@ -105,6 +114,7 @@ class TestingRequestPDFService:
             ['Name Of Station', station,     'Capacity',      capacity_str, 'Serial Number', serial],
             ['SSMD',           ssmd,         'Voltage Class', voltage,      'Date Of Commission', doc_date],
             ['Zone',           zone,         'Make',          make,         'YOM',           yom],
+            ['Voltage Ratio',  voltage_ratio, '',              '',           '',                ''],
         ]
         col_w = [1.0*inch, 1.4*inch, 1.0*inch, 1.0*inch, 1.3*inch, 0.8*inch]
         np_tbl = Table(np_table_data, colWidths=col_w)
@@ -283,12 +293,6 @@ class TestingRequestPDFService:
         story.append(status_table)
 
         # ── Test Result Data (generic — works for any template) ──────────────
-        result = (
-            self.db.query(TestResult)
-            .filter(TestResult.testing_request_id == testing_request.id)
-            .order_by(TestResult.cts.desc())
-            .first()
-        )
         if result and result.test_data:
             story.append(Spacer(1, 0.2 * inch))
             story.append(Paragraph("Test Data", heading_style))

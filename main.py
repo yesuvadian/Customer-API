@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()                              # load .env first
-load_dotenv(".env.local", override=True)   # .env.local overrides .env
+load_dotenv()
 
 import os
 import logging
@@ -1368,7 +1367,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Payment-Token", "X-Org-Name", "X-Dept-Name", "X-Dept-Id", "X-Plan-Id", "X-Trial-Expired-Dept-Mode", "X-Billing-Mode", "X-Dept-Pricing-Ready"],
+    expose_headers=["X-Payment-Token", "X-Org-Name", "X-Dept-Name", "X-Dept-Id", "X-Plan-Id", "X-Trial-Expired-Dept-Mode", "X-Billing-Mode", "X-Dept-Pricing-Ready", "X-Report-Filename"],
 )
 
 # ── Global Middleware ─────────────────────────────────────────────────────────
