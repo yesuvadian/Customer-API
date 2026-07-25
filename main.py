@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()  # ✅ MUST be first before any other import
+load_dotenv()
 
 import os
 import logging
@@ -265,7 +265,7 @@ def _check_trial_expiry():
     from datetime import datetime, timezone
     db = SessionLocal()
     try:
-        from models import Organization, SystemConfig, User
+        from models import Organization, OrgRole, OrgUserRole, SystemConfig, User
         from utils.email_service import EmailService
         import os
 
@@ -290,12 +290,16 @@ def _check_trial_expiry():
                 logger.info(f"[Trial] Expired org={org.id} name={org.name}")
 
             elif delta <= alert_days:
-                # Send alert email to org admin
-                admin = db.query(User).filter(
-                    User.organization_id == org.id,
-                    User.isactive == True,
-                    User.usertype == "org_admin",
+                # Send alert email to org admin (role-based lookup)
+                admin_role_user = db.query(OrgUserRole).join(OrgRole).filter(
+                    OrgUserRole.organization_id == org.id,
+                    OrgUserRole.is_active == True,
+                    OrgRole.is_org_admin == True,
+                    OrgRole.is_active == True,
                 ).first()
+                admin = db.query(User).filter_by(
+                    id=admin_role_user.user_id, isactive=True
+                ).first() if admin_role_user else None
                 if admin:
                     try:
                         email_svc.send_trial_expiry_alert(
@@ -754,6 +758,185 @@ def _check_schedule_notifications():
                             f"[Notif] Recurring rule {event_type} failed for org {org_id}: {_e}"
                         )
 
+        # ── Pass 3: Schedule execution overdue ───────────────────────────────
+        #
+        # Checks TestRequestSchedule rows whose next_run_date has passed without
+        # a successful TestRequestScheduleLog entry for that period.
+        # Fires schedule_missed (1–6 days) or schedule_overdue_escalation (≥7 days).
+        try:
+            from models import TestRequestSchedule, TestRequestScheduleLog, ScheduleLogStatus
+            from datetime import datetime as _dt3
+
+            overdue_schedules = (
+                db.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.is_active.is_(True),
+                    TestRequestSchedule.is_deleted.is_(False),
+                    TestRequestSchedule.next_run_date < _dt3.combine(today, _dt3.min.time()),
+                )
+                .all()
+            )
+
+            # Build set of schedule_ids that already have a success log after next_run_date
+            executed_ids: set = set()
+            for sch in overdue_schedules:
+                success = (
+                    db.query(TestRequestScheduleLog.id)
+                    .filter(
+                        TestRequestScheduleLog.schedule_id == sch.id,
+                        TestRequestScheduleLog.status == ScheduleLogStatus.success,
+                        TestRequestScheduleLog.run_date >= sch.next_run_date,
+                    )
+                    .first()
+                )
+                if success:
+                    executed_ids.add(sch.id)
+
+            # Group by (org_id, dept_id, event_type) for digest
+            sch_digest: dict = _ddict(list)
+            for sch in overdue_schedules:
+                if sch.id in executed_ids:
+                    continue
+                days_missed = (today - sch.next_run_date.date()).days
+                event_type = "schedule_overdue_escalation" if days_missed >= 7 else "schedule_missed"
+                dept_id = getattr(sch, "department_id", None)
+                sch_digest[(sch.organization_id, dept_id, event_type)].append((sch, days_missed))
+
+            for (org_id, dept_id, event_type), group in sch_digest.items():
+                try:
+                    cooldown_days = 1
+                    cutoff_dt = _dt.combine(today - timedelta(days=cooldown_days - 1), _dt.min.time())
+                    already = (
+                        db.query(NotificationLog.id)
+                        .filter(
+                            NotificationLog.organization_id == org_id,
+                            NotificationLog.event_type == event_type,
+                            NotificationLog.cts >= cutoff_dt,
+                            NotificationLog.source_id.in_([s.id for s, _ in group]),
+                        )
+                        .first()
+                    )
+                    if already:
+                        continue
+
+                    first_sch, first_days = group[0]
+                    eq_obj = getattr(first_sch, "equipment", None)
+                    eq_label = getattr(eq_obj, "ueic", "") or getattr(eq_obj, "name", "") or ""
+                    dept_obj = getattr(first_sch, "department", None)
+                    dept_name = getattr(dept_obj, "name", "") or ""
+
+                    nsvc.fire(
+                        event_type=event_type,
+                        context={
+                            "schedule.title": first_sch.title or "",
+                            "equipment.ueic": eq_label,
+                            "equipment.department": dept_name,
+                            "next_run_date": str(first_sch.next_run_date.date()),
+                            "days_missed": str(first_days),
+                            "digest_count": str(len(group)),
+                        },
+                        organization_id=org_id,
+                        department_id=dept_id,
+                        source_id=first_sch.id,
+                        source_type="test_request_schedule",
+                        severity="critical" if event_type == "schedule_overdue_escalation" else "alert",
+                    )
+                    fired_total += len(group)
+                except Exception as _e:
+                    logger.warning(f"[Notif] Schedule digest fire failed for {event_type} org={org_id}: {_e}")
+
+        except Exception as _e3:
+            logger.warning(f"[Notif] Pass 3 (schedule overdue) error: {_e3}")
+
+        # ── Pass 4: Workflow stage SLA breach ────────────────────────────────
+        #
+        # Finds TrWfStageInstance rows that are still in_progress but have been
+        # running longer than their stage's default_duration_days.
+        # Fires wf_stage_overdue (alert 1–3 days, critical >3 days).
+        try:
+            from models import TrWfStageInstance, TrWfStage, TrWfInstance
+            from datetime import datetime as _dt4
+
+            stage_instances = (
+                db.query(TrWfStageInstance)
+                .join(TrWfStage, TrWfStageInstance.stage_id == TrWfStage.id)
+                .join(TrWfInstance, TrWfStageInstance.wf_instance_id == TrWfInstance.id)
+                .filter(
+                    TrWfStageInstance.status == "in_progress",
+                    TrWfStageInstance.started_at.isnot(None),
+                    TrWfStage.default_duration_days.isnot(None),
+                )
+                .all()
+            )
+
+            # Group overdue instances by (org_id, dept_id)
+            stage_digest: dict = _ddict(list)
+            for si in stage_instances:
+                stage = si.stage
+                if not stage or not stage.default_duration_days:
+                    continue
+                deadline = si.started_at.date() + timedelta(days=stage.default_duration_days)
+                if today <= deadline:
+                    continue
+                days_overdue = (today - deadline).days
+
+                wf_instance = si.wf_instance
+                tr = getattr(wf_instance, "testing_request", None)
+                if tr is None:
+                    continue
+                org_id = getattr(tr, "organization_id", None)
+                dept_id = getattr(tr, "department_id", None)
+                stage_digest[(org_id, dept_id)].append((si, stage, tr, days_overdue, deadline))
+
+            for (org_id, dept_id), group in stage_digest.items():
+                try:
+                    event_type = "wf_stage_overdue"
+                    cooldown_days = 1
+                    cutoff_dt = _dt.combine(today - timedelta(days=cooldown_days - 1), _dt.min.time())
+                    already = (
+                        db.query(NotificationLog.id)
+                        .filter(
+                            NotificationLog.organization_id == org_id,
+                            NotificationLog.event_type == event_type,
+                            NotificationLog.cts >= cutoff_dt,
+                            NotificationLog.source_id.in_([si.id for si, _, _, _, _ in group]),
+                        )
+                        .first()
+                    )
+                    if already:
+                        continue
+
+                    first_si, first_stage, first_tr, first_days, first_deadline = group[0]
+                    eq_obj = getattr(first_tr, "equipment", None)
+                    eq_label = getattr(eq_obj, "ueic", "") or ""
+                    dept_obj = getattr(first_tr, "department", None)
+                    dept_name = getattr(dept_obj, "name", "") or ""
+                    severity = "critical" if first_days > 3 else "alert"
+
+                    nsvc.fire(
+                        event_type=event_type,
+                        context={
+                            "stage.name": first_stage.name or "",
+                            "request.number": getattr(first_tr, "request_number", "") or "",
+                            "equipment.ueic": eq_label,
+                            "equipment.department": dept_name,
+                            "days_overdue": str(first_days),
+                            "deadline": str(first_deadline),
+                            "digest_count": str(len(group)),
+                        },
+                        organization_id=org_id,
+                        department_id=dept_id,
+                        source_id=first_si.id,
+                        source_type="tr_wf_stage_instance",
+                        severity=severity,
+                    )
+                    fired_total += len(group)
+                except Exception as _e:
+                    logger.warning(f"[Notif] Stage digest fire failed org={org_id}: {_e}")
+
+        except Exception as _e4:
+            logger.warning(f"[Notif] Pass 4 (stage SLA) error: {_e4}")
+
         if fired_total:
             logger.info(f"[Notif] Schedule job total fired={fired_total}")
 
@@ -946,6 +1129,168 @@ scheduler.add_job(
     id="scheduled_report_job",
 )
 
+
+# ── Billing: subscription-expiry notification job (08:00 UTC) ─────────────────
+def _billing_notification_job():
+    """
+    Daily job: renewal-reminder and expiry notifications for dept subscriptions.
+    Uses NotificationService.fire() so templates + routing rules control channels.
+    """
+    db = SessionLocal()
+    try:
+        from datetime import date, timedelta
+        from models import OrgDepartment, Organization, User
+        from services.notification_service import NotificationService
+
+        today = date.today()
+        thresholds = [7, 3, 1]
+        fired = 0
+
+        for days_ahead in thresholds:
+            target_date = today + timedelta(days=days_ahead)
+            expiring = db.query(OrgDepartment).filter(
+                OrgDepartment.is_billing_unit == True,
+                OrgDepartment.subscription_end_date != None,
+                OrgDepartment.subscription_end_date >= target_date,
+                OrgDepartment.subscription_end_date < target_date + timedelta(days=1),
+            ).all()
+            for dept in expiring:
+                org = db.query(Organization).filter_by(id=dept.organization_id).first()
+                if not org:
+                    continue
+                admins = db.query(User).filter(
+                    User.organization_id == org.id,
+                    User.usertype == "org_admin",
+                    User.is_active == True,
+                ).all()
+                for admin in admins:
+                    try:
+                        NotificationService(db).fire(
+                            event_type="billing_renewal_reminder",
+                            context={
+                                "dept_name": dept.name,
+                                "org_name": org.name,
+                                "days_remaining": str(days_ahead),
+                            },
+                            organization_id=org.id,
+                            source_id=dept.id,
+                            source_type="OrgDepartment",
+                            severity="warning",
+                            extra_recipients=[admin],
+                            extra_data={"dept_id": str(dept.id), "days_remaining": days_ahead},
+                        )
+                        fired += 1
+                    except Exception as notify_err:
+                        logger.warning(f"[Billing] Renewal notify failed for admin {admin.id}: {notify_err}")
+
+        # Notify for depts that expired yesterday
+        expired_yesterday = db.query(OrgDepartment).filter(
+            OrgDepartment.is_billing_unit == True,
+            OrgDepartment.subscription_end_date != None,
+            OrgDepartment.subscription_end_date >= today - timedelta(days=1),
+            OrgDepartment.subscription_end_date < today,
+        ).all()
+        for dept in expired_yesterday:
+            org = db.query(Organization).filter_by(id=dept.organization_id).first()
+            if not org:
+                continue
+            admins = db.query(User).filter(
+                User.organization_id == org.id,
+                User.usertype == "org_admin",
+                User.is_active == True,
+            ).all()
+            for admin in admins:
+                try:
+                    NotificationService(db).fire(
+                        event_type="billing_subscription_expired",
+                        context={
+                            "dept_name": dept.name,
+                            "org_name": org.name,
+                        },
+                        organization_id=org.id,
+                        source_id=dept.id,
+                        source_type="OrgDepartment",
+                        severity="critical",
+                        extra_recipients=[admin],
+                        extra_data={"dept_id": str(dept.id), "days_remaining": 0},
+                    )
+                    fired += 1
+                except Exception as notify_err:
+                    logger.warning(f"[Billing] Expiry notify failed for admin {admin.id}: {notify_err}")
+
+        if fired:
+            logger.info(f"[Billing] Notification job fired {fired} notification(s)")
+    except Exception as e:
+        logger.error(f"[Billing] Notification job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _billing_notification_job,
+    trigger="cron",
+    hour=8,
+    minute=0,
+    id="billing_notification_job",
+)
+
+
+# ── Billing: anomaly-nag job (09:00 UTC) ─────────────────────────────────────
+def _billing_anomaly_nag_job():
+    """
+    Daily job: remind super-admins of unresolved billing anomalies older than 24 h.
+    Uses NotificationService.fire() so templates + routing rules control channels.
+    """
+    db = SessionLocal()
+    try:
+        from datetime import datetime, timezone, timedelta
+        from models import BillingOrder, User
+        from services.notification_service import NotificationService
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        unresolved = db.query(BillingOrder).filter(
+            BillingOrder.anomaly_flag == True,
+            BillingOrder.anomaly_resolution == None,
+            BillingOrder.created_at <= cutoff,
+        ).all()
+
+        if not unresolved:
+            return
+
+        super_admins = db.query(User).filter(
+            User.usertype == "super_admin",
+            User.is_active == True,
+        ).all()
+
+        count = len(unresolved)
+        for admin in super_admins:
+            try:
+                NotificationService(db).fire(
+                    event_type="billing_anomaly_nag",
+                    context={"count": str(count)},
+                    organization_id=None,
+                    severity="warning",
+                    extra_recipients=[admin],
+                    extra_data={"count": count},
+                )
+            except Exception as notify_err:
+                logger.warning(f"[Billing] Anomaly nag failed for admin {admin.id}: {notify_err}")
+
+        logger.info(f"[Billing] Anomaly nag sent to {len(super_admins)} super-admin(s) — {count} unresolved")
+    except Exception as e:
+        logger.error(f"[Billing] Anomaly nag job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _billing_anomaly_nag_job,
+    trigger="cron",
+    hour=9,
+    minute=0,
+    id="billing_anomaly_nag_job",
+)
+
 # ── App Init ─────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Customer Portal API",
@@ -1022,7 +1367,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Payment-Token", "X-Org-Name"],
+    expose_headers=["X-Payment-Token", "X-Org-Name", "X-Dept-Name", "X-Dept-Id", "X-Plan-Id", "X-Trial-Expired-Dept-Mode", "X-Billing-Mode", "X-Dept-Pricing-Ready", "X-Report-Filename"],
 )
 
 # ── Global Middleware ─────────────────────────────────────────────────────────
@@ -1179,6 +1524,7 @@ app.include_router(file_upload_router.router)
 # Public (no-auth) routes
 app.include_router(public_reg_router)
 app.include_router(billing_router.router)         # Razorpay billing
+app.include_router(billing_router.admin_router)   # Billing admin endpoints (/admin/orgs/...)
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")
@@ -1252,6 +1598,23 @@ async def startup_event():
             )
     except Exception as _e:
         logger.warning(f"[Notif] Notification seed failed on startup (non-fatal): {_e}")
+
+    # Re-dispatch any billing unit recompute jobs that were pending at shutdown
+    try:
+        from routers.billing import run_billing_unit_recompute_job
+        _db = SessionLocal()
+        _stale = _db.query(Organization).filter(
+            Organization.billing_unit_recompute_pending == True
+        ).all()
+        _stale_ids = [str(o.id) for o in _stale]
+        _db.close()
+        for _oid in _stale_ids:
+            import threading
+            threading.Thread(target=run_billing_unit_recompute_job, args=(_oid,), daemon=True).start()
+        if _stale_ids:
+            logger.info(f"[Billing] Recovered {len(_stale_ids)} stale recompute job(s) on startup")
+    except Exception as _e:
+        logger.warning(f"[Billing] Stale recompute recovery failed on startup (non-fatal): {_e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

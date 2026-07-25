@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from models import RepairWorkflow, TrWfInstance
+from models import RepairWorkflow, TrWfInstance, EquipmentAnalytics
 from auth_utils import get_current_user
 from database import get_db
 from models import User
@@ -67,7 +67,26 @@ def _build_dept_path_map(reqs, db) -> dict:
     return result
 
 
-def _enrich(req, dept_path_map: dict | None = None):
+def _build_analytics_map(reqs, db) -> dict:
+    """Return {equipment_id_str: {risk_level, critical_findings}} for all equipment in reqs."""
+    eq_ids = [r.equipment_id for r in reqs if r.equipment_id]
+    if not eq_ids:
+        return {}
+    rows = (
+        db.query(EquipmentAnalytics)
+        .filter(EquipmentAnalytics.equipment_id.in_(eq_ids))
+        .all()
+    )
+    return {
+        str(row.equipment_id): {
+            "risk_level": row.risk_level,
+            "critical_findings": row.critical_findings or [],
+        }
+        for row in rows
+    }
+
+
+def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None = None):
     """Attach computed display names to ORM object."""
 
     req.equipment_type_name = (
@@ -311,6 +330,17 @@ def _enrich(req, dept_path_map: dict | None = None):
     except Exception as _e:
         import logging as _log
         _log.getLogger(__name__).debug(f"session_types enrichment failed: {_e}")
+
+    # ─────────────────────────────────────────────
+    # Equipment analytics — risk level + critical findings
+    # ─────────────────────────────────────────────
+    if analytics_map and req.equipment_id:
+        a = analytics_map.get(str(req.equipment_id))
+        req.risk_level        = a["risk_level"]        if a else None
+        req.critical_findings = a["critical_findings"] if a else []
+    else:
+        req.risk_level        = None
+        req.critical_findings = []
 
     return req
 
@@ -627,8 +657,9 @@ def list_testing_requests(
     total = service.count_requests(**common)
     items = service.get_requests(skip=skip, limit=ps, **common)
     dept_path_map = _build_dept_path_map(items, db)
+    analytics_map = _build_analytics_map(items, db)
     serialized = [
-        TestingRequestResponse.model_validate(_enrich(r, dept_path_map), from_attributes=True).model_dump(mode='json')
+        TestingRequestResponse.model_validate(_enrich(r, dept_path_map, analytics_map), from_attributes=True).model_dump(mode='json')
         for r in items
     ]
 

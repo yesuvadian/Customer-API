@@ -530,6 +530,8 @@ async def extract_file(
             form_data = build_form_data(report, test_type_name, eq)
         except Exception:
             form_data = report
+            import traceback
+            traceback.print_exc()
             rec_warnings.append("Form template could not be applied — raw values shown.")
 
         pending_id = None

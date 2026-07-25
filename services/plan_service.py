@@ -98,12 +98,11 @@ class PlanService:
     @classmethod
     def get_basic_plan(cls, db: Session):
         """
-        Returns the Basic plan automatically.
-        If not found, returns the first active plan.
+        Returns the Monthly plan as the default. Falls back to first active plan.
         """
-        # 1. Try to find BASIC plan by name
+        # 1. Try Monthly plan
         basic = db.query(Plan).filter(
-            Plan.planname.ilike("%basic%"), 
+            Plan.planname.ilike("monthly"),
             Plan.isactive == True
         ).first()
 

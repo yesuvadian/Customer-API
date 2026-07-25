@@ -247,6 +247,14 @@ def create_org_user(
         user_data=user_data,
         created_by=current_user.id
     )
+
+    # Set billing_unit_id for the new user based on their department ancestry
+    if user.department_id:
+        from routers.billing import walk_up_tree
+        billing_unit = walk_up_tree(user.department_id, db, is_billing_unit=True)
+        user.billing_unit_id = str(billing_unit.id) if billing_unit else None
+        db.commit()
+
     # Convert to OrgUserWithRoles
     users_with_roles = service.list_org_users_with_roles(
         organization_id=org_id,
@@ -355,13 +363,26 @@ def assign_role_to_user(
     Only org admins can assign roles.
     """
     service = OrgUserService(db)
-    return service.assign_role_to_user(
+    result = service.assign_role_to_user(
         user_id=user_id,
         organization_id=org_id,
         org_role_id=role_assignment.org_role_id,
         department_id=role_assignment.department_id,
         assigned_by=current_user.id
     )
+
+    # Sync billing_unit_id whenever a dept role is assigned
+    if role_assignment.department_id:
+        from models import User as UserModel
+        from routers.billing import walk_up_tree
+        target_user = db.query(UserModel).filter_by(id=user_id).first()
+        if target_user:
+            dept_id = target_user.department_id or role_assignment.department_id
+            billing_unit = walk_up_tree(dept_id, db, is_billing_unit=True)
+            target_user.billing_unit_id = str(billing_unit.id) if billing_unit else None
+            db.commit()
+
+    return result
 
 
 @router.delete("/{user_id}/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)

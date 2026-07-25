@@ -63,7 +63,14 @@ _RISK_BANDS = [
 ]
 
 
-def _risk_from_score(score: Optional[float]) -> str:
+def _risk_from_score(score: Optional[float], critical_findings: list | None = None) -> str:
+    # If any finding has CRITICAL status, the equipment risk is at least Critical,
+    # regardless of its composite health score.
+    if critical_findings and any(
+        isinstance(f, dict) and f.get("status") == "CRITICAL"
+        for f in critical_findings
+    ):
+        return "Critical"
     if score is None:
         return "Unknown"
     for threshold, label in _RISK_BANDS:
@@ -1155,7 +1162,7 @@ class AnalyticsEngine:
         ta.testing_request_id= testing_request_id
         ta.template_key      = template_key
         ta.health_score      = health_score
-        ta.risk_level        = _risk_from_score(health_score)
+        ta.risk_level        = _risk_from_score(health_score, critical_findings)
         ta.condition_summary = _condition_from_score(health_score)
         ta.critical_findings = critical_findings
         ta.parameter_count   = parameter_count
@@ -1197,7 +1204,7 @@ class AnalyticsEngine:
         ea.organization_id     = organization_id
         ea.department_id       = department_id
         ea.health_score        = health_score
-        ea.risk_level          = _risk_from_score(health_score)
+        ea.risk_level          = _risk_from_score(health_score, critical_findings)
         ea.condition_summary   = _condition_from_score(health_score)
         ea.test_type_scores    = test_type_scores
         ea.critical_findings   = critical_findings

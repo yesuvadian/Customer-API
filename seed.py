@@ -1212,29 +1212,20 @@ def assign_viewer_role_to_new_users(session, new_user_ids, role_ids):
 def seed_plans(session):
     plans_data = [
         {
-            "planname": "Basic",
-            "plan_description": "Up to 5 users, core features",
-            "plan_limit": 5,
+            "planname": "Monthly",
+            "plan_description": "Monthly subscription",
+            "plan_limit": 0,
             "isactive": True,
             "price_paise": 99900,
             "billing_cycle": "monthly",
             "duration_days": 30,
         },
         {
-            "planname": "Standard",
-            "plan_description": "Up to 20 users, all features",
-            "plan_limit": 20,
+            "planname": "Yearly",
+            "plan_description": "Yearly subscription",
+            "plan_limit": 0,
             "isactive": True,
-            "price_paise": 249900,
-            "billing_cycle": "monthly",
-            "duration_days": 30,
-        },
-        {
-            "planname": "Premium",
-            "plan_description": "Unlimited users, priority support",
-            "plan_limit": 9999,
-            "isactive": True,
-            "price_paise": 2399900,
+            "price_paise": 999900,
             "billing_cycle": "yearly",
             "duration_days": 365,
         },
@@ -1706,6 +1697,13 @@ def seed_modules(session):
  "path": "workflow-config",
  "group_name": "Administration",
  "is_menu": True},
+# ✅ SUBSCRIPTION & BILLING MODULE
+{"name": "Subscription & Billing",
+ "description": "Manage organization subscription plans, billing cycles, and payment history.",
+ "path": "subscription-billing",
+ "group_name": "Organisation",
+ "is_active": True,
+ "is_menu": True},
     ]
 
     module_ids = {}
@@ -1795,6 +1793,8 @@ def seed_privileges(session, role_ids, module_ids):
         "Notifications",
         # ✅ REPORTING SUITE
         "Reports",
+        # ✅ SUBSCRIPTION & BILLING
+        "Subscription & Billing",
     ]
 
     # -------------------------------------------------------
@@ -3470,7 +3470,7 @@ def seed_role_templates(session):
     procurement_modules = [modules_by_name[n] for n in procurement_module_names if n in modules_by_name]
 
     # Org-management modules
-    org_module_names = ["Organizations", "User Role", "Role Permission"]
+    org_module_names = ["Organizations", "User Role", "Role Permission", "Subscription & Billing"]
     org_modules = [modules_by_name[n] for n in org_module_names if n in modules_by_name]
 
     # Testing-specific modules (by name, so we can pick individual ones)
@@ -4132,7 +4132,7 @@ def seed_sample_organization(session):
 
     if not skip_org_creation:
         # Get a basic plan if available
-        basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+        basic_plan = session.query(Plan).filter_by(planname="Monthly").first()
         plan_id = basic_plan.id if basic_plan else None
 
         # Create organization
@@ -4799,7 +4799,7 @@ def seed_kptcl_organization(session):
         return existing_org
 
     # Get a basic plan if available
-    basic_plan = session.query(Plan).filter_by(planname="Basic").first()
+    basic_plan = session.query(Plan).filter_by(planname="Monthly").first()
     plan_id = basic_plan.id if basic_plan else None
 
     # Create KPTCL organization
@@ -9793,6 +9793,43 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["report_name", "report_period", "download_url", "format"],
             default_roles=["SEE_WM", "CEE_TRANSMISSION_ZONE"],
         ),
+        # ── Escalation Matrix ─────────────────────────────────────────────────
+        dict(
+            event_type="fr_overdue_escalation",
+            label="Failure Report Overdue Escalation",
+            group_name="Schedule Reminders",
+            description="Escalation fired when a Failure Registry request is more than 3 days overdue.",
+            context_vars=["equipment.ueic", "request.title", "request.due_date",
+                          "days_overdue", "equipment.department"],
+            default_roles=["EE_TLSS", "AEE_MAINTENANCE"],
+        ),
+        dict(
+            event_type="schedule_missed",
+            label="Schedule Execution Missed",
+            group_name="Schedule Reminders",
+            description="Fired when a test request schedule's next_run_date has passed without a successful execution.",
+            context_vars=["schedule.title", "equipment.ueic", "equipment.department",
+                          "next_run_date", "days_missed"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        dict(
+            event_type="schedule_overdue_escalation",
+            label="Schedule Overdue Escalation (>7 days)",
+            group_name="Schedule Reminders",
+            description="Escalation fired when a schedule execution is more than 7 days overdue.",
+            context_vars=["schedule.title", "equipment.ueic", "equipment.department",
+                          "next_run_date", "days_missed"],
+            default_roles=["EE_TLSS", "SEE_WM"],
+        ),
+        dict(
+            event_type="wf_stage_overdue",
+            label="Workflow Stage SLA Breach",
+            group_name="Stage Workflows",
+            description="Fired when a workflow stage remains in-progress beyond its configured default_duration_days.",
+            context_vars=["stage.name", "request.number", "equipment.ueic",
+                          "equipment.department", "days_overdue", "deadline"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
     ]
 
     # Guard: surface any default_roles value that isn't a known RoleTemplate name
@@ -11209,6 +11246,91 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    # ── Escalation Matrix Templates ───────────────────────────────────────────
+    _tmpl("fr_overdue_escalation",
+        _e(
+            "[ESCALATION] {{digest_count}} Failure Report(s) Critically Overdue — {{dept.name}}",
+            "<h3 style='color:darkred'>Escalation: Failure Reports Overdue — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> Failure Registry request(s) are overdue and have been escalated.</p>"
+            "{{digest_table}}"
+            "<p>Failure reports require prompt action. Please log in to SEACMS to review and resolve these immediately.</p>",
+            ["EE_TLSS", "Supervisory Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[SEACMS] ESCALATION: {{digest_count}} failure report(s) overdue in {{dept.name}}."
+            " Oldest: {{equipment.ueic}} ({{days_overdue}}d). Req: {{request.number}}.",
+            ["EE_TLSS", "Supervisory Officer"],
+        ),
+        _i(
+            "Escalation — {{digest_count}} failure report(s) overdue — {{dept.name}}",
+            "{{digest_count}} failure report(s) overdue in {{dept.name}}. Oldest: {{equipment.ueic}} {{days_overdue}} days overdue.",
+            ["EE_TLSS", "Supervisory Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("schedule_missed",
+        _e(
+            "[SCHEDULE MISSED] {{digest_count}} Schedule(s) Not Executed — {{dept.name}}",
+            "<h3 style='color:orange'>Schedule Execution Missed — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> test schedule(s) were not executed on their scheduled date.</p>"
+            "{{digest_table}}"
+            "<p>Please log in to SEACMS to review the affected schedules and trigger execution or reschedule.</p>",
+            ["AEE_MAINTENANCE", "Maintenance Officer", "Reviewing Officer"],
+        ),
+        _s(
+            "[SEACMS] MISSED: {{digest_count}} schedule(s) in {{dept.name}} not executed."
+            " Earliest: {{schedule.title}} due {{next_run_date}} ({{days_missed}}d ago).",
+            ["AEE_MAINTENANCE", "Maintenance Officer"],
+        ),
+        _i(
+            "{{digest_count}} schedule(s) missed — {{dept.name}}",
+            "{{digest_count}} schedule(s) were not executed in {{dept.name}}. Earliest: {{schedule.title}} ({{days_missed}} days ago).",
+            ["AEE_MAINTENANCE", "Maintenance Officer", "Reviewing Officer"],
+        ),
+    )
+
+    _tmpl("schedule_overdue_escalation",
+        _e(
+            "[ESCALATION] {{digest_count}} Schedule(s) Critically Overdue — {{dept.name}}",
+            "<h3 style='color:darkred'>Escalation: Schedules Critically Overdue — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> test schedule(s) have not been executed for 7 or more days.</p>"
+            "{{digest_table}}"
+            "<p>This has been escalated to zone/circle management for immediate intervention.</p>",
+            ["EE_TLSS", "Supervisory Officer", "Senior Management Approver"],
+        ),
+        _s(
+            "[SEACMS] ESCALATION: {{digest_count}} schedule(s) critically overdue in {{dept.name}}."
+            " Oldest: {{schedule.title}} ({{days_missed}}d). Dept: {{equipment.department}}.",
+            ["EE_TLSS", "Supervisory Officer"],
+        ),
+        _i(
+            "Escalation — {{digest_count}} schedule(s) critically overdue — {{dept.name}}",
+            "{{digest_count}} schedule(s) critically overdue in {{dept.name}}. Oldest: {{schedule.title}} ({{days_missed}} days).",
+            ["EE_TLSS", "Supervisory Officer", "Senior Management Approver"],
+        ),
+    )
+
+    _tmpl("wf_stage_overdue",
+        _e(
+            "[STAGE SLA BREACH] {{digest_count}} Workflow Stage(s) Overdue — {{dept.name}}",
+            "<h3 style='color:red'>Workflow Stage SLA Breach — {{dept.name}}</h3>"
+            "<p><b>{{digest_count}}</b> workflow stage(s) have exceeded their allocated duration.</p>"
+            "{{digest_table}}"
+            "<p>Please log in to SEACMS and advance or resolve the affected stages immediately.</p>",
+            ["AEE_MAINTENANCE", "Reviewing Officer", "Supervisory Officer"],
+        ),
+        _s(
+            "[SEACMS] SLA BREACH: {{digest_count}} stage(s) overdue in {{dept.name}}."
+            " Oldest: {{stage.name}} for {{request.number}} ({{days_overdue}}d). Deadline: {{deadline}}.",
+            ["AEE_MAINTENANCE", "Reviewing Officer"],
+        ),
+        _i(
+            "{{digest_count}} stage SLA breach(es) — {{dept.name}}",
+            "{{digest_count}} workflow stage(s) overdue in {{dept.name}}. Oldest: {{stage.name}} for {{request.number}} ({{days_overdue}} days past deadline).",
+            ["AEE_MAINTENANCE", "Reviewing Officer", "Supervisory Officer"],
+        ),
+    )
+
     # ── Upsert into DB ────────────────────────────────────────────────────────
     inserted = 0
     for tpl in _TEMPLATES:
@@ -11331,6 +11453,18 @@ def _seed_notification_schedule_rules(session) -> int:
             severity="critical",
             frequency="weekly",
             applicable_categories=[],
+            digest_columns=_DIGEST_COLS_OVERDUE,
+        ),
+
+        # ── Failure Registry escalation (tighter SLA — 3 days, weekly repeat) ────────
+        dict(
+            event_type="fr_overdue_escalation",
+            label="Failure Report Overdue Escalation (>3 days) — weekly repeat",
+            trigger_type="escalation",
+            offset_days=3,
+            severity="critical",
+            frequency="weekly",
+            applicable_categories=["failure_registry"],
             digest_columns=_DIGEST_COLS_OVERDUE,
         ),
 
@@ -11780,6 +11914,27 @@ def _seed_notification_routing_rules(session) -> int:
          [], [],
          ["inapp"],
          "TR Workflow Status Changed — In-app"),
+
+        # ── Escalation Matrix ─────────────────────────────────────────────────
+        ("fr_overdue_escalation",
+         [], [],
+         ["inapp"],
+         "Failure Report Overdue Escalation — In-app"),
+
+        ("schedule_missed",
+         [], [],
+         ["inapp"],
+         "Schedule Execution Missed — In-app"),
+
+        ("schedule_overdue_escalation",
+         [], [],
+         ["inapp"],
+         "Schedule Overdue Escalation — In-app"),
+
+        ("wf_stage_overdue",
+         [], [],
+         ["inapp"],
+         "Workflow Stage SLA Breach — In-app"),
     ]
 
     inserted = 0
@@ -11878,6 +12033,11 @@ def run_seed():
         seed_user_roles(session, role_ids)
         assign_viewer_role_to_new_users(session, new_user_ids, role_ids)
         seed_plans(session)
+        seed_billing_dept_phase1(session)
+        from seed_billing_scope import seed_billing_scopes
+        seed_billing_scopes(session)
+        from seed_subscription_billing_module import run as seed_subscription_billing_module
+        seed_subscription_billing_module(session)
 
         # Geography
         seed_country_india
@@ -14047,6 +14207,16 @@ Department-filter validation matrix:
     tester.north should NOT see tester.south's requests
     tester.south should NOT see tester.mysuru's requests
 """)
+
+
+def seed_billing_dept_phase1(session):
+    """Run billing dept Phase 1 DDL migration + seed (BillingScope, SystemConfig, org backfill).
+    Intentionally NOT wrapped in try/except — schema failures must block the seed."""
+    print("\n" + "=" * 80)
+    print("  BILLING DEPT — PHASE 1 SEED")
+    print("=" * 80)
+    from migrate_billing_dept import run as billing_migration
+    billing_migration(session)
 
 
 def seed_kptcl_only(org_id: str):
