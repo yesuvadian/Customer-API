@@ -8,6 +8,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from models import TestSession, TestSessionReading, TestingRequest, TestResult
+from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
 
 _NAVY  = rl_colors.HexColor("#1B3A6B")
 _TEAL  = rl_colors.HexColor("#006D7E")
@@ -54,6 +55,9 @@ class TestSessionPDFService:
             Paragraph(f"Session Report — {session_name}", title_s),
             Paragraph(f"Request: {req_num}   |   Equipment: {eq_name}   |   Date: {date_str}", sub_s),
             Spacer(1, 0.1 * inch),
+        ]
+        story += self._equipment_section(request, test_result, h2_s)
+        story += [
             self._meta_table(session, date_str, body_s),
             Spacer(1, 0.15 * inch),
         ]
@@ -81,6 +85,59 @@ class TestSessionPDFService:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ("LEFTPADDING",   (0, 0), (-1, -1), 8),
         ])
+
+    def _equipment_section(self, request: TestingRequest, test_result: TestResult | None, h2_s) -> list:
+        """Equipment identity block — station, UEIC, capacity, voltage ratio etc.
+
+        Session reports previously showed none of this, so a reader had no way
+        to tell which physical asset the readings below belonged to. Capacity
+        and voltage ratio fall back to the test's own form data when the
+        Equipment register itself was never populated with them.
+        """
+        if not request:
+            return []
+        eq = getattr(request, "equipment", None)
+        np = (eq.nameplate_data or {}) if eq else {}
+        fallback = test_result.test_data if test_result and test_result.test_data else {}
+
+        station = (request.department.name if request.department else "") or "-"
+        ueic    = (eq.ueic if eq else "") or "-"
+        serial  = (eq.factory_serial_number if eq else "") or "-"
+        make    = (eq.manufacturer if eq else "") or "-"
+        yom     = str(eq.year_of_manufacture) if eq and eq.year_of_manufacture else "-"
+        voltage = (eq.voltage_class if eq else "") or "-"
+        capacity = resolve_capacity(np, fallback)
+        v_ratio  = resolve_voltage_ratio(np, fallback, voltage_class=eq.voltage_class if eq else None)
+        doc_date = "-"
+        if eq and eq.commissioned_date:
+            doc_date = eq.commissioned_date.strftime("%d-%b-%y")
+
+        rows = [
+            ["Name Of Station", station,  "UEIC",          ueic],
+            ["Capacity",        capacity, "Voltage Ratio", v_ratio],
+            ["Voltage Class",   voltage,  "Serial Number", serial],
+            ["Make",            make,     "YOM",            yom],
+            ["Date Of Commission", doc_date, "", ""],
+        ]
+        key_s = ParagraphStyle("EqK", fontSize=9, fontName="Helvetica-Bold", textColor=_NAVY)
+        val_s = ParagraphStyle("EqV", fontSize=9)
+        wrapped = [
+            [Paragraph(str(c), key_s if i % 2 == 0 else val_s) for i, c in enumerate(row)]
+            for row in rows
+        ]
+        t = Table(wrapped, colWidths=[1.5 * inch, 2.15 * inch, 1.5 * inch, 1.65 * inch])
+        t.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (0, -1), _LIGHT),
+            ("BACKGROUND",    (2, 0), (2, -1), _LIGHT),
+            ("FONTSIZE",      (0, 0), (-1, -1), 9),
+            ("BOX",           (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#CCCCCC")),
+            ("INNERGRID",     (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#DDDDDD")),
+            ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ]))
+        return [Paragraph("Equipment Details", h2_s), t, Spacer(1, 0.15 * inch)]
 
     def _meta_table(self, session: TestSession, date_str: str, body_s) -> Table:
         def row(label, value):

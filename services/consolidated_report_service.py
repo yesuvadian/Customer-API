@@ -34,6 +34,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, 
 
 from models import TestResult, TestingRequest, Equipment, OrgDepartment, CategoryDetails
 from services.report_service import ReportService
+from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
 from utils.common_service import get_dept_subtree_ids
 
 
@@ -145,8 +146,9 @@ class ConsolidatedReportService:
                 story.append(PageBreak())
             first = False
 
-            # Equipment identity header (auto-pulled from register)
-            story.extend(self._build_equipment_header(styles, eq_id, g["request"]))
+            # Equipment identity header (auto-pulled from register, falling
+            # back to the test results' own form data — see _build_equipment_header)
+            story.extend(self._build_equipment_header(styles, eq_id, g["request"], g["results"]))
             story.append(Spacer(1, 3 * mm))
 
             # Each test result rendered via the shared generic section builder
@@ -247,15 +249,18 @@ class ConsolidatedReportService:
             _used.add(t)
             return t
 
-        def _eq_header_pairs(eq) -> list[tuple[str, str]]:
+        def _eq_header_pairs(eq, results: list = None) -> list[tuple[str, str]]:
             """
-            Build fixed (label, value) pairs from the Equipment register.
-            Walks the department hierarchy for Zone and SSMD; reads nameplate_data
-            for Capacity; uses Equipment model columns for the rest.
-            Returns 9 pairs in display order (3 per row):
+            Build fixed (label, value) pairs from the Equipment register, falling
+            back to the test results' own captured form data (e.g. a "Rated MVA"
+            field on the oil-test form) when the register itself is incomplete.
+            Walks the department hierarchy for Zone and SSMD; uses Equipment
+            model columns for the rest.
+            Returns 10 pairs in display order (3 per row, Voltage Ratio trailing):
               Name Of Station | Capacity      | Serial Number
               SSMD            | Voltage Class | Date Of Commission
               Zone            | Make          | YOM
+              Voltage Ratio
             """
             def _v(*vals):
                 for v in vals:
@@ -282,12 +287,10 @@ class ConsolidatedReportService:
             ssmd    = ancestors[1] if len(ancestors) >= 2 else "-"
             zone    = ancestors[-1] if len(ancestors) >= 3 else (ancestors[-1] if ancestors else "-")
 
-            capacity = _v(
-                nd.get("rated_mva"), nd.get("rated_mva_onan"),
-                nd.get("capacity_mva"), nd.get("rated_mva_onan_mva"),
-            )
-            if capacity != "-":
-                capacity = f"{capacity} MVA"
+            test_data_sources = [r.test_data for r in (results or []) if r.test_data]
+            voltage_class = eq.voltage_class if eq else None
+            capacity      = resolve_capacity(nd, *test_data_sources)
+            voltage_ratio = resolve_voltage_ratio(nd, *test_data_sources, voltage_class=voltage_class)
 
             doc_date = "-"
             if eq and eq.commissioned_date:
@@ -299,14 +302,14 @@ class ConsolidatedReportService:
                 ("Serial Number",   _v(eq.factory_serial_number if eq else None,
                                        nd.get("factory_serial_number"), nd.get("serial_number"))),
                 ("SSMD",            ssmd),
-                ("Voltage Class",   _v(eq.voltage_class if eq else None,
-                                       nd.get("voltage_class"), nd.get("rated_voltage"))),
+                ("Voltage Class",   _v(voltage_class, nd.get("voltage_class"), nd.get("rated_voltage"))),
                 ("Date Of Commission", doc_date),
                 ("Zone",            zone),
                 ("Make",            _v(eq.manufacturer if eq else None,
                                        nd.get("manufacturer"), nd.get("make"))),
                 ("YOM",             _v(eq.year_of_manufacture if eq else None,
                                        nd.get("yom"), nd.get("year_of_manufacture"))),
+                ("Voltage Ratio",   voltage_ratio),
             ]
 
         # ── No results ───────────────────────────────────────────────────────────
@@ -352,7 +355,7 @@ class ConsolidatedReportService:
             #   Name Of Station | Capacity      | Serial Number
             #   SSMD            | Voltage Class | Date Of Commission
             #   Zone            | Make          | YOM
-            hdr_pairs = _eq_header_pairs(eq)
+            hdr_pairs = _eq_header_pairs(eq, results)
 
             cur_row = 2
             # Lay out 3 pairs per row: label | value | label | value | label | value
@@ -644,15 +647,15 @@ class ConsolidatedReportService:
         return sorted(latest.values(), key=lambda x: (x.tested_at or x.cts))
 
     def _title_line(self, equipment_type_id, date_from, date_to) -> str:
-        cd = self.db.query(CategoryDetails).filter(CategoryDetails.id == equipment_type_id).first()
-        et = cd.name if cd else "Equipment"
         rng = ""
         if date_from or date_to:
             rng = f"  |  {date_from or '…'} to {date_to or '…'}"
-        return f"Consolidated Test Report — {et}{rng}"
+        return f"Test Report{rng}"
 
-    def _build_equipment_header(self, styles, eq_id: str, request):
-        """Equipment identity block — pulled from the Equipment register."""
+    def _build_equipment_header(self, styles, eq_id: str, request, results: list = None):
+        """Equipment identity block — pulled from the Equipment register, falling
+        back to the test results' own captured form data (e.g. a "Rated MVA"
+        field on the oil-test form) when the register itself is incomplete."""
         elements = [Paragraph("Equipment Details", styles["SectionHeader"])]
 
         if eq_id == "unassigned" or not request or not request.equipment_id:
@@ -661,6 +664,7 @@ class ConsolidatedReportService:
 
         eq = self.db.query(Equipment).filter(Equipment.id == request.equipment_id).first()
         nd = (eq.nameplate_data or {}) if eq else {}
+        test_data_sources = [r.test_data for r in (results or []) if r.test_data]
 
         def _v(*vals):
             for v in vals:
@@ -670,11 +674,8 @@ class ConsolidatedReportService:
 
         ueic = eq.ueic if eq else "-"
         substation = request.department.name if request and request.department else "-"
-        capacity = _v(nd.get("rated_mva_onan"))
-        capacity = f"{capacity} MVA" if capacity != "-" else "-"
-        v_ratio = "-"
-        if nd.get("hv_voltage"):
-            v_ratio = "/".join(str(x) for x in [nd.get("hv_voltage"), nd.get("mv_voltage"), nd.get("lv_voltage")] if x) + " kV"
+        capacity = resolve_capacity(nd, *test_data_sources)
+        v_ratio = resolve_voltage_ratio(nd, *test_data_sources, voltage_class=eq.voltage_class if eq else None)
         doc_date = "-"
         if eq and eq.commissioned_date:
             doc_date = eq.commissioned_date.strftime("%d.%m.%Y")

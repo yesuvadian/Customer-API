@@ -5,10 +5,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from models import RepairWorkflow, TrWfInstance
+from models import RepairWorkflow, TrWfInstance, EquipmentAnalytics
 from auth_utils import get_current_user
 from database import get_db
 from models import User
+from category_labels import RequestCategoryLabels, RequestCategoryColors
 from schemas import (
     TestingRequestCreate,
     TestingRequestUpdate,
@@ -66,7 +67,26 @@ def _build_dept_path_map(reqs, db) -> dict:
     return result
 
 
-def _enrich(req, dept_path_map: dict | None = None):
+def _build_analytics_map(reqs, db) -> dict:
+    """Return {equipment_id_str: {risk_level, critical_findings}} for all equipment in reqs."""
+    eq_ids = [r.equipment_id for r in reqs if r.equipment_id]
+    if not eq_ids:
+        return {}
+    rows = (
+        db.query(EquipmentAnalytics)
+        .filter(EquipmentAnalytics.equipment_id.in_(eq_ids))
+        .all()
+    )
+    return {
+        str(row.equipment_id): {
+            "risk_level": row.risk_level,
+            "critical_findings": row.critical_findings or [],
+        }
+        for row in rows
+    }
+
+
+def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None = None):
     """Attach computed display names to ORM object."""
 
     req.equipment_type_name = (
@@ -216,7 +236,7 @@ def _enrich(req, dept_path_map: dict | None = None):
                 .filter(TrWfInstance.id == req.wf_instance_id)
                 .first()
             )
-            req.is_closed = bool(_inst and _inst.status in ("completed", "terminated"))
+            req.is_closed = bool(_inst and _inst.status in ("completed", "terminated", "cancelled"))
         else:
             req.is_closed = False
     except Exception:
@@ -237,7 +257,7 @@ def _enrich(req, dept_path_map: dict | None = None):
                 .first()
             )
             if _inst2:
-                if _inst2.status in ("completed", "terminated"):
+                if _inst2.status in ("completed", "terminated", "cancelled"):
 
                     if req.current_status_code:
                         _st = (
@@ -250,10 +270,16 @@ def _enrich(req, dept_path_map: dict | None = None):
                         if _st:
                             req.wf_status_name = _st.status_name
                             req.wf_status_color = _st.color
+                        elif _inst2.status == "cancelled":
+                            req.wf_status_name = "Cancelled"
+                            req.wf_status_color = "#6B7280"
                         else:
                             req.wf_status_name = "Completed"
                             req.wf_status_color = "#16A34A"
 
+                    elif _inst2.status == "cancelled":
+                        req.wf_status_name = "Cancelled"
+                        req.wf_status_color = "#6B7280"
                     else:
                         req.wf_status_name = "Completed"
                         req.wf_status_color = "#16A34A"
@@ -304,6 +330,17 @@ def _enrich(req, dept_path_map: dict | None = None):
     except Exception as _e:
         import logging as _log
         _log.getLogger(__name__).debug(f"session_types enrichment failed: {_e}")
+
+    # ─────────────────────────────────────────────
+    # Equipment analytics — risk level + critical findings
+    # ─────────────────────────────────────────────
+    if analytics_map and req.equipment_id:
+        a = analytics_map.get(str(req.equipment_id))
+        req.risk_level        = a["risk_level"]        if a else None
+        req.critical_findings = a["critical_findings"] if a else []
+    else:
+        req.risk_level        = None
+        req.critical_findings = []
 
     return req
 
@@ -522,14 +559,25 @@ def create_testing_request(
 
 @router.get("/request-categories")
 def list_request_categories():
-    """Return all valid request categories with labels for Flutter dropdowns."""
+    """Return all valid request categories with labels/colors for Flutter dropdowns."""
+    _entries = [
+        ("test",             "Testing",           "science",        "Routine or scheduled equipment testing"),
+        ("maintenance",      "Maintenance",       "build",          "Preventive or corrective maintenance"),
+        ("inspection",       "Inspection",        "search",         "Visual or functional inspection"),
+        ("repair_lifecycle", "Repair / Lifecycle","engineering",    "Repair work or lifecycle assessment"),
+        ("failure_registry", "Failure Registry",  "report_problem", "Equipment failure registration and tracking"),
+        ("taqc_inspection",  "TA&QC Inspection",  "verified",       "Type approval and quality control inspection"),
+    ]
     return [
-        {"value": "test",             "label": "Testing",          "icon": "science",        "description": "Routine or scheduled equipment testing"},
-        {"value": "maintenance",      "label": "Maintenance",      "icon": "build",          "description": "Preventive or corrective maintenance"},
-        {"value": "inspection",       "label": "Inspection",       "icon": "search",         "description": "Visual or functional inspection"},
-        {"value": "repair_lifecycle", "label": "Repair / Lifecycle","icon": "engineering",   "description": "Repair work or lifecycle assessment"},
-        {"value": "failure_registry", "label": "Failure Registry", "icon": "report_problem", "description": "Equipment failure registration and tracking"},
-        {"value": "taqc_inspection",  "label": "TA&QC Inspection", "icon": "verified",       "description": "Type approval and quality control inspection"},
+        {
+            "value": value,
+            "label": label,
+            "short_label": RequestCategoryLabels.get(value),
+            "color": RequestCategoryColors.get(value),
+            "icon": icon,
+            "description": description,
+        }
+        for value, label, icon, description in _entries
     ]
 
 
@@ -609,8 +657,9 @@ def list_testing_requests(
     total = service.count_requests(**common)
     items = service.get_requests(skip=skip, limit=ps, **common)
     dept_path_map = _build_dept_path_map(items, db)
+    analytics_map = _build_analytics_map(items, db)
     serialized = [
-        TestingRequestResponse.model_validate(_enrich(r, dept_path_map), from_attributes=True).model_dump(mode='json')
+        TestingRequestResponse.model_validate(_enrich(r, dept_path_map, analytics_map), from_attributes=True).model_dump(mode='json')
         for r in items
     ]
 

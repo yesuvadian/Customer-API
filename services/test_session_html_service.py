@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from models import TestSession, TestSessionReading, TestingRequest, TestResult
+from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
 
 
 class TestSessionHTMLService:
@@ -30,6 +31,7 @@ class TestSessionHTMLService:
             else ""
         )
         form_section = self._build_form_section(test_result)
+        equipment_section = self._equipment_header_html(request, test_result)
 
         return f"""<!DOCTYPE html>
 <html>
@@ -50,6 +52,11 @@ class TestSessionHTMLService:
     table.readings th {{ background:#1b3a6b; color:white; padding:8px 10px; text-align:left }}
     table.readings tr:nth-child(even) {{ background:#f5f8ff }}
     .footer {{ margin-top:24px; font-size:11px; color:#aaa; text-align:center }}
+    .np-grid {{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:16px;
+      background:#eef2fb; padding:12px 16px; border-radius:8px; border:1px solid #c5d3f0 }}
+    .np-item label {{ color:#555; font-size:10px; display:block; margin-bottom:2px;
+      font-weight:700; text-transform:uppercase; letter-spacing:.4px }}
+    .np-item span {{ font-size:13px; font-weight:700; color:#1b3a6b }}
   </style>
 </head>
 <body>
@@ -59,6 +66,8 @@ class TestSessionHTMLService:
   </div>
   <div class="body">
     <div style="margin-bottom:16px">{self._status_badge(session.status or 'scheduled')}</div>
+
+    {equipment_section}
 
     <div class="meta-grid">
       <div class="meta-item"><label>Session Number</label><span>{session.session_number}</span></div>
@@ -97,6 +106,54 @@ class TestSessionHTMLService:
 </html>"""
 
     # ── private helpers ────────────────────────────────────────────────────────
+
+    def _equipment_header_html(self, request: TestingRequest, test_result: TestResult | None = None) -> str:
+        """Equipment identity block — station, UEIC, capacity, voltage ratio etc.
+
+        Session reports previously showed none of this, so a reader had no way
+        to tell which physical asset the readings below belonged to. Capacity
+        and voltage ratio fall back to the test's own form data when the
+        Equipment register itself was never populated with them.
+        """
+        if not request:
+            return ""
+        eq = request.equipment
+        np = (eq.nameplate_data or {}) if eq else {}
+        fallback = test_result.test_data if test_result and test_result.test_data else {}
+
+        station = (request.department.name if request.department else "") or "—"
+        ueic    = (eq.ueic if eq else "") or "—"
+        serial  = (eq.factory_serial_number if eq else "") or "—"
+        make    = (eq.manufacturer if eq else "") or "—"
+        yom     = str(eq.year_of_manufacture) if eq and eq.year_of_manufacture else "—"
+        voltage = (eq.voltage_class if eq else "") or "—"
+        capacity = resolve_capacity(np, fallback, blank="—")
+        v_ratio  = resolve_voltage_ratio(np, fallback, voltage_class=eq.voltage_class if eq else None, blank="—")
+        doc = "—"
+        if eq and eq.commissioned_date:
+            doc = eq.commissioned_date.strftime("%d-%b-%y")
+
+        def _cell(label, value):
+            return (
+                '<div class="np-item">'
+                '<label>' + label + '</label>'
+                '<span>' + str(value) + '</span>'
+                '</div>'
+            )
+
+        return (
+            '<div class="np-grid">'
+            + _cell('Name Of Station', station)
+            + _cell('UEIC', ueic)
+            + _cell('Capacity', capacity)
+            + _cell('Voltage Ratio', v_ratio)
+            + _cell('Voltage Class', voltage)
+            + _cell('Serial Number', serial)
+            + _cell('Make', make)
+            + _cell('YOM', yom)
+            + _cell('Date Of Commission', doc)
+            + '</div>'
+        )
 
     def _fmt(self, v) -> str:
         if v is None:

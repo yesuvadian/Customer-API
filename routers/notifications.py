@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+from category_labels import NotificationRoutingCategoryLabels
 from models import (
     NotificationEventCatalogue,
     NotificationRoutingRule,
@@ -1290,13 +1291,6 @@ def _get_test_types(db: Session = None) -> list:
     Return distinct test category types from CategoryDetails — the real source of truth.
     Falls back to a hardcoded list if db is not provided.
     """
-    _LABELS = {
-        "test":             "Test",
-        "maintenance":      "Maintenance",
-        "inspection":       "Inspection",
-        "repair_lifecycle": "Repair Cycle",
-        "nameplate":        "Nameplate",
-    }
     if db is not None:
         from models import CategoryDetails
         from sqlalchemy import distinct as sa_distinct
@@ -1309,11 +1303,11 @@ def _get_test_types(db: Session = None) -> list:
             .all()
         )
         return [
-            {"value": r[0], "label": _LABELS.get(r[0], r[0].replace("_", " ").title())}
+            {"value": r[0], "label": NotificationRoutingCategoryLabels.get(r[0])}
             for r in rows if r[0]
         ]
     # static fallback (used at module load time for TEST_TYPES constant)
-    return [{"value": k, "label": v} for k, v in _LABELS.items()]
+    return [{"value": k, "label": v} for k, v in NotificationRoutingCategoryLabels.as_dict().items()]
 
 TEST_TYPES = _get_test_types()
 

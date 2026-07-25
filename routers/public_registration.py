@@ -5,6 +5,7 @@ No authentication required — this is the sign-up flow.
 
 import logging
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -115,10 +116,6 @@ def register_org(payload: OrgRegistrationRequest, db: Session = Depends(get_db))
     steps = OrgOnboardingSteps(organization_id=org.id)
     db.add(steps)
 
-    # Trial orgs go straight into the app — no wizard needed
-    org.onboarding_complete = True
-    org.onboarding_completed_at = now
-
     # Set admin usertype
     admin_user.usertype = "org_admin"
 
@@ -210,23 +207,28 @@ def register_org(payload: OrgRegistrationRequest, db: Session = Depends(get_db))
         ))
     db.commit()
 
-    # Send welcome email (non-fatal — org is already created if this fails)
+    # Send welcome email in background so it doesn't delay the response
     login_url = os.getenv("BASE_URL", "http://localhost:3000")
-    try:
-        EmailService().send_org_welcome(
-            to_email=payload.admin_email,
-            org_name=payload.org_name,
-            admin_firstname=payload.admin_firstname,
-            temp_password=temp_password,
-            trial_days=trial_days,
-            login_url=login_url,
-        )
-        _log.info("Welcome email sent to %s for org %s", payload.admin_email, payload.org_name)
-    except Exception as _exc:
-        _log.error(
-            "Welcome email FAILED for %s (org=%s): %s",
-            payload.admin_email, payload.org_name, _exc, exc_info=True,
-        )
+    _email_kwargs = dict(
+        to_email=payload.admin_email,
+        org_name=payload.org_name,
+        admin_firstname=payload.admin_firstname,
+        temp_password=temp_password,
+        trial_days=trial_days,
+        login_url=login_url,
+    )
+
+    def _send_welcome():
+        try:
+            EmailService().send_org_welcome(**_email_kwargs)
+            _log.info("Welcome email sent to %s for org %s", payload.admin_email, payload.org_name)
+        except Exception as _exc:
+            _log.error(
+                "Welcome email FAILED for %s (org=%s): %s",
+                payload.admin_email, payload.org_name, _exc, exc_info=True,
+            )
+
+    threading.Thread(target=_send_welcome, daemon=True).start()
 
     return {
         "message": "Organisation registered successfully. Check your email for login credentials.",

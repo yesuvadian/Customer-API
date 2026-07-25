@@ -17,7 +17,7 @@ from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from models import (
@@ -25,9 +25,29 @@ from models import (
     CategoryMaster,
     Equipment,
     OrgDepartment,
+    RequestCategory,
     TestingRequest,
     TestRequestSchedule,
 )
+
+
+def _request_category_filter(request_category: str):
+    """
+    Build the SQLAlchemy filter clause for TestRequestSchedule.request_category.
+
+    Legacy rows created before this column existed have request_category
+    left NULL. Those legacy rows are effectively 'test' schedules — the
+    same fallback list_master_schedules() already applies — so treat NULL
+    as 'test' here too. Without this, "test" (CM) dashboards silently drop
+    every un-tagged schedule while "maintenance" (PM) ones (which are all
+    explicitly tagged) look complete.
+    """
+    if request_category == RequestCategory.test.value:
+        return or_(
+            TestRequestSchedule.request_category == RequestCategory.test,
+            TestRequestSchedule.request_category.is_(None),
+        )
+    return TestRequestSchedule.request_category == request_category
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -181,11 +201,23 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.in_(eq_ids),
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
-                TestRequestSchedule.request_category == request_category,
+                _request_category_filter(request_category),
                 (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
             )
             .all()
         )
+                # 3b. Backfill any schedule missing next_run_date (should never
+        # happen post-creation, but guards against stale/legacy rows so
+        # the compliance cell always has a real date instead of "na").
+        from services.test_request_schedule_service import _advance_date
+        _needs_commit = False
+        for s in schedules:
+            if s.next_run_date is None:
+                base = s.last_run_date or s.start_date or _now
+                s.next_run_date = _advance_date(base, s.frequency)
+                _needs_commit = True
+        if _needs_commit:
+            self.db.commit()
 
         # Index: equipment_id → {test_type_id → schedule}
         sched_idx: dict[UUID, dict[int, TestRequestSchedule]] = {}
@@ -233,21 +265,27 @@ class TestScheduleDashboardService:
                 tid = col["id"]
                 sched = eq_scheds.get(tid)
                 if sched is None:
-                    cells[str(tid)] = {
-                        "next_due": None,
-                        "days_until_due": None,
-                        "last_tested": None,
-                        "status": "na",
-                    }
+                    # This equipment was never scheduled for this test type
+                    # (columns is the union across every equipment in the
+                    # matrix, not just this equipment's own tests) — omit the
+                    # cell entirely instead of a placeholder "na" entry, so
+                    # the UI only shows badges for tests actually assigned
+                    # to this equipment.
                     continue
 
                 next_run = sched.next_run_date
-                # If next_run_date is beyond end_date, there are no more valid runs
+                # If the cached next_run_date overshoots end_date, the schedule
+                # may have simply drifted out of alignment (e.g. stale/seeded
+                # data) rather than truly expired. Only treat it as "no more
+                # valid runs" once end_date itself has actually passed; while
+                # end_date is still today-or-later, clamp the due date to
+                # end_date so the schedule keeps showing a real day count
+                # instead of going blank.
                 if next_run and sched.end_date:
                     end_naive = sched.end_date.date() if isinstance(sched.end_date, datetime) else sched.end_date
                     next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
                     if next_naive > end_naive:
-                        next_run = None
+                        next_run = sched.end_date if end_naive >= self._today else None
 
                 if next_run:
                     next_date = next_run.date() if isinstance(next_run, datetime) else next_run
@@ -291,6 +329,7 @@ class TestScheduleDashboardService:
                 "voltage_class":      eq.voltage_class,
                 "manufacturer":       eq.manufacturer,
                 "year_of_manufacture":eq.year_of_manufacture,
+                "department_id":      str(eq.department_id) if eq.department_id else None,
                 "department_name":    dept_path[-1] if dept_path else None,
                 "department_path":    dept_path,
                 "model_number":       eq.model_number,
@@ -308,10 +347,14 @@ class TestScheduleDashboardService:
         kpis = self._compute_kpis(rows, columns)
 
         # 8. Upcoming schedule counts per time window
-        # A schedule counts in the 30d bucket if it has a run within 30 days.
-        # It counts in the 180d bucket only if its end_date extends past 30 days
-        # (i.e. it still has runs in the 30–180d range).
-        # Same logic for 365d (end_date must extend past 180 days).
+        # Each schedule is counted in exactly ONE band, based on how many days
+        # until its next run: 0–30 → "30", 31–180 → "180", 181+ → "365"
+        # (the 365d bucket is effectively "365 days or beyond" so every
+        # non-overdue schedule — including longer-cadence ones like triennial
+        # tests due 3 years out — is represented in exactly one bucket).
+        # (Previously each bucket re-counted everything due within its window,
+        # so a schedule due in 7 days was tallied under 30d AND 180d AND 365d —
+        # inflating the wider buckets instead of showing a clean breakdown.)
         today_dt = self._today
         d30 = d180 = d365 = 0
         for s in schedules:
@@ -319,26 +362,27 @@ class TestScheduleDashboardService:
             if not nr:
                 continue
             nr_date = nr.date() if isinstance(nr, datetime) else nr
-            days = (nr_date - today_dt).days
-            if days < 0:
-                continue  # overdue — not "upcoming"
-            # Clamp: if next_run is beyond end_date, no valid run at all
+            # Clamp: if the cached next_run overshoots end_date, treat end_date
+            # itself as the due date (same drift-tolerant logic as the cell
+            # matrix above) rather than dropping the schedule outright — only
+            # skip it once end_date has actually passed.
             end_d = None
             if s.end_date:
                 end_d = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
                 if nr_date > end_d:
-                    continue
-            # days_until_end: None means schedule runs indefinitely
-            days_until_end = (end_d - today_dt).days if end_d else None
+                    if end_d < today_dt:
+                        continue  # truly expired — no valid run at all
+                    nr_date = end_d
+            days = (nr_date - today_dt).days
+            if days < 0:
+                continue  # overdue — not "upcoming"
 
             if days <= 30:
                 d30 += 1
-            # Only count in 180d if schedule still has runs beyond 30 days
-            if days <= 180 and (days_until_end is None or days_until_end > 30):
+            elif days <= 180:
                 d180 += 1
-            # Only count in 365d if schedule still has runs beyond 180 days
-            if days <= 365 and (days_until_end is None or days_until_end > 180):
-                d365 += 1
+            else:
+                d365 += 1  # 181 days and beyond, no upper bound
 
         upcoming_counts = {"30": d30, "180": d180, "365": d365}
 
@@ -375,6 +419,18 @@ class TestScheduleDashboardService:
             )
             .all()
         )
+                # 3b. Backfill any schedule missing next_run_date (should never
+        # happen post-creation, but guards against stale/legacy rows so
+        # the compliance cell always has a real date instead of "na").
+        from services.test_request_schedule_service import _advance_date
+        _needs_commit = False
+        for s in schedules:
+            if s.next_run_date is None:
+                base = s.last_run_date or s.start_date or _now
+                s.next_run_date = _advance_date(base, s.frequency)
+                _needs_commit = True
+        if _needs_commit:
+            self.db.commit()
 
         tt_ids = [s.test_type_id for s in schedules if s.test_type_id]
         tt_map: dict[int, CategoryDetails] = {}
@@ -442,12 +498,14 @@ class TestScheduleDashboardService:
         cells_for_health: dict[str, dict] = {}
         for s in all_scheds:
             next_run = s.next_run_date
-            # Clamp: if next_run is beyond end_date, treat as no upcoming run
+            # Clamp: if next_run overshoots end_date, fall back to end_date
+            # itself (still-valid, just drifted) rather than dropping the run
+            # entirely — only treat it as gone once end_date has passed.
             if next_run and s.end_date:
                 end_naive = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
                 next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
                 if next_naive > end_naive:
-                    next_run = None
+                    next_run = s.end_date if end_naive >= today else None
             if next_run:
                 nd = next_run.date() if isinstance(next_run, datetime) else next_run
                 days = (nd - today).days
@@ -554,7 +612,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.is_(None),
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
-                TestRequestSchedule.request_category == request_category,
+                _request_category_filter(request_category),
                 TestRequestSchedule.department_id.isnot(None),
                 (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now_dept)),
             )
@@ -572,7 +630,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.organization_id == org_id,
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
-                TestRequestSchedule.request_category == request_category,
+                _request_category_filter(request_category),
                 Equipment.department_id.isnot(None),
                 (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now_dept)),
             )
@@ -753,7 +811,7 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id.is_(None),
                 TestRequestSchedule.is_active.is_(True),
                 TestRequestSchedule.is_deleted.is_(False),
-                TestRequestSchedule.request_category == request_category,
+                _request_category_filter(request_category),
                 (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > datetime.now(timezone.utc))),
             )
         )
@@ -787,12 +845,14 @@ class TestScheduleDashboardService:
         items = []
         for s in schedules:
             next_run = s.next_run_date
-            # Clamp: if next_run is beyond end_date, no more valid runs
+            # Clamp: if next_run overshoots end_date, fall back to end_date
+            # itself (still-valid, just drifted) rather than dropping the run
+            # entirely — only treat it as gone once end_date has passed.
             if next_run and s.end_date:
                 end_naive = s.end_date.date() if isinstance(s.end_date, datetime) else s.end_date
                 next_naive = next_run.date() if isinstance(next_run, datetime) else next_run
                 if next_naive > end_naive:
-                    next_run = None
+                    next_run = s.end_date if end_naive >= self._today else None
             if next_run:
                 next_date = next_run.date() if isinstance(next_run, datetime) else next_run
                 days = (next_date - self._today).days

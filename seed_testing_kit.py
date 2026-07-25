@@ -242,33 +242,46 @@ def run(db: Session):
 
 def seed_module_and_privileges():
     """
-    Create the 'testing_kit_register' Module and grant Asset Data Officer
+    Create the 'Testing Kit Registry' Module and grant Asset Data Officer
     full RW access (can_view, can_add, can_edit).
     Uses VendorSessionLocal — the same DB as roles/modules.
     """
     db = VendorSessionLocal()
     try:
-        # 1. Ensure module exists with correct underscore path
-        module = db.query(Module).filter(Module.name == "testing_kit_register").first()
+        # 1. Ensure module exists — look up by path (stable across renames),
+        # not by name, so re-running this after a name change updates the
+        # existing row in place instead of creating a duplicate.
+        module = db.query(Module).filter(Module.path == "testing_kit_register").first()
+        if not module:
+            # Fall back to the old leading-slash path / old raw-name row so an
+            # existing install gets migrated in place rather than duplicated.
+            module = db.query(Module).filter(
+                (Module.path == "/testing_kit_register") | (Module.name == "testing_kit_register")
+            ).first()
         if module:
-            if module.path != "/testing_kit_register":
-                old_path = module.path
-                module.path = "/testing_kit_register"
-                print(f"[OK]   Fixed module path -> /testing_kit_register (was: {old_path})")
+            changed = []
+            if module.name != "Testing Kit Registry":
+                changed.append(f"name: {module.name!r} -> 'Testing Kit Registry'")
+                module.name = "Testing Kit Registry"
+            if module.path != "testing_kit_register":
+                changed.append(f"path: {module.path!r} -> 'testing_kit_register'")
+                module.path = "testing_kit_register"
+            if changed:
+                print(f"[OK]   Fixed module ({', '.join(changed)})")
             else:
-                print(f"[SKIP] Module 'testing_kit_register' already exists (id={module.id})")
+                print(f"[SKIP] Module 'Testing Kit Registry' already up to date (id={module.id})")
         else:
             module = Module(
-                name="testing_kit_register",
+                name="Testing Kit Registry",
                 description="Testing Kit Register — register and manage testing instruments",
-                path="/testing_kit_register",
+                path="testing_kit_register",
                 group_name="ASSETS",
                 is_active=True,
                 is_menu=True,
             )
             db.add(module)
             db.flush()
-            print(f"[OK]   Module 'testing_kit_register' created (id={module.id})")
+            print(f"[OK]   Module 'Testing Kit Registry' created (id={module.id})")
 
         def _upsert_perm(role_obj, **flags):
             p = db.query(OrgRolePermission).filter(

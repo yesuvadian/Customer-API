@@ -1083,6 +1083,18 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             if hasattr(schedule, key):
                 setattr(schedule, key, value)
 
+        # If the frequency changed, next_run_date (set from the OLD
+        # frequency when this schedule was created) is now stale — e.g. a
+        # schedule edited from weekly to monthly would otherwise keep a
+        # next_run_date only ~7 days out despite the "monthly" label, and
+        # any equipment commissioned afterward inherits that inconsistency.
+        # Recompute it from start_date so it always matches the current
+        # frequency.
+        if "frequency" in data:
+            schedule.next_run_date = _advance_date(
+                schedule.start_date, schedule.frequency
+            )
+
         schedule.modified_by = user_id
 
         schedule.mts = self._utc_now()

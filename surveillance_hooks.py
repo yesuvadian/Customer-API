@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     Equipment,
+    RepairStageAuditLog,
     RepairWorkflow,
     RepairWorkflowDefinition,
     RepairStageDefinition,
@@ -57,12 +58,12 @@ def _on_repair_workflow_completed(
     """
     try:
         # Only create surveillance for repair-type workflows
-        # Check workflow_type field (case-insensitive: 'BREAKDOWN', 'OVERHAUL', 'REPAIR')
-        workflow_type_upper = (workflow.workflow_type or "").upper()
-        if workflow_type_upper not in ['REPAIR', 'BREAKDOWN', 'OVERHAUL']:
+        # workflow_code is the reliable identifier — must match repair_workflow_definitions
+        workflow_code_upper = (workflow.workflow_code or "").upper()
+        if workflow_code_upper not in ['BREAKDOWN', 'OVERHAUL']:
             logger.info(
-                "[SurveillanceHook] Skipping surveillance for workflow_type=%s (workflow_id=%s)",
-                workflow.workflow_type, workflow.id
+                "[SurveillanceHook] Skipping surveillance for workflow_code=%s (workflow_id=%s)",
+                workflow.workflow_code, workflow.id
             )
             return
 
@@ -147,6 +148,19 @@ def _on_repair_workflow_completed(
             surveillance_workflow.current_stage_instance_id = stages[0].id
             stages[0].status = 'in_progress'
             stages[0].started_at = start_date
+
+        # Audit log — every other workflow-creation path (BREAKDOWN, OVERHAUL,
+        # CALIBRATION, ANNUAL_AUDIT, PRE_COMMISSION) logs a "created" entry so
+        # it shows up in the workflow dashboard's Recent Activity feed; this
+        # auto-triggered surveillance workflow was missing that entirely.
+        db.add(RepairStageAuditLog(
+            workflow_id=surveillance_workflow.id,
+            stage_id=stages[0].stage_id if stages else None,
+            action="created",
+            performed_by=user_id,
+            note=f"Post-commissioning surveillance auto-started from completed repair {workflow.workflow_number}",
+            performed_at=start_date,
+        ))
 
         # Create test request schedules for all quarters
         # This will be picked up by the daily scheduler to create testing requests
@@ -408,7 +422,7 @@ def register_surveillance_hooks():
     # Listen for repair workflow completion (final stage, regardless of number)
     # workflow_code will be checked dynamically for 'repair' or 'breakdown'
     # Register for common repair workflow codes
-    for workflow_code in ['REPAIR', 'BREAKDOWN', 'OVERHAUL']:
+    for workflow_code in ['BREAKDOWN', 'OVERHAUL']:
         register(workflow_code, 'completed', _on_repair_workflow_completed)
 
     logger.info("[SurveillanceHook] Hooks registered for workflow completion events")

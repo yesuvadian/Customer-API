@@ -168,9 +168,6 @@ class ReportService:
         elements = []
         elements.append(Paragraph("TEST REPORT", styles["ReportTitle"]))
 
-        org_line = "PowerXchange.ai — Procurement Portal"
-        elements.append(Paragraph(org_line, styles["ReportSubTitle"]))
-
         elements.append(HRFlowable(
             width="100%", thickness=1.5,
             color=colors.HexColor("#2c5f8a"),
