@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import func
 from services.tan_delta_extractor import TanDeltaExtractor
 from services.tan_delta_validator import TanDeltaValidator
+from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
 
 
 class TestResultPDFService:
@@ -721,6 +722,45 @@ class TestResultPDFService:
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#DDDDDD')),
             ]))
             story.append(request_table)
+            story.append(Spacer(1, 0.3*inch))
+
+        # ============================================================
+        # EQUIPMENT DETAILS (device under test — distinct from the
+        # "Testing Kit Used" section below, which covers the instrument)
+        # ============================================================
+        eq = testing_request.equipment if testing_request else None
+        if eq:
+            eq_nd = eq.nameplate_data or {}
+            fallback = result.test_data or {}
+            capacity = resolve_capacity(eq_nd, fallback)
+            voltage_ratio = resolve_voltage_ratio(eq_nd, fallback, voltage_class=eq.voltage_class)
+
+            story.append(Paragraph("Equipment Details", heading_style))
+            equipment_data = [
+                ['UEIC:', eq.ueic or '-'],
+                ['Station:', testing_request.department.name if testing_request.department else '-'],
+                ['Manufacturer:', eq.manufacturer or '-'],
+                ['Serial Number:', eq.factory_serial_number or '-'],
+                ['Capacity:', capacity],
+                ['Voltage Class:', eq.voltage_class or '-'],
+                ['Voltage Ratio:', voltage_ratio],
+                ['Year of Mfg:', str(eq.year_of_manufacture) if eq.year_of_manufacture else '-'],
+            ]
+            equipment_table = Table(equipment_data, colWidths=[2*inch, 4.5*inch])
+            equipment_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8F9FA')),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#DDDDDD')),
+            ]))
+            story.append(equipment_table)
             story.append(Spacer(1, 0.3*inch))
 
         # ============================================================

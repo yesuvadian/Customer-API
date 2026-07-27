@@ -234,6 +234,10 @@ class ReportingService:
 
     def _q_equipment_condition(self, p: dict) -> list[dict]:
         org = _org_clause(self.org_id, "e")
+        # Capacity and voltage ratio live in nameplate_data (JSONB) under a
+        # handful of different key names depending on which template was used
+        # at onboarding — mirrors services/nameplate_helper.py's key list so
+        # this report shows the same values the PDF/HTML reports do.
         sql = text(f"""
             SELECT
                 e.ueic,
@@ -242,7 +246,26 @@ class ReportingService:
                 e.voltage_class,
                 e.status                            AS equipment_status,
                 e.manufacturer,
+                e.factory_serial_number             AS serial_number,
                 e.year_of_manufacture,
+                COALESCE(
+                    e.nameplate_data->>'rated_mva',
+                    e.nameplate_data->>'rated_mva_onan',
+                    e.nameplate_data->>'rated_mva_onan_mva',
+                    e.nameplate_data->>'capacity_mva',
+                    e.nameplate_data->>'mva_rating',
+                    e.nameplate_data->>'rated_capacity',
+                    e.nameplate_data->>'capacity',
+                    e.nameplate_data->>'kva_rating'
+                )                                    AS capacity,
+                COALESCE(
+                    e.nameplate_data->>'voltage_ratio',
+                    NULLIF(concat_ws('/',
+                        e.nameplate_data->>'hv_voltage',
+                        e.nameplate_data->>'mv_voltage',
+                        e.nameplate_data->>'lv_voltage'), ''),
+                    e.voltage_class
+                )                                    AS voltage_ratio,
                 COALESCE(tr_latest.evaluation_result->>'overall', 'NOT_TESTED') AS condition,
                 tr_latest.tested_at                 AS last_tested_at,
                 tr_latest.test_name                 AS last_test_name

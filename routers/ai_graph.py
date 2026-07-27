@@ -113,6 +113,36 @@ def _scoped_ea(department_id: uuid.UUID | None, db: Session, organization_id=Non
     return q.all()
 
 
+def _apply_commission_date_scope(
+    eq_ids: list,
+    ea_list: list[EquipmentAnalytics],
+    ea_map: dict | None,
+    db: Session,
+    commission_date_from: date | None,
+    commission_date_to: date | None,
+):
+    """Narrow eq_ids/ea_list/ea_map down to equipment whose commissioned_date
+    falls within [commission_date_from, commission_date_to] (either bound optional).
+    No-op when neither bound is given."""
+    if not commission_date_from and not commission_date_to:
+        return eq_ids, ea_list, ea_map
+    if not eq_ids:
+        return eq_ids, ea_list, ea_map
+
+    dq = db.query(Equipment.id).filter(Equipment.id.in_(eq_ids))
+    if commission_date_from:
+        dq = dq.filter(Equipment.commissioned_date >= commission_date_from)
+    if commission_date_to:
+        dq = dq.filter(Equipment.commissioned_date <= commission_date_to)
+    allowed = {r[0] for r in dq.all()}
+
+    eq_ids  = [i for i in eq_ids if i in allowed]
+    ea_list = [ea for ea in ea_list if ea.equipment_id in allowed]
+    if ea_map is not None:
+        ea_map = {k: v for k, v in ea_map.items() if k in allowed}
+    return eq_ids, ea_list, ea_map
+
+
 def _life_bucket(years: float) -> str:
     if years < 5:   return "0–5 yrs"
     if years < 10:  return "5–10 yrs"
@@ -151,6 +181,8 @@ def _param_risk_score(condition: str | None) -> float:
 @router.get("/overview", summary="Fleet KPIs + health condition distribution + quarterly trend")
 def get_overview(
     department_id: Optional[uuid.UUID] = Query(None),
+    commission_date_from: Optional[date] = Query(None),
+    commission_date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -171,6 +203,8 @@ def get_overview(
     ea_list: list[EquipmentAnalytics] = _scoped_ea(department_id, db, organization_id=user.organization_id)
     ea_map = {ea.equipment_id: ea for ea in ea_list}
     eq_ids = list(ea_map.keys())
+    eq_ids, ea_list, ea_map = _apply_commission_date_scope(
+        eq_ids, ea_list, ea_map, db, commission_date_from, commission_date_to)
 
     # ── Equipment register (for type name + commissioned_date) ───────────────
     eq_q = db.query(Equipment).filter(Equipment.id.in_(eq_ids)) if eq_ids else []
@@ -299,6 +333,8 @@ def get_overview(
 @router.get("/life-left", summary="Per-asset remaining life and life-trend")
 def get_life_left(
     department_id: Optional[uuid.UUID] = Query(None),
+    commission_date_from: Optional[date] = Query(None),
+    commission_date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -311,6 +347,8 @@ def get_life_left(
     ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
     ea_map = {ea.equipment_id: ea for ea in ea_list}
+    eq_ids, ea_list, ea_map = _apply_commission_date_scope(
+        eq_ids, ea_list, ea_map, db, commission_date_from, commission_date_to)
 
     eq_list: list[Equipment] = db.query(Equipment).filter(
         Equipment.id.in_(eq_ids)
@@ -403,6 +441,8 @@ _DP_KEYS = ["dp", "degree_of_polymerization", "polymerisation", "cellulose"]
 @router.get("/ageing", summary="Ageing risk radar axes + DP degree of polymerisation trend")
 def get_ageing(
     department_id: Optional[uuid.UUID] = Query(None),
+    commission_date_from: Optional[date] = Query(None),
+    commission_date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -417,6 +457,8 @@ def get_ageing(
     ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
     ea_map = {ea.equipment_id: ea for ea in ea_list}
+    eq_ids, ea_list, ea_map = _apply_commission_date_scope(
+        eq_ids, ea_list, ea_map, db, commission_date_from, commission_date_to)
 
     eq_list = db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all() if eq_ids else []
     type_ids = list({e.equipment_type_id for e in eq_list if e.equipment_type_id})
@@ -551,6 +593,8 @@ _TREND_GROUPS = {
 @router.get("/dielectric", summary="Dielectric risk radar + DGA / Tan Delta / BDV parameter trends")
 def get_dielectric(
     department_id: Optional[uuid.UUID] = Query(None),
+    commission_date_from: Optional[date] = Query(None),
+    commission_date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -566,6 +610,8 @@ def get_dielectric(
     """
     ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
+    eq_ids, ea_list, _ = _apply_commission_date_scope(
+        eq_ids, ea_list, None, db, commission_date_from, commission_date_to)
 
     eq_list = db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all() if eq_ids else []
     eq_label_map = {e.id: e.ueic for e in eq_list}
@@ -665,6 +711,8 @@ def get_grouped(
         "Dimension to group by: equipment_type | make | capacity | "
         "make_model | year_commissioned | year_failure | year_replaced"
     )),
+    commission_date_from: Optional[date] = Query(None),
+    commission_date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -680,6 +728,8 @@ def get_grouped(
     ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids  = [ea.equipment_id for ea in ea_list]
     ea_map  = {ea.equipment_id: ea for ea in ea_list}
+    eq_ids, ea_list, ea_map = _apply_commission_date_scope(
+        eq_ids, ea_list, ea_map, db, commission_date_from, commission_date_to)
 
     eq_list: list[Equipment] = db.query(Equipment).filter(
         Equipment.id.in_(eq_ids)
