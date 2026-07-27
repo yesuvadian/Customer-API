@@ -295,6 +295,12 @@ class TestingRequestService:
                 (TestingRequest.request_number.ilike(term)) |
                 (TestingRequest.title.ilike(term))
             )
+            if date_from:
+                query = query.filter(func.date(TestingRequest.cts) >= date_from)
+
+            if date_to:
+                query = query.filter(func.date(TestingRequest.cts) <= date_to)
+                
         if status_filter:
             if status_filter == "open":
                 query = query.filter(
@@ -415,12 +421,24 @@ class TestingRequestService:
             query = query.filter(TestingRequest.department_id.in_(department_ids))
         elif department_id:
             query = query.filter(TestingRequest.department_id == department_id)
+        from datetime import datetime, timedelta
+
         if date_from:
-            from datetime import datetime
-            query = query.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
+            query = query.filter(
+                TestingRequest.cts >= datetime.combine(
+                    date_from,
+                    datetime.min.time()
+                )
+            )
+
         if date_to:
-            from datetime import datetime, timedelta
-            query = query.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+            query = query.filter(
+                TestingRequest.cts <
+                datetime.combine(
+                    date_to + timedelta(days=1),
+                    datetime.min.time()
+                )
+            )
 
         if voltage_class:
             if voltage_class == "Unknown":
@@ -1451,6 +1469,8 @@ class TestingRequestService:
         department_ids: Optional[List[UUID]] = None,
         request_category: Optional[str] = None,
         is_closed: Optional[bool] = None,
+        date_from=None,
+        date_to=None,
     ) -> List[dict]:
         """Return testing requests grouped by equipment with alert bar status."""
         from datetime import timezone
