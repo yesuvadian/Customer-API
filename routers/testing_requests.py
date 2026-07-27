@@ -16,6 +16,7 @@ from schemas import (
     TestingRequestAssign,
     TestingRequestResponse,
 )
+from services.reporting_service import _date
 from services.testing_request_service import TestingRequestService
 from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
 
@@ -492,27 +493,46 @@ def get_dropdown_values(master_desc: str, db: Session = Depends(get_db)):
 
 
 # ─── List testers (users with Tester role, optionally filtered by location) ───
+from datetime import date as _date
+
 @router.get("/by-equipment")
 def get_by_equipment(
     org_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
     request_category: Optional[str] = None,
     is_closed: Optional[bool] = None,
+    date_from: Optional[str] = Query(
+        None, description="Filter request creation date >= YYYY-MM-DD"
+    ),
+    date_to: Optional[str] = Query(
+        None, description="Filter request creation date <= YYYY-MM-DD"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Return testing requests grouped by equipment with alert bar status."""
+
     eff_org_id = org_id or current_user.organization_id
     if not eff_org_id:
         raise HTTPException(status_code=400, detail="org_id required")
+
     dept_ids = None
     if department_id:
         dept_ids = get_dept_subtree_ids(db, department_id, eff_org_id)
+
+    def _parse_date(s: Optional[str]):
+        try:
+            return _date.fromisoformat(s) if s else None
+        except ValueError:
+            return None
+
     return TestingRequestService(db).get_by_equipment(
         org_id=eff_org_id,
         department_ids=dept_ids,
         request_category=request_category,
         is_closed=is_closed,
+        date_from=_parse_date(date_from),
+        date_to=_parse_date(date_to),
     )
 
 

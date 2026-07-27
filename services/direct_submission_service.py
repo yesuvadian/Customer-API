@@ -41,6 +41,7 @@ from models import (
 )
 from utils.common_service import UTCDateTimeMixin
 from services.tr_workflow_routing_service import WorkflowRoutingService
+from datetime import datetime, timedelta
 
 
 # ── prefix map ────────────────────────────────────────────────────────────────
@@ -335,6 +336,8 @@ class DirectSubmissionService:
         limit: int = 50,
         own_only: bool = False,
         department_id=None,
+        date_from=None,
+        date_to=None,
     ) -> list:
         """
         Return direct-submission records for a given category, dept-scoped
@@ -378,6 +381,23 @@ class DirectSubmissionService:
 
         if own_only:
             query = query.filter(TestingRequest.originator_id == user.id)
+
+        if date_from:
+            query = query.filter(
+                TestingRequest.cts >= datetime.combine(
+                    date_from,
+                    datetime.min.time(),
+                )
+            )
+
+        if date_to:
+            query = query.filter(
+                TestingRequest.cts <
+                datetime.combine(
+                    date_to + timedelta(days=1),
+                    datetime.min.time(),
+                )
+            )
 
         records = query.offset(skip).limit(limit + 1).all()
         has_more = len(records) > limit

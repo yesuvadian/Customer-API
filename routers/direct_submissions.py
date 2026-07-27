@@ -25,6 +25,9 @@ from auth_utils import get_current_user
 from database import get_db
 from models import User, TrWfStatus, TrWfInstance, TrWfStage, TrWfDefinition, TestingRequest, RequestCategory
 from services.direct_submission_service import DirectSubmissionService
+from datetime import date
+
+from services.testing_request_service import TestingRequestService
 
 router = APIRouter(
     prefix="/direct-submissions",
@@ -126,9 +129,10 @@ def get_by_equipment(
     is_closed: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None), 
 ):
     """Return direct submissions grouped by equipment with alert bar status."""
-    from services.testing_request_service import TestingRequestService
     from utils.common_service import get_dept_subtree_ids
     org_id = current_user.organization_id
     if not org_id:
@@ -141,27 +145,26 @@ def get_by_equipment(
         department_ids=dept_ids,
         request_category=category,
         is_closed=is_closed,
+        date_from=date_from,
+        date_to=date_to,
     )
-
 
 @router.get("/")
 def list_direct_submissions(
-    category: str = Query(
-        ..., description="failure_registry | taqc_inspection"
-    ),
-    own_only: bool = Query(
-        False,
-        description="If true, return only submissions created by the current user",
-    ),
-    department_id: Optional[UUID] = Query(
-        None,
-        description="Filter by department (overrides automatic user-scope filtering)",
-    ),
+    category: str = Query(...),
+    own_only: bool = Query(False),
+    department_id: Optional[UUID] = Query(None),
+
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    
     """List direct-submission records for a given category."""
     svc = DirectSubmissionService(db)
     return svc.list_submissions(
@@ -171,6 +174,8 @@ def list_direct_submissions(
         limit=limit,
         own_only=own_only,
         department_id=department_id,
+        date_from=date_from,
+        date_to=date_to,
     )
 
 
