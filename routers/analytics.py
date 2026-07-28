@@ -100,6 +100,8 @@ def _build_dept_rollup(equipment_list: list, scope_dept_id, db) -> dict:
 @router.get("/asset-breakdown", summary="Asset Dashboard grouping counts (voltage, type, make, year, dept)")
 def get_asset_breakdown(
     department_id: Optional[uuid.UUID] = Query(None),
+    date_from:      Optional[date]      = Query(None, description="Filter test counts to TestResult.tested_at >= this date (YYYY-MM-DD)"),
+    date_to:        Optional[date]      = Query(None, description="Filter test counts to TestResult.tested_at <= this date (YYYY-MM-DD)"),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -201,14 +203,15 @@ def get_asset_breakdown(
     by_failure_year:  dict[str, int]  = {}
     by_failure_year_h: dict[str, dict] = {}
 
-    # Test counts per equipment (all statuses)
+    # Test counts per equipment (all statuses; respects date filter when given)
     eq_id_set = {e.id for e in all_eq}
-    tc_rows_all = (
-        db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
-        .filter(TestingRequest.equipment_id.in_(eq_id_set))
-        .group_by(TestingRequest.equipment_id)
-        .all()
-    ) if eq_id_set else []
+    if eq_id_set:
+        tc_q = db.query(TestingRequest.equipment_id, func.count(func.distinct(TestingRequest.id))) \
+            .filter(TestingRequest.equipment_id.in_(eq_id_set))
+        tc_q = _apply_tested_at_filter(tc_q, date_from, date_to)
+        tc_rows_all = tc_q.group_by(TestingRequest.equipment_id).all()
+    else:
+        tc_rows_all = []
     eq_test_counts: dict = {str(r[0]): r[1] for r in tc_rows_all}
 
     # Test groupings (parallel to asset groupings)
@@ -298,8 +301,8 @@ def get_asset_breakdown(
 @router.get("/dashboard", summary="AI Analytics Dashboard summary")
 def get_analytics_dashboard(
     department_id: Optional[uuid.UUID] = Query(None),
-    date_from:     Optional[date]      = Query(None, description="Filter completed_at >= this date (YYYY-MM-DD)"),
-    date_to:       Optional[date]      = Query(None, description="Filter completed_at <= this date (YYYY-MM-DD)"),
+    date_from:     Optional[date]      = Query(None, description="Filter TestResult.tested_at >= this date (YYYY-MM-DD)"),
+    date_to:       Optional[date]      = Query(None, description="Filter TestResult.tested_at <= this date (YYYY-MM-DD)"),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -341,13 +344,13 @@ def get_analytics_dashboard(
     # Build per-equipment test count (respects date filter)
     if all_eq_ids:
         kpi_tc_q = (
-            db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+            db.query(TestingRequest.equipment_id, func.count(func.distinct(TestingRequest.id)))
             .filter(
                 TestingRequest.equipment_id.in_(all_eq_ids),
                 TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
             )
         )
-        kpi_tc_q = _apply_completed_at_filter(kpi_tc_q, date_from, date_to)
+        kpi_tc_q = _apply_tested_at_filter(kpi_tc_q, date_from, date_to)
         kpi_tc_rows = kpi_tc_q.group_by(TestingRequest.equipment_id).all()
         kpi_test_count_map: dict = {row[0]: row[1] for row in kpi_tc_rows}
     else:
@@ -358,13 +361,13 @@ def get_analytics_dashboard(
     # Tests-by-category breakdown for AI analytics tab
     if all_eq_ids:
         cat_q = (
-            db.query(TestingRequest.request_category, func.count(TestingRequest.id))
+            db.query(TestingRequest.request_category, func.count(func.distinct(TestingRequest.id)))
             .filter(
                 TestingRequest.equipment_id.in_(all_eq_ids),
                 TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
             )
         )
-        cat_q = _apply_completed_at_filter(cat_q, date_from, date_to)
+        cat_q = _apply_tested_at_filter(cat_q, date_from, date_to)
         cat_rows = cat_q.group_by(TestingRequest.request_category).all()
         tests_by_category = {
             (getattr(row[0], "value", str(row[0])) if row[0] else "unknown"): row[1]
@@ -457,7 +460,7 @@ def get_analytics_dashboard(
                 TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
             )
         )
-        cat_eq_rows = _apply_completed_at_filter(cat_eq_rows, date_from, date_to)
+        cat_eq_rows = _apply_tested_at_filter(cat_eq_rows, date_from, date_to)
         for cat, eq_id in cat_eq_rows.all():
             key = getattr(cat, "value", str(cat)) if cat else "unknown"
             cat_tested.setdefault(key, set()).add(eq_id)
@@ -885,13 +888,13 @@ def get_dashboard_equipment(
 
     # Test counts (respects date filter)
     tc_q = (
-        db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+        db.query(TestingRequest.equipment_id, func.count(func.distinct(TestingRequest.id)))
         .filter(
             TestingRequest.equipment_id.in_(eq_ids),
             TestingRequest.status.in_(("completed", "closed")),
         )
     )
-    tc_q = _apply_completed_at_filter(tc_q, date_from, date_to)
+    tc_q = _apply_tested_at_filter(tc_q, date_from, date_to)
     test_count_map = {row[0]: row[1] for row in tc_q.group_by(TestingRequest.equipment_id).all()}
 
     # When a date filter is active, only show equipment that has tests in that period
@@ -1506,12 +1509,19 @@ def get_test_analytics_with_raw(
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _apply_completed_at_filter(q, date_from: Optional[date], date_to: Optional[date]):
-    """Filter a TestingRequest query by completed_at range (both bounds optional)."""
+def _apply_tested_at_filter(q, date_from: Optional[date], date_to: Optional[date]):
+    """Join TestResult onto a TestingRequest-based query and filter by
+    TestResult.tested_at (coalesced with cts for legacy rows with no
+    tested_at), both bounds optional. No-op (no join) when neither bound is
+    given, so callers' row shape is unchanged for the unfiltered case."""
+    if not date_from and not date_to:
+        return q
+    q = q.join(TestResult, TestResult.testing_request_id == TestingRequest.id)
+    coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
     if date_from:
-        q = q.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
+        q = q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
-        q = q.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        q = q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
     return q
 
 
