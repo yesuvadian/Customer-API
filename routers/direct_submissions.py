@@ -157,6 +157,7 @@ def list_direct_submissions(
 
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
+    is_closed: Optional[bool] = Query(None),
 
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -164,7 +165,6 @@ def list_direct_submissions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    
     """List direct-submission records for a given category."""
     svc = DirectSubmissionService(db)
     return svc.list_submissions(
@@ -176,6 +176,7 @@ def list_direct_submissions(
         department_id=department_id,
         date_from=date_from,
         date_to=date_to,
+        is_closed=is_closed,
     )
 
 

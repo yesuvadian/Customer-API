@@ -15,8 +15,9 @@ FR flow:
 TAQC flow: TR + TestResult + Recommendation (direct to TechApprover queue).
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import UUID
+from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm.attributes import flag_modified
@@ -335,9 +336,10 @@ class DirectSubmissionService:
         skip: int = 0,
         limit: int = 50,
         own_only: bool = False,
-        department_id=None,
-        date_from=None,
-        date_to=None,
+        department_id: Optional[UUID] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        is_closed: Optional[bool] = None,
     ) -> list:
         """
         Return direct-submission records for a given category, dept-scoped
@@ -382,22 +384,53 @@ class DirectSubmissionService:
         if own_only:
             query = query.filter(TestingRequest.originator_id == user.id)
 
-        if date_from:
-            query = query.filter(
-                TestingRequest.cts >= datetime.combine(
-                    date_from,
-                    datetime.min.time(),
-                )
-            )
+        if date_from or date_to:
 
-        if date_to:
-            query = query.filter(
-                TestingRequest.cts <
-                datetime.combine(
-                    date_to + timedelta(days=1),
-                    datetime.min.time(),
+            # All tab -> use TestResult.tested_at
+            if is_closed is None:
+
+                subquery = self.db.query(TestResult.testing_request_id)
+
+                if date_from:
+                    subquery = subquery.filter(
+                        TestResult.tested_at >= datetime.combine(
+                            date_from,
+                            datetime.min.time(),
+                        )
+                    )
+
+                if date_to:
+                    subquery = subquery.filter(
+                        TestResult.tested_at <
+                        datetime.combine(
+                            date_to + timedelta(days=1),
+                            datetime.min.time(),
+                        )
+                    )
+
+                query = query.filter(
+                    TestingRequest.id.in_(subquery.subquery())
                 )
-            )
+
+            # Open tab -> use TestingRequest.cts
+            else:
+
+                if date_from:
+                    query = query.filter(
+                        TestingRequest.cts >= datetime.combine(
+                            date_from,
+                            datetime.min.time(),
+                        )
+                    )
+
+                if date_to:
+                    query = query.filter(
+                        TestingRequest.cts <
+                        datetime.combine(
+                            date_to + timedelta(days=1),
+                            datetime.min.time(),
+                        )
+                    )
 
         records = query.offset(skip).limit(limit + 1).all()
         has_more = len(records) > limit
