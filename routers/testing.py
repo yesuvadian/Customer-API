@@ -893,14 +893,27 @@ def preview_test_result(
     current_user: User = Depends(get_current_user),
 ):
     """Render test result as styled HTML (browser-friendly preview)."""
-    from models import TestResult
+    from models import TestResult, TestingRequest
+    from sqlalchemy.orm import joinedload as _joinedload
     from services.org_test_template_service import OrgTestTemplateService
+    from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
 
     service = TestingService(db)
     result = db.query(TestResult).filter(TestResult.id == result_id).first()
 
     if not result:
         raise HTTPException(status_code=404, detail="Test result not found")
+
+    # Equipment under test — pulled from the linked TestingRequest's Equipment
+    # register, falling back to this result's own submitted form data when the
+    # register is incomplete (same lookup used by every other report format).
+    _req_for_eq = (
+        db.query(TestingRequest)
+        .options(_joinedload(TestingRequest.equipment), _joinedload(TestingRequest.department))
+        .filter(TestingRequest.id == result.testing_request_id)
+        .first()
+    )
+    _eq = _req_for_eq.equipment if _req_for_eq else None
 
     # Get template definition to render fields properly
     template_service = OrgTestTemplateService(db)
@@ -1004,6 +1017,23 @@ def preview_test_result(
         html += '</div>'
         return html
 
+    # UEIC and Voltage Ratio never appear as fields on any test template — the
+    # template only captures what the tester typed for that submission
+    # (Capacity/Voltage Class/etc., which stay as-is below). These two are
+    # pulled from the live Equipment register instead, with a fallback to
+    # this result's own test_data, and merged into whichever section is
+    # titled "Equipment Details" (or added as a new section if none exists).
+    _equipment_extra_html = ""
+    _equipment_section_merged = False
+    if _eq:
+        _eq_nd = _eq.nameplate_data or {}
+        _ueic = _eq.ueic or "-"
+        _voltage_ratio = resolve_voltage_ratio(_eq_nd, test_data, voltage_class=_eq.voltage_class)
+        _equipment_extra_html = f'''
+                <div class="field"><label>UEIC</label><div class="value">{_ueic}</div></div>
+                <div class="field"><label>Voltage Ratio</label><div class="value">{_voltage_ratio}</div></div>
+                '''
+
     fields_html = ""
 
     if template and template.template_data:
@@ -1015,6 +1045,10 @@ def preview_test_result(
 
             if not fields:
                 continue
+
+            is_equipment_section = "equipment" in section_title.lower()
+            if is_equipment_section:
+                _equipment_section_merged = True
 
             fields_html += f'<div class="section"><h3>{section_title}</h3><div class="fields">'
 
@@ -1058,12 +1092,38 @@ def preview_test_result(
                 </div>
                 '''
 
+            if is_equipment_section:
+                fields_html += _equipment_extra_html
             fields_html += '</div></div>'
     else:
         # No template - render raw test_data intelligently
         fields_html += '<div class="section"><h3>Test Data</h3>'
         fields_html += render_test_data_structure(test_data)
         fields_html += '</div>'
+
+    # No "Equipment Details" section existed to merge into (either there was
+    # no template, or its sections don't include one) — add a dedicated one
+    # from the register so the equipment is still identifiable in the report.
+    if _eq and not _equipment_section_merged:
+        _eq_nd = _eq.nameplate_data or {}
+        _station = _req_for_eq.department.name if _req_for_eq and _req_for_eq.department else "-"
+        _capacity = resolve_capacity(_eq_nd, test_data)
+        _voltage_ratio = resolve_voltage_ratio(_eq_nd, test_data, voltage_class=_eq.voltage_class)
+        fields_html += f'''
+        <div class="section">
+            <h3>Equipment Details</h3>
+            <div class="fields">
+                <div class="field"><label>UEIC</label><div class="value">{_eq.ueic or "-"}</div></div>
+                <div class="field"><label>Station</label><div class="value">{_station}</div></div>
+                <div class="field"><label>Manufacturer</label><div class="value">{_eq.manufacturer or "-"}</div></div>
+                <div class="field"><label>Serial Number</label><div class="value">{_eq.factory_serial_number or "-"}</div></div>
+                <div class="field"><label>Capacity</label><div class="value">{_capacity}</div></div>
+                <div class="field"><label>Voltage Class</label><div class="value">{_eq.voltage_class or "-"}</div></div>
+                <div class="field"><label>Voltage Ratio</label><div class="value">{_voltage_ratio}</div></div>
+                <div class="field"><label>Year of Mfg</label><div class="value">{_eq.year_of_manufacture or "-"}</div></div>
+            </div>
+        </div>
+        '''
 
     # ── Testing Kit Used ────────────────────────────────────────────────────────
     if result.testing_kit_id and result.testing_kit:
@@ -1154,10 +1214,7 @@ def preview_test_result(
                 _session_reading_values[str(_sid)] = _tr.test_data["reading"]
 
     # Detect cumulative from TestingRequest or from template_key on submitted results
-    from models import TestingRequest as _TestingRequest
-    _tr_req = db.query(_TestingRequest).filter(
-        _TestingRequest.id == result.testing_request_id
-    ).first()
+    _tr_req = _req_for_eq
     _is_cumulative = bool(_tr_req and _tr_req.is_cumulative)
     if not _is_cumulative and _session_reading_values:
         # Also treat operations_tracking template as cumulative

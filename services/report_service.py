@@ -24,6 +24,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 from sqlalchemy.orm import joinedload
 from models import Recommendation, TestingRequest, TestResult, User
+from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
 
 
 class ReportService:
@@ -85,7 +86,7 @@ class ReportService:
         story.append(Spacer(1, 4 * mm))
 
         # ─── REQUEST DETAILS ───────────────────────────
-        story.extend(self._build_request_section(styles, request, rec))
+        story.extend(self._build_request_section(styles, request, rec, results))
         story.append(Spacer(1, 4 * mm))
 
         # ─── TEST RESULTS ─────────────────────────────
@@ -178,7 +179,7 @@ class ReportService:
     # ───────────────────────────────────────────────────
     # Request Details Section
     # ───────────────────────────────────────────────────
-    def _build_request_section(self, styles, request, rec):
+    def _build_request_section(self, styles, request, rec, results=None):
         elements = []
         elements.append(self._section_header("Section I — Request Details", styles))
 
@@ -203,6 +204,20 @@ class ReportService:
         if request.equipment and request.equipment.ueic:
             ueic = request.equipment.ueic
 
+        # Capacity / Voltage Class / Voltage Ratio / YOM — pulled from the
+        # Equipment register, falling back to the submitted test's own form
+        # data (e.g. a "Rated MVA" field on the oil-test form) when the
+        # register itself was never populated with them.
+        eq = request.equipment
+        eq_nd = (eq.nameplate_data or {}) if eq else {}
+        test_data_sources = [r.test_data for r in (results or []) if r.test_data]
+        capacity = resolve_capacity(eq_nd, *test_data_sources) if eq else "-"
+        voltage_ratio = resolve_voltage_ratio(
+            eq_nd, *test_data_sources, voltage_class=eq.voltage_class if eq else None
+        ) if eq else "-"
+        eq_voltage_class = (eq.voltage_class if eq else None) or "-"
+        eq_yom = str(eq.year_of_manufacture) if eq and eq.year_of_manufacture else "-"
+
         # Department
         dept_name = "-"
         if request.department:
@@ -217,6 +232,10 @@ class ReportService:
 
         if ueic != "-":
             data.append(["UEIC", ueic, "Department", dept_name])
+
+        if eq:
+            data.append(["Capacity", capacity, "Voltage Class", eq_voltage_class])
+            data.append(["Voltage Ratio", voltage_ratio, "Year of Mfg", eq_yom])
 
         data.extend([
             ["Equipment Type", equip_name,
