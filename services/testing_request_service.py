@@ -5,6 +5,8 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, text
+from models import TestResult
+from datetime import datetime, timedelta
 
 from models import (
     TestingRequest, TestingRequestStatus, User,
@@ -295,6 +297,7 @@ class TestingRequestService:
                 (TestingRequest.request_number.ilike(term)) |
                 (TestingRequest.title.ilike(term))
             )
+                
         if status_filter:
             if status_filter == "open":
                 query = query.filter(
@@ -309,10 +312,13 @@ class TestingRequestService:
                     ])
                 )
 
-            elif status_filter == "closed":
-                completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
-                    TrWfInstance.status.in_(["completed", "terminated"])
-                ).scalar_subquery()
+            elif status_filter in ("closed", "wf_completed"):
+                completed_wf_ids = (
+                    self.db.query(TRWorkflowInstance.request_id)
+                    .filter(TRWorkflowInstance.status == WorkflowInstanceStatus.COMPLETED)
+                    .subquery()
+                )
+
                 query = query.filter(
                     or_(
                         TestingRequest.status.in_([
@@ -415,65 +421,139 @@ class TestingRequestService:
             query = query.filter(TestingRequest.department_id.in_(department_ids))
         elif department_id:
             query = query.filter(TestingRequest.department_id == department_id)
-        if date_from:
-            from datetime import datetime
-            query = query.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
-        if date_to:
-            from datetime import datetime, timedelta
-            query = query.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+
+        if date_from or date_to:
+
+            # All tab -> use tested_at
+            if is_closed is None:
+
+                subquery = self.db.query(TestResult.testing_request_id)
+
+                if date_from:
+                    subquery = subquery.filter(
+                        TestResult.tested_at >= datetime.combine(
+                            date_from,
+                            datetime.min.time(),
+                        )
+                    )
+
+                if date_to:
+                    subquery = subquery.filter(
+                        TestResult.tested_at <
+                        datetime.combine(
+                            date_to + timedelta(days=1),
+                            datetime.min.time(),
+                        )
+                    )
+
+                query = query.filter(
+                    TestingRequest.id.in_(subquery.subquery())
+                )
+
+            # Open / Assigned / Overdue -> use CTS
+            else:
+
+                if date_from:
+                    query = query.filter(
+                        TestingRequest.cts >= datetime.combine(
+                            date_from,
+                            datetime.min.time(),
+                        )
+                    )
+
+                if date_to:
+                    query = query.filter(
+                        TestingRequest.cts <
+                        datetime.combine(
+                            date_to + timedelta(days=1),
+                            datetime.min.time(),
+                        )
+                    )
 
         if voltage_class:
             if voltage_class == "Unknown":
-                query = query.filter(or_(Equipment.voltage_class.is_(None), Equipment.voltage_class == ""))
+                query = query.filter(
+                    or_(
+                        Equipment.voltage_class.is_(None),
+                        Equipment.voltage_class == "",
+                    )
+                )
             else:
                 query = query.filter(Equipment.voltage_class == voltage_class)
+
         if equipment_type:
             if equipment_type == "Unknown":
                 query = query.filter(CategoryMaster.name.is_(None))
             else:
                 query = query.filter(CategoryMaster.name == equipment_type)
+
         if make:
             if make == "Unknown":
-                query = query.filter(or_(Equipment.manufacturer.is_(None), Equipment.manufacturer == ""))
+                query = query.filter(
+                    or_(
+                        Equipment.manufacturer.is_(None),
+                        Equipment.manufacturer == "",
+                    )
+                )
             else:
                 query = query.filter(Equipment.manufacturer == make)
+
         if commissioned_year:
             if commissioned_year == "Unknown":
                 query = query.filter(Equipment.commissioned_date.is_(None))
             else:
                 try:
-                    query = query.filter(func.extract("year", Equipment.commissioned_date) == int(commissioned_year))
+                    query = query.filter(
+                        func.extract("year", Equipment.commissioned_date)
+                        == int(commissioned_year)
+                    )
                 except ValueError:
                     query = query.filter(TestingRequest.id.is_(None))
+
         if failure_year:
             if failure_year == "Unknown":
                 query = query.filter(Equipment.retired_date.is_(None))
             else:
                 try:
-                    query = query.filter(func.extract("year", Equipment.retired_date) == int(failure_year))
+                    query = query.filter(
+                        func.extract("year", Equipment.retired_date)
+                        == int(failure_year)
+                    )
                 except ValueError:
                     query = query.filter(TestingRequest.id.is_(None))
+
         if capacity_mva:
             equipment_rows = (
                 self.db.query(Equipment)
                 .filter(Equipment.id.isnot(None))
                 .all()
             )
+
             matching_ids = [
-                equipment.id for equipment in equipment_rows
+                equipment.id
+                for equipment in equipment_rows
                 if self._capacity_label(equipment) == capacity_mva
             ]
+
             if matching_ids and capacity_mva == "Unknown":
-                query = query.filter(or_(
-                    TestingRequest.equipment_id.in_(matching_ids),
-                    TestingRequest.equipment_id.is_(None),
-                ))
+                query = query.filter(
+                    or_(
+                        TestingRequest.equipment_id.in_(matching_ids),
+                        TestingRequest.equipment_id.is_(None),
+                    )
+                )
             elif matching_ids:
-                query = query.filter(TestingRequest.equipment_id.in_(matching_ids))
+                query = query.filter(
+                    TestingRequest.equipment_id.in_(matching_ids)
+                )
             elif capacity_mva == "Unknown":
-                query = query.filter(TestingRequest.equipment_id.is_(None))
+                query = query.filter(
+                    TestingRequest.equipment_id.is_(None)
+                )
             else:
-                query = query.filter(TestingRequest.id.is_(None))
+                query = query.filter(
+                    TestingRequest.id.is_(None)
+                )
 
         return query
 
@@ -1451,6 +1531,8 @@ class TestingRequestService:
         department_ids: Optional[List[UUID]] = None,
         request_category: Optional[str] = None,
         is_closed: Optional[bool] = None,
+        date_from=None,
+        date_to=None,
     ) -> List[dict]:
         """Return testing requests grouped by equipment with alert bar status."""
         from datetime import timezone

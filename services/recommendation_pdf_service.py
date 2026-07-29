@@ -25,6 +25,8 @@ from reportlab.platypus import (
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
+from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
+
 # ── Shared paragraph styles used inside table cells ─────────────────────────
 _HDR_STYLE  = ParagraphStyle("_TblHdr",  fontSize=9,  fontName="Helvetica-Bold",
                               textColor=colors.white,  leading=11, wordWrap="CJK")
@@ -157,6 +159,13 @@ class RecommendationPDFService:
         story.append(self._kv_table(request_data))
         story.append(Spacer(1, 0.3 * inch))
 
+        # Fetch test results now — used both as a fallback source for
+        # equipment fields the register never got populated with, and later
+        # for the "Test Results" section.
+        test_results = self.db.query(TestResult).filter(
+            TestResult.testing_request_id == testing_request.id
+        ).order_by(TestResult.cts).all()
+
         # ── Equipment Details ─────────────────────────────────────────────────
         equip_details = []
         for label, attr in [
@@ -168,6 +177,22 @@ class RecommendationPDFService:
             val = getattr(testing_request, attr, None)
             if val:
                 equip_details.append([label, val])
+
+        # Capacity / Voltage Class / Voltage Ratio / YOM — pulled from the
+        # Equipment register, falling back to the submitted test's own form
+        # data when the register itself was never populated with them.
+        eq = testing_request.equipment
+        if eq:
+            eq_nd = eq.nameplate_data or {}
+            fallback_sources = [r.test_data for r in test_results if r.test_data]
+            capacity = resolve_capacity(eq_nd, *fallback_sources)
+            voltage_ratio = resolve_voltage_ratio(eq_nd, *fallback_sources, voltage_class=eq.voltage_class)
+            equip_details.append(["Capacity:", capacity])
+            equip_details.append(["Voltage Class:", eq.voltage_class or "-"])
+            equip_details.append(["Voltage Ratio:", voltage_ratio])
+            if eq.year_of_manufacture:
+                equip_details.append(["Year of Mfg:", str(eq.year_of_manufacture)])
+
         if equip_details:
             story.append(Paragraph("Equipment Details", heading_style))
             story.append(self._kv_table(equip_details))
@@ -202,10 +227,6 @@ class RecommendationPDFService:
             story.append(Spacer(1, 0.3 * inch))
 
         # ── Test Results ──────────────────────────────────────────────────────
-        test_results = self.db.query(TestResult).filter(
-            TestResult.testing_request_id == testing_request.id
-        ).order_by(TestResult.cts).all()
-
         if test_results:
             story.append(Paragraph("Test Results", heading_style))
 

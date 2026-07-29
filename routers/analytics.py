@@ -26,6 +26,7 @@ Drill-down chain:
 """
 
 import uuid
+import re
 import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -56,6 +57,64 @@ from services.analytics_engine import AnalyticsEngine
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+_CAPACITY_NUM_RE = re.compile(r"[\d.]+")
+
+
+def _parse_capacity_mva(raw) -> float | None:
+    """Parse values like '100MVA', '167.5MVA', '' into a float, or None."""
+    if not raw:
+        return None
+    m = _CAPACITY_NUM_RE.search(str(raw))
+    if not m:
+        return None
+    try:
+        return float(m.group())
+    except ValueError:
+        return None
+
+
+def _capacity_bucket(mva) -> str:
+    """Return a display-friendly MVA capacity label (mirrors ai_graph.py's
+    bucket boundaries so both dashboards group equipment the same way)."""
+    if mva is None:
+        return "Unknown"
+    try:
+        v = float(mva)
+    except (TypeError, ValueError):
+        return "Unknown"
+    if v < 10:    return "< 10 MVA"
+    if v < 50:    return "10–50 MVA"
+    if v < 100:   return "50–100 MVA"
+    if v < 200:   return "100–200 MVA"
+    return "200+ MVA"
+
+
+def _eq_capacity_map(eq_ids: list, db: Session) -> dict:
+    """Resolve each equipment's capacity (MVA), keyed by equipment_id.
+    Equipment.nameplate_data doesn't carry this for the actual fleet (only a
+    handful of portable testing kits have any nameplate_data at all) —
+    capacity is captured per-test instead, inside
+    TestResult.test_data['capacity_mva'] (e.g. "100MVA"). Uses each
+    equipment's most recent test that has a parseable value."""
+    if not eq_ids:
+        return {}
+    rows = db.query(
+        TestingRequest.equipment_id, TestResult.test_data,
+        TestResult.tested_at, TestResult.cts,
+    ).join(TestResult, TestResult.testing_request_id == TestingRequest.id).filter(
+        TestingRequest.equipment_id.in_(eq_ids),
+    ).all()
+    best: dict = {}
+    for eq_id, test_data, tr_tested_at, tr_cts in rows:
+        mva = _parse_capacity_mva((test_data or {}).get("capacity_mva"))
+        if mva is None:
+            continue
+        eff_date = tr_tested_at or tr_cts
+        cur = best.get(eq_id)
+        if cur is None or (eff_date and (cur[1] is None or eff_date > cur[1])):
+            best[eq_id] = (mva, eff_date)
+    return {eq_id: v[0] for eq_id, v in best.items()}
 
 
 def _build_dept_rollup(equipment_list: list, scope_dept_id, db) -> dict:
@@ -100,6 +159,8 @@ def _build_dept_rollup(equipment_list: list, scope_dept_id, db) -> dict:
 @router.get("/asset-breakdown", summary="Asset Dashboard grouping counts (voltage, type, make, year, dept)")
 def get_asset_breakdown(
     department_id: Optional[uuid.UUID] = Query(None),
+    date_from:      Optional[date]      = Query(None, description="Filter test counts to TestResult.tested_at >= this date (YYYY-MM-DD)"),
+    date_to:        Optional[date]      = Query(None, description="Filter test counts to TestResult.tested_at <= this date (YYYY-MM-DD)"),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -164,11 +225,16 @@ def get_asset_breakdown(
     ea_map = {r.equipment_id: r for r in ea_rows}
 
     def _empty_health() -> dict:
-        return {"critical": 0, "high": 0, "healthy": 0, "sum": 0.0, "cnt": 0}
+        return {"critical": 0, "high": 0, "healthy": 0, "untested": 0, "sum": 0.0, "cnt": 0}
 
-    def _add_health(bucket: dict, eq_id) -> None:
+    def _add_health(bucket: dict, eq_id, tested: bool) -> None:
+        """Fold one equipment into exactly one bucket, so critical + high +
+        healthy + untested always equals the group's total asset count.
+        `tested` = has a qualifying completed test (in-range when a date
+        filter is active, ever otherwise); equipment with no analytics row
+        yet (never assessed) always lands in "untested" regardless."""
         ea = ea_map.get(eq_id)
-        if ea:
+        if tested and ea:
             rl = (ea.risk_level or "").strip()
             if rl == "Critical":
                 bucket["critical"] += 1
@@ -179,12 +245,15 @@ def get_asset_breakdown(
             if ea.health_score is not None:
                 bucket["sum"] += float(ea.health_score)
                 bucket["cnt"] += 1
+        else:
+            bucket["untested"] += 1
 
     def _finalise(bucket: dict) -> dict:
         return {
             "critical":   bucket["critical"],
             "high":       bucket["high"],
             "healthy":    bucket["healthy"],
+            "untested":   bucket["untested"],
             "avg_health": round(bucket["sum"] / bucket["cnt"], 1) if bucket["cnt"] > 0 else None,
         }
 
@@ -201,17 +270,30 @@ def get_asset_breakdown(
     by_failure_year:  dict[str, int]  = {}
     by_failure_year_h: dict[str, dict] = {}
 
-    # Test counts per equipment (all statuses)
+    # Test counts per equipment — completed/closed requests only, so this
+    # matches the definition of "a conducted test" used by /analytics/dashboard
+    # (kpi_summary.total_tests) and /analytics/dashboard/equipment. Without
+    # this filter, in-progress/draft requests were being counted here but not
+    # there, making the two endpoints' totals silently disagree.
     eq_id_set = {e.id for e in all_eq}
-    tc_rows_all = (
-        db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
-        .filter(TestingRequest.equipment_id.in_(eq_id_set))
-        .group_by(TestingRequest.equipment_id)
-        .all()
-    ) if eq_id_set else []
+    if eq_id_set:
+        tc_q = db.query(TestingRequest.equipment_id, func.count(func.distinct(TestingRequest.id))) \
+            .filter(
+                TestingRequest.equipment_id.in_(eq_id_set),
+                TestingRequest.status.in_(("completed", "closed")),
+            )
+        tc_q = _apply_tested_at_filter(tc_q, date_from, date_to)
+        tc_rows_all = tc_q.group_by(TestingRequest.equipment_id).all()
+    else:
+        tc_rows_all = []
     eq_test_counts: dict = {str(r[0]): r[1] for r in tc_rows_all}
+    eq_capacity_map = _eq_capacity_map(list(eq_id_set), db)
 
-    # Test groupings (parallel to asset groupings)
+    # Test groupings (parallel to asset groupings). The "_tests" maps count
+    # distinct EQUIPMENT tested (so they reconcile with critical/high/healthy/
+    # untested); the "_test_events" maps count raw test occurrences (an
+    # equipment tested 3 times contributes 3), shown alongside as extra
+    # context, e.g. "43 equipment (58 tests)".
     by_make_tests:         dict[str, int] = {}
     by_type_tests:         dict[str, int] = {}
     by_voltage_tests:      dict[str, int] = {}
@@ -219,44 +301,69 @@ def get_asset_breakdown(
     by_capacity_tests:     dict[str, int] = {}
     by_failure_year_tests: dict[str, int] = {}
 
+    by_make_test_events:         dict[str, int] = {}
+    by_type_test_events:         dict[str, int] = {}
+    by_voltage_test_events:      dict[str, int] = {}
+    by_year_test_events:         dict[str, int] = {}
+    by_capacity_test_events:     dict[str, int] = {}
+    by_failure_year_test_events: dict[str, int] = {}
+
+    _date_filter_active = bool(date_from or date_to)
+
     for eq in all_eq:
         tc = eq_test_counts.get(str(eq.id), 0)
+        # "tested" = has a qualifying completed test: in-range when a date
+        # filter is active, ever otherwise. Drives both which health bucket
+        # the equipment falls into AND the "tests" count below — so an
+        # equipment counts as one tested asset (not once per test event),
+        # keeping critical+high+healthy+untested == total assets always,
+        # and "tests" comparable to that same equipment-count breakdown.
+        tested = (not _date_filter_active) or tc > 0
+        tested_n = 1 if tc > 0 else 0
 
         vc = (eq.voltage_class or "").strip() or "Unknown"
         by_voltage[vc] = by_voltage.get(vc, 0) + 1
         by_voltage_h.setdefault(vc, _empty_health())
-        _add_health(by_voltage_h[vc], eq.id)
-        by_voltage_tests[vc] = by_voltage_tests.get(vc, 0) + tc
+        _add_health(by_voltage_h[vc], eq.id, tested)
+        by_voltage_tests[vc] = by_voltage_tests.get(vc, 0) + tested_n
+        by_voltage_test_events[vc] = by_voltage_test_events.get(vc, 0) + tc
 
         tn = type_map.get(eq.equipment_type_id) or "Unknown"
         by_type[tn] = by_type.get(tn, 0) + 1
         by_type_h.setdefault(tn, _empty_health())
-        _add_health(by_type_h[tn], eq.id)
-        by_type_tests[tn] = by_type_tests.get(tn, 0) + tc
+        _add_health(by_type_h[tn], eq.id, tested)
+        by_type_tests[tn] = by_type_tests.get(tn, 0) + tested_n
+        by_type_test_events[tn] = by_type_test_events.get(tn, 0) + tc
 
         mk = (eq.manufacturer or "").strip() or "Unknown"
         by_make[mk] = by_make.get(mk, 0) + 1
         by_make_h.setdefault(mk, _empty_health())
-        _add_health(by_make_h[mk], eq.id)
-        by_make_tests[mk] = by_make_tests.get(mk, 0) + tc
+        _add_health(by_make_h[mk], eq.id, tested)
+        by_make_tests[mk] = by_make_tests.get(mk, 0) + tested_n
+        by_make_test_events[mk] = by_make_test_events.get(mk, 0) + tc
 
         yr = str(eq.commissioned_date.year) if eq.commissioned_date else "Unknown"
         by_year[yr] = by_year.get(yr, 0) + 1
         by_year_h.setdefault(yr, _empty_health())
-        _add_health(by_year_h[yr], eq.id)
-        by_year_tests[yr] = by_year_tests.get(yr, 0) + tc
+        _add_health(by_year_h[yr], eq.id, tested)
+        by_year_tests[yr] = by_year_tests.get(yr, 0) + tested_n
+        by_year_test_events[yr] = by_year_test_events.get(yr, 0) + tc
 
-        by_capacity["Unknown"] = by_capacity.get("Unknown", 0) + 1
-        by_capacity_h.setdefault("Unknown", _empty_health())
-        _add_health(by_capacity_h["Unknown"], eq.id)
-        by_capacity_tests["Unknown"] = by_capacity_tests.get("Unknown", 0) + tc
+        cap_bucket = _capacity_bucket(eq_capacity_map.get(eq.id))
+        by_capacity[cap_bucket] = by_capacity.get(cap_bucket, 0) + 1
+        by_capacity_h.setdefault(cap_bucket, _empty_health())
+        _add_health(by_capacity_h[cap_bucket], eq.id, tested)
+        by_capacity_tests[cap_bucket] = by_capacity_tests.get(cap_bucket, 0) + tested_n
+        by_capacity_test_events[cap_bucket] = by_capacity_test_events.get(cap_bucket, 0) + tc
 
     for eq in retired_eq:
         yr = str(eq.retired_date.year) if eq.retired_date else "Unknown"
         by_failure_year[yr] = by_failure_year.get(yr, 0) + 1
         by_failure_year_h.setdefault(yr, _empty_health())
-        by_failure_year_tests[yr] = by_failure_year_tests.get(yr, 0) + eq_test_counts.get(str(eq.id), 0)
-        _add_health(by_failure_year_h[yr], eq.id)
+        tc = eq_test_counts.get(str(eq.id), 0)
+        by_failure_year_tests[yr] = by_failure_year_tests.get(yr, 0) + (1 if tc > 0 else 0)
+        by_failure_year_test_events[yr] = by_failure_year_test_events.get(yr, 0) + tc
+        _add_health(by_failure_year_h[yr], eq.id, (not _date_filter_active) or tc > 0)
 
     # ── Hierarchical dept_equipment_counts: rollup per direct child of scope ──
     dept_counts = _build_dept_rollup(all_eq, department_id, db)
@@ -276,17 +383,23 @@ def get_asset_breakdown(
         "by_make":                  _sort(by_make),
         "by_make_health":           {k: _finalise(v) for k, v in by_make_h.items()},
         "by_make_tests":            _sort(by_make_tests),
+        "by_make_test_events":      by_make_test_events,
         "by_commissioned_year":     dict(sorted(by_year.items())),
         "by_commissioned_year_health": {k: _finalise(v) for k, v in by_year_h.items()},
         "by_commissioned_year_tests":  dict(sorted(by_year_tests.items())),
+        "by_commissioned_year_test_events": dict(sorted(by_year_test_events.items())),
         "by_failure_year":          dict(sorted(by_failure_year.items())),
         "by_failure_year_health":   {k: _finalise(v) for k, v in by_failure_year_h.items()},
         "by_failure_year_tests":    dict(sorted(by_failure_year_tests.items())),
+        "by_failure_year_test_events": dict(sorted(by_failure_year_test_events.items())),
         "by_capacity_mva":          _sort(by_capacity),
         "by_capacity_mva_health":   {k: _finalise(v) for k, v in by_capacity_h.items()},
         "by_capacity_mva_tests":    _sort(by_capacity_tests),
+        "by_capacity_mva_test_events": by_capacity_test_events,
         "by_type_tests":            _sort(by_type_tests),
+        "by_type_test_events":      by_type_test_events,
         "by_voltage_class_tests":   _sort(by_voltage_tests),
+        "by_voltage_class_test_events": by_voltage_test_events,
         "dept_equipment_counts":    dept_counts,
     }
 
@@ -298,8 +411,8 @@ def get_asset_breakdown(
 @router.get("/dashboard", summary="AI Analytics Dashboard summary")
 def get_analytics_dashboard(
     department_id: Optional[uuid.UUID] = Query(None),
-    date_from:     Optional[date]      = Query(None, description="Filter completed_at >= this date (YYYY-MM-DD)"),
-    date_to:       Optional[date]      = Query(None, description="Filter completed_at <= this date (YYYY-MM-DD)"),
+    date_from:     Optional[date]      = Query(None, description="Filter TestResult.tested_at >= this date (YYYY-MM-DD)"),
+    date_to:       Optional[date]      = Query(None, description="Filter TestResult.tested_at <= this date (YYYY-MM-DD)"),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -341,13 +454,13 @@ def get_analytics_dashboard(
     # Build per-equipment test count (respects date filter)
     if all_eq_ids:
         kpi_tc_q = (
-            db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+            db.query(TestingRequest.equipment_id, func.count(func.distinct(TestingRequest.id)))
             .filter(
                 TestingRequest.equipment_id.in_(all_eq_ids),
                 TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
             )
         )
-        kpi_tc_q = _apply_completed_at_filter(kpi_tc_q, date_from, date_to)
+        kpi_tc_q = _apply_tested_at_filter(kpi_tc_q, date_from, date_to)
         kpi_tc_rows = kpi_tc_q.group_by(TestingRequest.equipment_id).all()
         kpi_test_count_map: dict = {row[0]: row[1] for row in kpi_tc_rows}
     else:
@@ -358,13 +471,13 @@ def get_analytics_dashboard(
     # Tests-by-category breakdown for AI analytics tab
     if all_eq_ids:
         cat_q = (
-            db.query(TestingRequest.request_category, func.count(TestingRequest.id))
+            db.query(TestingRequest.request_category, func.count(func.distinct(TestingRequest.id)))
             .filter(
                 TestingRequest.equipment_id.in_(all_eq_ids),
                 TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
             )
         )
-        cat_q = _apply_completed_at_filter(cat_q, date_from, date_to)
+        cat_q = _apply_tested_at_filter(cat_q, date_from, date_to)
         cat_rows = cat_q.group_by(TestingRequest.request_category).all()
         tests_by_category = {
             (getattr(row[0], "value", str(row[0])) if row[0] else "unknown"): row[1]
@@ -457,7 +570,7 @@ def get_analytics_dashboard(
                 TestingRequest.status.in_(_TERMINAL_STATUSES_KPI),
             )
         )
-        cat_eq_rows = _apply_completed_at_filter(cat_eq_rows, date_from, date_to)
+        cat_eq_rows = _apply_tested_at_filter(cat_eq_rows, date_from, date_to)
         for cat, eq_id in cat_eq_rows.all():
             key = getattr(cat, "value", str(cat)) if cat else "unknown"
             cat_tested.setdefault(key, set()).add(eq_id)
@@ -885,13 +998,13 @@ def get_dashboard_equipment(
 
     # Test counts (respects date filter)
     tc_q = (
-        db.query(TestingRequest.equipment_id, func.count(TestingRequest.id))
+        db.query(TestingRequest.equipment_id, func.count(func.distinct(TestingRequest.id)))
         .filter(
             TestingRequest.equipment_id.in_(eq_ids),
             TestingRequest.status.in_(("completed", "closed")),
         )
     )
-    tc_q = _apply_completed_at_filter(tc_q, date_from, date_to)
+    tc_q = _apply_tested_at_filter(tc_q, date_from, date_to)
     test_count_map = {row[0]: row[1] for row in tc_q.group_by(TestingRequest.equipment_id).all()}
 
     # When a date filter is active, only show equipment that has tests in that period
@@ -1506,12 +1619,19 @@ def get_test_analytics_with_raw(
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _apply_completed_at_filter(q, date_from: Optional[date], date_to: Optional[date]):
-    """Filter a TestingRequest query by completed_at range (both bounds optional)."""
+def _apply_tested_at_filter(q, date_from: Optional[date], date_to: Optional[date]):
+    """Join TestResult onto a TestingRequest-based query and filter by
+    TestResult.tested_at (coalesced with cts for legacy rows with no
+    tested_at), both bounds optional. No-op (no join) when neither bound is
+    given, so callers' row shape is unchanged for the unfiltered case."""
+    if not date_from and not date_to:
+        return q
+    q = q.join(TestResult, TestResult.testing_request_id == TestingRequest.id)
+    coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
     if date_from:
-        q = q.filter(TestingRequest.completed_at >= datetime.combine(date_from, datetime.min.time()))
+        q = q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
-        q = q.filter(TestingRequest.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        q = q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
     return q
 
 

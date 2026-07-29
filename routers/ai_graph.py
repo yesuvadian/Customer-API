@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import uuid
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from statistics import mean, stdev
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+import re
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -39,8 +41,51 @@ from models import (
     OrgDepartment,
     ParameterAnalytics,
     TestAnalytics,
+    TestingRequest,
     TestResult,
 )
+
+_CAPACITY_NUM_RE = re.compile(r"[\d.]+")
+
+
+def _parse_capacity_mva(raw) -> float | None:
+    """Parse values like '100MVA', '167.5MVA', '' into a float, or None."""
+    if not raw:
+        return None
+    m = _CAPACITY_NUM_RE.search(str(raw))
+    if not m:
+        return None
+    try:
+        return float(m.group())
+    except ValueError:
+        return None
+
+
+def _eq_capacity_map(eq_ids: list, db: Session) -> dict:
+    """Resolve each equipment's capacity (MVA), keyed by equipment_id.
+    Equipment.nameplate_data doesn't carry this for the actual fleet (only a
+    handful of portable testing kits have any nameplate_data at all) —
+    capacity is captured per-test instead, inside
+    TestResult.test_data['capacity_mva'] (e.g. "100MVA"). Uses each
+    equipment's most recent test that has a parseable value."""
+    if not eq_ids:
+        return {}
+    rows = db.query(
+        TestingRequest.equipment_id, TestResult.test_data,
+        TestResult.tested_at, TestResult.cts,
+    ).join(TestResult, TestResult.testing_request_id == TestingRequest.id).filter(
+        TestingRequest.equipment_id.in_(eq_ids),
+    ).all()
+    best: dict = {}
+    for eq_id, test_data, tr_tested_at, tr_cts in rows:
+        mva = _parse_capacity_mva((test_data or {}).get("capacity_mva"))
+        if mva is None:
+            continue
+        eff_date = tr_tested_at or tr_cts
+        cur = best.get(eq_id)
+        if cur is None or (eff_date and (cur[1] is None or eff_date > cur[1])):
+            best[eq_id] = (mva, eff_date)
+    return {eq_id: v[0] for eq_id, v in best.items()}
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +158,97 @@ def _scoped_ea(department_id: uuid.UUID | None, db: Session, organization_id=Non
     return q.all()
 
 
+def _ta_with_dates(eq_ids: list, db: Session) -> list[tuple]:
+    """Fetch (TestAnalytics, effective_test_date) pairs for the given
+    equipment. TestAnalytics.tested_at is NOT reliable for date filtering —
+    it reflects whenever the analytics recompute job last ran (observed
+    clustered within minutes of each other across all rows), not the actual
+    test date. The real date lives on the linked TestResult, so resolve it
+    from there (tested_at, falling back to cts for legacy rows)."""
+    if not eq_ids:
+        return []
+    rows = db.query(TestAnalytics, TestResult.tested_at, TestResult.cts).join(
+        TestResult, TestResult.id == TestAnalytics.test_result_id
+    ).filter(TestAnalytics.equipment_id.in_(eq_ids)).all()
+    result = []
+    for ta, tr_tested_at, tr_cts in rows:
+        eff_date = tr_tested_at or tr_cts
+        if eff_date:
+            result.append((ta, eff_date))
+    return result
+
+
+def _apply_test_date_scope(
+    eq_ids: list,
+    ea_list: list[EquipmentAnalytics],
+    ea_map: dict | None,
+    db: Session,
+    date_from: date | None,
+    date_to: date | None,
+):
+    """Narrow eq_ids/ea_list/ea_map down to equipment that have at least one
+    test whose real date (via TestResult, see _ta_with_dates) falls within
+    [date_from, date_to] (either bound optional). No-op when neither bound
+    is given."""
+    if not date_from and not date_to:
+        return eq_ids, ea_list, ea_map
+    if not eq_ids:
+        return eq_ids, ea_list, ea_map
+
+    allowed = {
+        ta.equipment_id
+        for ta, eff_date in _ta_with_dates(eq_ids, db)
+        if _dt_in_range(eff_date, date_from, date_to)
+    }
+
+    eq_ids  = [i for i in eq_ids if i in allowed]
+    ea_list = [ea for ea in ea_list if ea.equipment_id in allowed]
+    if ea_map is not None:
+        ea_map = {k: v for k, v in ea_map.items() if k in allowed}
+    return eq_ids, ea_list, ea_map
+
+
+def _dt_in_range(dt: datetime | None, date_from: date | None, date_to: date | None) -> bool:
+    """True if `dt` falls within [date_from, date_to] (both bounds optional,
+    date_to inclusive of its whole day). Used to trim trend arrays down to
+    the selected date range — separate from `_apply_test_date_scope`, which
+    only decides which *equipment* to include, not which *data points*."""
+    if dt is None:
+        return False
+    if not date_from and not date_to:
+        return True
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if date_from:
+        lo = datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc)
+        if dt < lo:
+            return False
+    if date_to:
+        hi_date = date_to + timedelta(days=1)
+        hi = datetime(hi_date.year, hi_date.month, hi_date.day, tzinfo=timezone.utc)
+        if dt >= hi:
+            return False
+    return True
+
+
+def _trend_bucket(dt: datetime, span_days: int | None) -> tuple:
+    """Choose a trend-chart bucket for `dt`, adapting granularity to the
+    selected date range's span so a short range doesn't collapse into a
+    single quarterly point. Returns (sort_key, label); sort_key is a plain
+    `date` so callers can sort chronologically without re-parsing the label.
+    Falls back to quarterly (the original behaviour) when there's no active
+    range (span_days is None) or it's wide (>180 days)."""
+    d = dt.date() if isinstance(dt, datetime) else dt
+    if span_days is not None and span_days <= 31:
+        return (d, d.strftime("%b %d"))
+    if span_days is not None and span_days <= 180:
+        iso_year, iso_week, _ = d.isocalendar()
+        monday = d - timedelta(days=d.weekday())
+        return (monday, f"W{iso_week} {iso_year}")
+    q = (d.month - 1) // 3 + 1
+    return (date(d.year, 3 * (q - 1) + 1, 1), f"Q{q} {d.year}")
+
+
 def _life_bucket(years: float) -> str:
     if years < 5:   return "0–5 yrs"
     if years < 10:  return "5–10 yrs"
@@ -151,6 +287,8 @@ def _param_risk_score(condition: str | None) -> float:
 @router.get("/overview", summary="Fleet KPIs + health condition distribution + quarterly trend")
 def get_overview(
     department_id: Optional[uuid.UUID] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -171,6 +309,38 @@ def get_overview(
     ea_list: list[EquipmentAnalytics] = _scoped_ea(department_id, db, organization_id=user.organization_id)
     ea_map = {ea.equipment_id: ea for ea in ea_list}
     eq_ids = list(ea_map.keys())
+    eq_ids, ea_list, ea_map = _apply_test_date_scope(
+        eq_ids, ea_list, ea_map, db, date_from, date_to)
+
+    # When a date range is active, use each equipment's most recent
+    # TestAnalytics row *within that range* for health/risk, instead of
+    # EquipmentAnalytics' current/all-time snapshot — otherwise the KPI cards
+    # and health distribution chart below would keep showing today's health
+    # even when looking at a past date range.
+    _date_active = bool(date_from or date_to)
+    _ta_dated = _ta_with_dates(eq_ids, db) if eq_ids else []
+    latest_ta_map: dict = {}
+    if _date_active:
+        best: dict = {}
+        for ta, eff_date in _ta_dated:
+            if not _dt_in_range(eff_date, date_from, date_to):
+                continue
+            cur = best.get(ta.equipment_id)
+            if cur is None or eff_date > cur[1]:
+                best[ta.equipment_id] = (ta, eff_date)
+        latest_ta_map = {eq_id: pair[0] for eq_id, pair in best.items()}
+
+    def _eff_health(eq_id, ea) -> float | None:
+        if _date_active:
+            ta = latest_ta_map.get(eq_id)
+            return float(ta.health_score) if ta and ta.health_score is not None else None
+        return float(ea.health_score) if ea and ea.health_score is not None else None
+
+    def _eff_risk(eq_id, ea) -> str | None:
+        if _date_active:
+            ta = latest_ta_map.get(eq_id)
+            return ta.risk_level if ta else None
+        return ea.risk_level if ea else None
 
     # ── Equipment register (for type name + commissioned_date) ───────────────
     eq_q = db.query(Equipment).filter(Equipment.id.in_(eq_ids)) if eq_ids else []
@@ -183,7 +353,11 @@ def get_overview(
     } if type_ids else {}
 
     # ── KPI 1: Fleet Health ──────────────────────────────────────────────────
-    scores = [float(ea.health_score) for ea in ea_list if ea.health_score is not None]
+    scores: list[float] = []
+    for ea in ea_list:
+        s = _eff_health(ea.equipment_id, ea)
+        if s is not None:
+            scores.append(s)
     fleet_health = round(mean(scores), 1) if scores else None
 
     # ── KPI 2: Avg Life Left ─────────────────────────────────────────────────
@@ -195,12 +369,24 @@ def get_overview(
     avg_life_left = round(mean(life_vals), 1) if life_vals else None
 
     # ── KPI 3: Ageing Risk Index ─────────────────────────────────────────────
-    # Derived from ParameterAnalytics: mean absolute pct_change_annual across fleet
-    pa_age_q = db.query(ParameterAnalytics.pct_change_annual).filter(
+    # Derived from ParameterAnalytics: mean absolute pct_change_annual across
+    # fleet, trimmed to the selected date range (not just equipment inclusion).
+    pa_age_rows = db.query(
+        ParameterAnalytics.pct_change_annual, ParameterAnalytics.test_result_id,
+    ).filter(
         ParameterAnalytics.equipment_id.in_(eq_ids),
         ParameterAnalytics.pct_change_annual.isnot(None),
-    )
-    pct_changes = [float(r[0]) for r in pa_age_q.all()]
+    ).all()
+    if date_from or date_to:
+        _age_result_ids = list({r[1] for r in pa_age_rows})
+        _age_tr_date_map = {
+            r.id: (r.tested_at or r.cts)
+            for r in db.query(TestResult).filter(TestResult.id.in_(_age_result_ids)).all()
+        } if _age_result_ids else {}
+        pct_changes = [float(r[0]) for r in pa_age_rows
+                       if _dt_in_range(_age_tr_date_map.get(r[1]), date_from, date_to)]
+    else:
+        pct_changes = [float(r[0]) for r in pa_age_rows]
     if pct_changes:
         avg_abs_pct = mean([abs(v) for v in pct_changes])
         ageing_risk_index = round(min(100.0, avg_abs_pct * 2), 1)
@@ -231,7 +417,7 @@ def get_overview(
         ll = _life_left(eq.commissioned_date if eq else None,
                         type_map.get(eq.equipment_type_id) if eq else None)
         bucket = _life_bucket(ll) if ll is not None else "25+ yrs"
-        cond = _condition_from_score(float(ea.health_score) if ea.health_score is not None else None)
+        cond = _condition_from_score(_eff_health(ea.equipment_id, ea))
         key = cond.lower()
         if key in CONDITIONS:
             dist[bucket][key] += 1
@@ -239,22 +425,27 @@ def get_overview(
 
     health_distribution = [{"bucket": b, **dist[b]} for b in BUCKETS]
 
-    # ── Health trend: quarterly avg score from TestAnalytics ─────────────────
-    ta_q = db.query(TestAnalytics).filter(
-        TestAnalytics.equipment_id.in_(eq_ids),
-        TestAnalytics.health_score.isnot(None),
-        TestAnalytics.tested_at.isnot(None),
-    ).order_by(TestAnalytics.tested_at.asc())
-    ta_rows = ta_q.all()
+    # ── Health trend: adaptive-granularity avg score from TestAnalytics,
+    # using each test's real date resolved via TestResult (see _ta_with_dates
+    # — TestAnalytics.tested_at itself is not a reliable test date).
+    ta_rows = [
+        (ta, eff_date) for ta, eff_date in _ta_dated
+        if ta.health_score is not None and _dt_in_range(eff_date, date_from, date_to)
+    ]
+    ta_rows.sort(key=lambda pair: pair[1])
 
-    # Group by quarter
+    # Group adaptively (day/week/quarter — see _trend_bucket) so a short
+    # selected range still yields multiple points instead of collapsing into
+    # a single quarterly bucket.
+    span_days = (date_to - date_from).days if (date_from and date_to) else None
     quarter_buckets: dict[str, list[float]] = {}
     quarter_conditions: dict[str, dict] = {}
-    for ta in ta_rows:
-        dt = ta.tested_at
+    bucket_sort_key: dict[str, date] = {}
+    for ta, dt in ta_rows:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        q_key = f"Q{(dt.month - 1) // 3 + 1} {dt.year}"
+        sort_key, q_key = _trend_bucket(dt, span_days)
+        bucket_sort_key[q_key] = sort_key
         quarter_buckets.setdefault(q_key, []).append(float(ta.health_score))
         qc = quarter_conditions.setdefault(q_key, {"critical": 0, "fair": 0, "good": 0})
         cond = _condition_from_score(float(ta.health_score))
@@ -273,9 +464,10 @@ def get_overview(
             "fair_count":      quarter_conditions[period]["fair"],
             "good_count":      quarter_conditions[period]["good"],
         }
-        for period in sorted(quarter_buckets.keys(),
-                              key=lambda p: (int(p.split()[1]), int(p[1])))
-    ][-12:]  # last 12 quarters max
+        for period in sorted(quarter_buckets.keys(), key=lambda p: bucket_sort_key[p])
+    ]
+    if span_days is None:
+        health_trend = health_trend[-12:]  # no active range: cap at last 12 quarters
 
     return {
         "kpis": {
@@ -284,8 +476,8 @@ def get_overview(
             "ageing_risk_index":  ageing_risk_index,
             "dielectric_index":   dielectric_index,
             "equipment_count":    len(eq_ids),
-            "critical_count":     sum(1 for ea in ea_list if ea.risk_level == "Critical"),
-            "high_count":         sum(1 for ea in ea_list if ea.risk_level == "High"),
+            "critical_count":     sum(1 for ea in ea_list if _eff_risk(ea.equipment_id, ea) == "Critical"),
+            "high_count":         sum(1 for ea in ea_list if _eff_risk(ea.equipment_id, ea) == "High"),
         },
         "health_distribution": health_distribution,
         "health_trend":        health_trend,
@@ -299,6 +491,8 @@ def get_overview(
 @router.get("/life-left", summary="Per-asset remaining life and life-trend")
 def get_life_left(
     department_id: Optional[uuid.UUID] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -311,6 +505,8 @@ def get_life_left(
     ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
     ea_map = {ea.equipment_id: ea for ea in ea_list}
+    eq_ids, ea_list, ea_map = _apply_test_date_scope(
+        eq_ids, ea_list, ea_map, db, date_from, date_to)
 
     eq_list: list[Equipment] = db.query(Equipment).filter(
         Equipment.id.in_(eq_ids)
@@ -345,18 +541,19 @@ def get_life_left(
 
     assets.sort(key=lambda x: (x["life_left_years"] or 999))
 
-    # Life trend — approximate from TestAnalytics tested_at dates cross-joined with
-    # commissioned_date: for each quarter's tests, calculate avg life_left at that time
-    ta_rows = db.query(
-        TestAnalytics.equipment_id,
-        TestAnalytics.tested_at,
-    ).filter(
-        TestAnalytics.equipment_id.in_(eq_ids),
-        TestAnalytics.tested_at.isnot(None),
-    ).order_by(TestAnalytics.tested_at.asc()).all()
+    # Life trend — from each test's real date (resolved via TestResult, see
+    # _ta_with_dates) cross-joined with commissioned_date: for each period's
+    # tests, calculate avg life_left at that time.
+    ta_rows = [
+        (ta.equipment_id, eff_date)
+        for ta, eff_date in _ta_with_dates(eq_ids, db)
+        if _dt_in_range(eff_date, date_from, date_to)
+    ]
 
+    span_days = (date_to - date_from).days if (date_from and date_to) else None
     eq_commissioned = {e.id: (e.commissioned_date, type_map.get(e.equipment_type_id)) for e in eq_list}
     quarter_life: dict[str, list[float]] = {}
+    bucket_sort_key: dict[str, date] = {}
     for eq_id, tested_at in ta_rows:
         comm, tname = eq_commissioned.get(eq_id, (None, None))
         if not comm or not tested_at:
@@ -367,7 +564,8 @@ def get_life_left(
             comm = comm.replace(tzinfo=timezone.utc)
         age_at = (tested_at - comm).days / 365.25
         ll_at = max(0.0, _expected_life(tname) - age_at)
-        q_key = f"Q{(tested_at.month - 1) // 3 + 1} {tested_at.year}"
+        sort_key, q_key = _trend_bucket(tested_at, span_days)
+        bucket_sort_key[q_key] = sort_key
         quarter_life.setdefault(q_key, []).append(ll_at)
 
     life_trend = [
@@ -377,9 +575,11 @@ def get_life_left(
         }
         for period, vals in sorted(
             quarter_life.items(),
-            key=lambda x: (int(x[0].split()[1]), int(x[0][1])),
+            key=lambda x: bucket_sort_key[x[0]],
         )
-    ][-12:]
+    ]
+    if span_days is None:
+        life_trend = life_trend[-12:]  # no active range: cap at last 12 quarters
 
     return {
         "assets":     assets,
@@ -403,6 +603,8 @@ _DP_KEYS = ["dp", "degree_of_polymerization", "polymerisation", "cellulose"]
 @router.get("/ageing", summary="Ageing risk radar axes + DP degree of polymerisation trend")
 def get_ageing(
     department_id: Optional[uuid.UUID] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -417,6 +619,8 @@ def get_ageing(
     ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
     ea_map = {ea.equipment_id: ea for ea in ea_list}
+    eq_ids, ea_list, ea_map = _apply_test_date_scope(
+        eq_ids, ea_list, ea_map, db, date_from, date_to)
 
     eq_list = db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all() if eq_ids else []
     type_ids = list({e.equipment_type_id for e in eq_list if e.equipment_type_id})
@@ -428,6 +632,18 @@ def get_ageing(
     pa_rows: list[ParameterAnalytics] = db.query(ParameterAnalytics).filter(
         ParameterAnalytics.equipment_id.in_(eq_ids),
     ).all() if eq_ids else []
+
+    # Resolve each parameter's test date up front and trim pa_rows to the
+    # selected range — otherwise the radar/asset-score/DP-trend numbers below
+    # would silently ignore the date filter even though eq_ids was scoped by it.
+    _all_result_ids = list({r.test_result_id for r in pa_rows})
+    tr_date_map = {
+        r.id: (r.tested_at or r.cts)
+        for r in db.query(TestResult).filter(TestResult.id.in_(_all_result_ids)).all()
+    } if _all_result_ids else {}
+    _date_active = bool(date_from or date_to)
+    if _date_active:
+        pa_rows = [r for r in pa_rows if _dt_in_range(tr_date_map.get(r.test_result_id), date_from, date_to)]
 
     # ── Radar axes ────────────────────────────────────────────────────────────
     def _match(label: str, keys: list[str]) -> bool:
@@ -490,21 +706,17 @@ def get_ageing(
         })
     asset_scores.sort(key=lambda x: -x["ageing_index"])
 
-    # ── DP trend — degree of polymerisation history ────────────────────────────
+    # ── DP trend — degree of polymerisation history (pa_rows already
+    # trimmed to the selected range above) ─────────────────────────────────────
     dp_pa = [r for r in pa_rows if _match(r.parameter_label or r.parameter_key, _DP_KEYS)]
-    dp_result_ids = [r.test_result_id for r in dp_pa]
-    dp_tr_map = {
-        r.id: (r.tested_at or r.cts)
-        for r in db.query(TestResult).filter(TestResult.id.in_(dp_result_ids)).all()
-    } if dp_result_ids else {}
 
     dp_trend = sorted(
         [
             {
                 "equipment_id": str(r.equipment_id),
                 "ueic":         eq_label_map.get(r.equipment_id, str(r.equipment_id)),
-                "tested_at":    dp_tr_map[r.test_result_id].isoformat()
-                                if dp_tr_map.get(r.test_result_id) else None,
+                "tested_at":    tr_date_map[r.test_result_id].isoformat()
+                                if tr_date_map.get(r.test_result_id) else None,
                 "value":        float(r.current_value) if r.current_value is not None else None,
                 "unit":         r.unit,
                 "condition":    r.condition,
@@ -513,7 +725,7 @@ def get_ageing(
                                        if r.breach_predicted_at else None,
             }
             for r in dp_pa
-            if dp_tr_map.get(r.test_result_id)
+            if tr_date_map.get(r.test_result_id)
         ],
         key=lambda x: x["tested_at"] or "",
     )
@@ -551,6 +763,8 @@ _TREND_GROUPS = {
 @router.get("/dielectric", summary="Dielectric risk radar + DGA / Tan Delta / BDV parameter trends")
 def get_dielectric(
     department_id: Optional[uuid.UUID] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -566,6 +780,8 @@ def get_dielectric(
     """
     ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
+    eq_ids, ea_list, _ = _apply_test_date_scope(
+        eq_ids, ea_list, None, db, date_from, date_to)
 
     eq_list = db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all() if eq_ids else []
     eq_label_map = {e.id: e.ueic for e in eq_list}
@@ -573,6 +789,18 @@ def get_dielectric(
     pa_rows: list[ParameterAnalytics] = db.query(ParameterAnalytics).filter(
         ParameterAnalytics.equipment_id.in_(eq_ids),
     ).all() if eq_ids else []
+
+    # Resolve each parameter's test date up front and trim pa_rows to the
+    # selected range — otherwise the radar axes below would silently ignore
+    # the date filter even though eq_ids was scoped by it (equipment
+    # inclusion only, not per-row trimming).
+    all_result_ids = list({r.test_result_id for r in pa_rows})
+    tr_date_map = {
+        r.id: (r.tested_at or r.cts)
+        for r in db.query(TestResult).filter(TestResult.id.in_(all_result_ids)).all()
+    } if all_result_ids else {}
+    if date_from or date_to:
+        pa_rows = [r for r in pa_rows if _dt_in_range(tr_date_map.get(r.test_result_id), date_from, date_to)]
 
     def _match(label: str, keys: list[str]) -> bool:
         l = (label or "").lower()
@@ -590,13 +818,7 @@ def get_dielectric(
 
     radar_limit = {k: 100.0 for k in _DIEL_AXIS_KEYS}
 
-    # ── Trend data ────────────────────────────────────────────────────────────
-    all_result_ids = list({r.test_result_id for r in pa_rows})
-    tr_date_map = {
-        r.id: (r.tested_at or r.cts)
-        for r in db.query(TestResult).filter(TestResult.id.in_(all_result_ids)).all()
-    } if all_result_ids else {}
-
+    # ── Trend data (pa_rows already trimmed to the selected range above) ──────
     def _build_trend(group_keys: list[str]) -> list[dict]:
         matched = [r for r in pa_rows
                    if _match(r.parameter_label or r.parameter_key, group_keys)
@@ -665,6 +887,8 @@ def get_grouped(
         "Dimension to group by: equipment_type | make | capacity | "
         "make_model | year_commissioned | year_failure | year_replaced"
     )),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
@@ -680,23 +904,53 @@ def get_grouped(
     ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
     eq_ids  = [ea.equipment_id for ea in ea_list]
     ea_map  = {ea.equipment_id: ea for ea in ea_list}
+    eq_ids, ea_list, ea_map = _apply_test_date_scope(
+        eq_ids, ea_list, ea_map, db, date_from, date_to)
 
     eq_list: list[Equipment] = db.query(Equipment).filter(
         Equipment.id.in_(eq_ids)
     ).all() if eq_ids else []
 
-    # Test count per equipment_id
+    # When a date range is active, use each equipment's most recent
+    # TestAnalytics row *within that range* for health, instead of
+    # EquipmentAnalytics' current/all-time snapshot — same reasoning as
+    # get_overview's _eff_health.
+    _date_active = bool(date_from or date_to)
+    _ta_dated = _ta_with_dates(eq_ids, db) if eq_ids else []
+    latest_ta_map: dict = {}
+    if _date_active:
+        best: dict = {}
+        for ta, eff_date in _ta_dated:
+            if not _dt_in_range(eff_date, date_from, date_to):
+                continue
+            cur = best.get(ta.equipment_id)
+            if cur is None or eff_date > cur[1]:
+                best[ta.equipment_id] = (ta, eff_date)
+        latest_ta_map = {eq_id: pair[0] for eq_id, pair in best.items()}
+
+    def _eff_health(eq_id, ea) -> float | None:
+        if _date_active:
+            ta = latest_ta_map.get(eq_id)
+            return float(ta.health_score) if ta and ta.health_score is not None else None
+        return float(ea.health_score) if ea and ea.health_score is not None else None
+
+    # Test count per equipment_id — trimmed to the selected date range, not
+    # just gated on "has any test in range" (that's what _apply_test_date_scope
+    # already did above for equipment inclusion). Reuses _ta_dated's
+    # TestResult-resolved dates rather than TestAnalytics.tested_at.
     from collections import Counter
-    ta_counts_raw = db.query(TestAnalytics.equipment_id).filter(
-        TestAnalytics.equipment_id.in_(eq_ids)
-    ).all() if eq_ids else []
-    test_count_map: dict = Counter(str(r[0]) for r in ta_counts_raw)
+    test_count_map: dict = Counter(
+        str(ta.equipment_id) for ta, eff_date in _ta_dated
+        if not _date_active or _dt_in_range(eff_date, date_from, date_to)
+    )
 
     type_ids = list({e.equipment_type_id for e in eq_list if e.equipment_type_id})
     type_map = {
         c.id: c.name
         for c in db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
     } if type_ids else {}
+
+    eq_capacity_map = _eq_capacity_map(eq_ids, db) if group_by == "capacity" else {}
 
     def _group_label(eq: Equipment) -> str:
         if group_by == "equipment_type":
@@ -708,10 +962,7 @@ def get_grouped(
             model = eq.model_number or ""
             return f"{make} {model}".strip() if model else make
         if group_by == "capacity":
-            # Try nameplate_data JSONB first, then fall through to Unknown
-            nd = eq.nameplate_data or {}
-            mva = nd.get("rated_mva") or nd.get("capacity_mva") or nd.get("mva")
-            return _capacity_bucket(mva)
+            return _capacity_bucket(eq_capacity_map.get(eq.id))
         if group_by == "year_commissioned":
             if eq.commissioned_date:
                 return str(eq.commissioned_date.year)
@@ -752,7 +1003,7 @@ def get_grouped(
         ea        = ea_map.get(eq.id)
         label     = _group_label(eq)
         type_name = type_map.get(eq.equipment_type_id)
-        score = float(ea.health_score) if ea and ea.health_score is not None else None
+        score = _eff_health(eq.id, ea)
         if score is not None:
             group_scores[label].append(score)
             cond = _condition_from_score(score).lower()
