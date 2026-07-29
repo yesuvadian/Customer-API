@@ -667,10 +667,39 @@ class TestResultPDFService:
         # ============================================================
         story.append(Paragraph("Test Information", heading_style))
 
+        # Test Category — the app has 4 activity categories (test / maintenance
+        # / inspection / repair_lifecycle, see CategoryDetails.category_type,
+        # same grouping used by the Reporting Center's Activities filter).
+        # result.test_category is rarely set at submission time, so fall back
+        # to the category the request's Test Type itself belongs to.
+        _CATEGORY_LABELS = {
+            'test': 'Test',
+            'maintenance': 'Maintenance',
+            'inspection': 'Inspection',
+            'repair_lifecycle': 'Repair / Lifecycle',
+        }
+        _raw_category = result.test_category or (
+            testing_request.test_type.category_type
+            if testing_request and testing_request.test_type else None
+        )
+        test_category_label = _CATEGORY_LABELS.get(
+            _raw_category, _raw_category.replace('_', ' ').title() if _raw_category else '-'
+        )
+
+        # Title — the request's own title is often left blank at creation, so
+        # fall back to the test name (the same text the report's own heading
+        # is built from) rather than showing a bare "-".
+        _test_name = result.test_name or result.template_key or '-'
+        _title_fallback = (
+            testing_request.title
+            or (testing_request.test_type.name if testing_request and testing_request.test_type else None)
+            or _test_name
+        ) if testing_request else _test_name
+
         test_info_data = [
-            ['Test Name:', result.test_name or result.template_key or '-'],
+            ['Test Name:', _test_name],
             ['Template Key:', result.template_key or '-'],
-            ['Test Category:', result.test_category or '-'],
+            ['Test Category:', test_category_label],
             ['Tested At:', result.tested_at.strftime('%d/%m/%Y %H:%M:%S') if result.tested_at else '-'],
             ['Tested By:', f"{tester.firstname} {tester.lastname}" if tester else '-'],
         ]
@@ -700,7 +729,7 @@ class TestResultPDFService:
 
             request_data = [
                 ['Request Number:', testing_request.request_number or '-'],
-                ['Title:', testing_request.title or '-'],
+                ['Title:', _title_fallback],
                 ['Equipment Type:', testing_request.equipment_type.name if testing_request.equipment_type else '-'],
                 ['Test Type:', testing_request.test_type.name if testing_request.test_type else '-'],
                 ['Organization:', testing_request.organization.name if testing_request.organization else '-'],
@@ -805,6 +834,19 @@ class TestResultPDFService:
         story.append(Paragraph("Test Data", heading_style))
 
         test_data = result.test_data or {}
+
+        # Capacity and Year of Mfg are the same values already shown, resolved,
+        # in "Equipment Details" above (as "Capacity" / "Year of Mfg") — drop
+        # their raw form-field duplicates here so the reader doesn't see the
+        # same figure presented as two differently-labelled, independently
+        # blank-or-not rows ("Capacity" vs "Capacity Mva").
+        if eq:
+            _dup_keys = {
+                "capacity_mva", "rated_mva", "rated_mva_onan", "rated_mva_onan_mva",
+                "mva_rating", "rated_capacity", "capacity", "kva_rating",
+                "year_of_manufacture",
+            }
+            test_data = {k: v for k, v in test_data.items() if k not in _dup_keys}
 
         if test_data:
             self._render_test_data_structure(test_data, story, heading_style, subheading_style, normal_style)
