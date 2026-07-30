@@ -3178,12 +3178,10 @@ TEST_TEMPLATES = {
                 "options": ["open", "skip"],
             },
             "fields": [
-                {"key": "test_voltage_kv",   "label": "Applied Test Voltage",  "type": "number", "unit": "kV",  "required": True, "import_skip": True},
                 {"key": "frequency_hz",      "label": "Supply Frequency",      "type": "number", "unit": "Hz",  "required": True, "default": "50"},
                 {"key": "ambient_temp_c",    "label": "Ambient Temperature",   "type": "number", "unit": "°C", "required": True},
                 {"key": "oil_temp_c",        "label": "Oil Temperature",       "type": "number", "unit": "°C"},
                 {"key": "weather_condition", "label": "Weather Condition",     "type": "text",   "placeholder": "e.g. Cloudy, Sunny"},
-                {"key": "bushing_condition", "label": "Condition of Bushings", "type": "text",   "placeholder": "e.g. Clean & Dry"},
                 {"key": "instrument_make",   "label": "Instrument Make/Model", "type": "text",   "placeholder": "e.g. Megger IDAX 300"},
             ],
         },
