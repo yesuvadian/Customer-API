@@ -15,7 +15,7 @@ from models import (
     Role, UserRole, TesterLocation,
     OrgRole, OrgUserRole,
     OrgTestTemplate,
-    Equipment,
+    Equipment, EquipmentStatus,
     TrWfStageRole,
     TrWfInstance,
     TrWfStatus,
@@ -1239,6 +1239,19 @@ class TestingRequestService:
                     )
                     .count() > 0
                 ),
+                # Equipment registered directly at this department (not its
+                # subtree) — lets pickers like the Consolidated Test Report
+                # department navigator treat a node as a selectable
+                # "sub-station level" even when it also has child departments
+                # (e.g. bays) underneath it.
+                "has_equipment": (
+                    self.db.query(func.count(Equipment.id))
+                    .filter(
+                        Equipment.department_id == d.id,
+                        Equipment.status != EquipmentStatus.retired,
+                    )
+                    .scalar()
+                ) > 0,
                 "type": "department",
                 "depth": _depth(d),
             })
