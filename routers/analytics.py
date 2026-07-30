@@ -227,23 +227,27 @@ def get_asset_breakdown(
     def _empty_health() -> dict:
         return {"critical": 0, "high": 0, "healthy": 0, "untested": 0, "sum": 0.0, "cnt": 0}
 
-    def _add_health(bucket: dict, eq_id, tested: bool) -> None:
+    def _add_health(bucket: dict, eq_id, tested: bool, source=None) -> None:
         """Fold one equipment into exactly one bucket, so critical + high +
         healthy + untested always equals the group's total asset count.
         `tested` = has a qualifying completed test (in-range when a date
         filter is active, ever otherwise); equipment with no analytics row
-        yet (never assessed) always lands in "untested" regardless."""
-        ea = ea_map.get(eq_id)
-        if tested and ea:
-            rl = (ea.risk_level or "").strip()
+        yet (never assessed) always lands in "untested" regardless.
+        `source` supplies risk_level/health_score — EquipmentAnalytics for
+        the all-time view, or a date-scoped TestAnalytics snapshot when a
+        range is active; falls back to the all-time ea_map lookup when
+        omitted."""
+        src = source if source is not None else ea_map.get(eq_id)
+        if tested and src:
+            rl = (src.risk_level or "").strip()
             if rl == "Critical":
                 bucket["critical"] += 1
             elif rl == "High":
                 bucket["high"] += 1
             else:
                 bucket["healthy"] += 1
-            if ea.health_score is not None:
-                bucket["sum"] += float(ea.health_score)
+            if src.health_score is not None:
+                bucket["sum"] += float(src.health_score)
                 bucket["cnt"] += 1
         else:
             bucket["untested"] += 1
@@ -270,6 +274,8 @@ def get_asset_breakdown(
     by_failure_year:  dict[str, int]  = {}
     by_failure_year_h: dict[str, dict] = {}
 
+    _date_filter_active = bool(date_from or date_to)
+
     # Test counts per equipment — completed/closed requests only, so this
     # matches the definition of "a conducted test" used by /analytics/dashboard
     # (kpi_summary.total_tests) and /analytics/dashboard/equipment. Without
@@ -288,6 +294,33 @@ def get_asset_breakdown(
         tc_rows_all = []
     eq_test_counts: dict = {str(r[0]): r[1] for r in tc_rows_all}
     eq_capacity_map = _eq_capacity_map(list(eq_id_set), db)
+
+    # Per-test analytics snapshot dated within the selected range (latest one
+    # per equipment) — mirrors /analytics/ai-graph/grouped's "assessed in
+    # this period" definition, so the two dashboards agree on which equipment
+    # counts as tested/healthy for the same scope and date range, instead of
+    # this endpoint's looser "any completed test in range + any
+    # EquipmentAnalytics row ever" check.
+    dated_ta_map: dict = {}
+    if _date_filter_active and eq_id_set:
+        coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
+        ta_q = (
+            db.query(TestAnalytics, coalesced.label("eff_date"))
+            .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
+            .filter(TestAnalytics.equipment_id.in_(eq_id_set))
+        )
+        if date_from:
+            ta_q = ta_q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            ta_q = ta_q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        _best: dict = {}
+        for ta, eff_date in ta_q.all():
+            if eff_date is None:
+                continue
+            cur = _best.get(ta.equipment_id)
+            if cur is None or eff_date > cur[1]:
+                _best[ta.equipment_id] = (ta, eff_date)
+        dated_ta_map = {eq_id: pair[0] for eq_id, pair in _best.items()}
 
     # Test groupings (parallel to asset groupings). The "_tests" maps count
     # distinct EQUIPMENT tested (so they reconcile with critical/high/healthy/
@@ -308,51 +341,55 @@ def get_asset_breakdown(
     by_capacity_test_events:     dict[str, int] = {}
     by_failure_year_test_events: dict[str, int] = {}
 
-    _date_filter_active = bool(date_from or date_to)
-
     for eq in all_eq:
-        tc = eq_test_counts.get(str(eq.id), 0)
-        # "tested" = has a qualifying completed test: in-range when a date
-        # filter is active, ever otherwise. Drives both which health bucket
-        # the equipment falls into AND the "tests" count below — so an
-        # equipment counts as one tested asset (not once per test event),
-        # keeping critical+high+healthy+untested == total assets always,
-        # and "tests" comparable to that same equipment-count breakdown.
-        tested = (not _date_filter_active) or tc > 0
-        tested_n = 1 if tc > 0 else 0
+        tc  = eq_test_counts.get(str(eq.id), 0)
+        # `src` supplies the risk_level/health_score used for bucketing (and,
+        # once a date filter is active, also drives "tested"/"tested_n"):
+        # the all-time EquipmentAnalytics snapshot when no range is selected,
+        # or the date-scoped TestAnalytics snapshot (dated_ta_map) when one
+        # is — see dated_ta_map's comment above for why. When a filter is
+        # active, also require a non-null health_score: /ai-graph/grouped's
+        # _eff_health treats a scoreless snapshot as "not assessed" (excluded
+        # from its count), so this must too or the two dashboards' counts
+        # drift apart again on that edge case.
+        src = dated_ta_map.get(eq.id) if _date_filter_active else ea_map.get(eq.id)
+        if _date_filter_active and src is not None and src.health_score is None:
+            src = None
+        tested   = (not _date_filter_active) or src is not None
+        tested_n = (1 if tc > 0 else 0) if not _date_filter_active else (1 if src is not None else 0)
 
         vc = (eq.voltage_class or "").strip() or "Unknown"
         by_voltage[vc] = by_voltage.get(vc, 0) + 1
         by_voltage_h.setdefault(vc, _empty_health())
-        _add_health(by_voltage_h[vc], eq.id, tested)
+        _add_health(by_voltage_h[vc], eq.id, tested, source=src)
         by_voltage_tests[vc] = by_voltage_tests.get(vc, 0) + tested_n
         by_voltage_test_events[vc] = by_voltage_test_events.get(vc, 0) + tc
 
         tn = type_map.get(eq.equipment_type_id) or "Unknown"
         by_type[tn] = by_type.get(tn, 0) + 1
         by_type_h.setdefault(tn, _empty_health())
-        _add_health(by_type_h[tn], eq.id, tested)
+        _add_health(by_type_h[tn], eq.id, tested, source=src)
         by_type_tests[tn] = by_type_tests.get(tn, 0) + tested_n
         by_type_test_events[tn] = by_type_test_events.get(tn, 0) + tc
 
         mk = (eq.manufacturer or "").strip() or "Unknown"
         by_make[mk] = by_make.get(mk, 0) + 1
         by_make_h.setdefault(mk, _empty_health())
-        _add_health(by_make_h[mk], eq.id, tested)
+        _add_health(by_make_h[mk], eq.id, tested, source=src)
         by_make_tests[mk] = by_make_tests.get(mk, 0) + tested_n
         by_make_test_events[mk] = by_make_test_events.get(mk, 0) + tc
 
         yr = str(eq.commissioned_date.year) if eq.commissioned_date else "Unknown"
         by_year[yr] = by_year.get(yr, 0) + 1
         by_year_h.setdefault(yr, _empty_health())
-        _add_health(by_year_h[yr], eq.id, tested)
+        _add_health(by_year_h[yr], eq.id, tested, source=src)
         by_year_tests[yr] = by_year_tests.get(yr, 0) + tested_n
         by_year_test_events[yr] = by_year_test_events.get(yr, 0) + tc
 
         cap_bucket = _capacity_bucket(eq_capacity_map.get(eq.id))
         by_capacity[cap_bucket] = by_capacity.get(cap_bucket, 0) + 1
         by_capacity_h.setdefault(cap_bucket, _empty_health())
-        _add_health(by_capacity_h[cap_bucket], eq.id, tested)
+        _add_health(by_capacity_h[cap_bucket], eq.id, tested, source=src)
         by_capacity_tests[cap_bucket] = by_capacity_tests.get(cap_bucket, 0) + tested_n
         by_capacity_test_events[cap_bucket] = by_capacity_test_events.get(cap_bucket, 0) + tc
 
@@ -731,12 +768,16 @@ def get_analytics_dashboard(
     child_eq_counts: dict = {}
     for child_id in all_child_dept_ids:
         subtree_ids = _collect_department_ids(child_id, db)
-        tc_rows = (
+        tc_q = (
             db.query(func.count(TestingRequest.id))
             .join(Equipment, Equipment.id == TestingRequest.equipment_id)
-            .filter(Equipment.department_id.in_(subtree_ids))
-            .scalar()
+            .filter(
+                Equipment.department_id.in_(subtree_ids),
+                TestingRequest.status.in_(("completed", "closed")),
+            )
         )
+        tc_q = _apply_tested_at_filter(tc_q, date_from, date_to)
+        tc_rows = tc_q.scalar()
         eq_cnt = (
             db.query(func.count(Equipment.id))
             .filter(Equipment.department_id.in_(subtree_ids),
