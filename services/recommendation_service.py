@@ -230,6 +230,7 @@ class RecommendationService:
         if tr:
             rec.request_number = tr.request_number
             rec.request_title = tr.title
+            rec.tr_status = tr.status.value if tr.status else None
 
             # Equipment context — both already eager-loaded, zero lazy hits
             eq = tr.equipment
@@ -243,6 +244,7 @@ class RecommendationService:
         else:
             rec.request_number = None
             rec.request_title = None
+            rec.tr_status = None
             rec.equipment_ueic = None
             rec.equipment_type_name = None
 
@@ -272,6 +274,8 @@ class RecommendationService:
         testing_request_id: Optional[UUID] = None,
         organization_id: Optional[UUID] = None,
         approval_status: Optional[str] = None,
+        equipment_id: Optional[UUID] = None,
+        tr_status: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> List[Recommendation]:
@@ -289,6 +293,22 @@ class RecommendationService:
             query = query.filter(
                 Recommendation.approval_status == approval_status
             )
+        if equipment_id or tr_status:
+            query = query.join(
+                TestingRequest, TestingRequest.id == Recommendation.testing_request_id
+            )
+            if equipment_id:
+                query = query.filter(TestingRequest.equipment_id == equipment_id)
+            if tr_status:
+                try:
+                    query = query.filter(
+                        TestingRequest.status == TestingRequestStatus(tr_status)
+                    )
+                except ValueError:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid tr_status: {tr_status}",
+                    )
 
         recs = (
             query
