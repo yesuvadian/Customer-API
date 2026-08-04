@@ -1621,6 +1621,7 @@ class RecommendationResponse(BaseModel):
     equipment_ueic: Optional[str] = None         # from rec.testing_request.equipment.ueic
     equipment_type_name: Optional[str] = None    # from rec.testing_request.equipment.equipment_type.name
                                                  # ↑ THIS was None → caused "Unknown Equipment Type" grouping
+    tr_status: Optional[str] = None              # from rec.testing_request.status
 
     class Config:
         from_attributes = True

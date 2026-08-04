@@ -408,6 +408,7 @@ class EquipmentService:
 
         query = (
             db.query(Equipment)
+            .join(CategoryMaster, Equipment.equipment_type_id == CategoryMaster.id)
             .options(
                 joinedload(Equipment.equipment_type),
                 joinedload(Equipment.department),
@@ -420,6 +421,7 @@ class EquipmentService:
         if department_id:
             dept_ids = cls._get_department_subtree_ids(db, department_id)
             query = query.filter(Equipment.department_id.in_(dept_ids))
+        query = query.filter(CategoryMaster.name != "Testing Kit")
 
         if equipment_type_id:
             query = query.filter(Equipment.equipment_type_id == equipment_type_id)

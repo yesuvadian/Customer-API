@@ -206,6 +206,8 @@ def get_asset_breakdown(
 
     # Retired equipment for failure-year breakdown
     retired_q = db.query(Equipment).filter(Equipment.status == "retired")
+    if org_id:
+        retired_q = retired_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
         retired_q = retired_q.filter(Equipment.department_id.in_(dept_ids))
     retired_eq: list[Equipment] = retired_q.all()
@@ -273,6 +275,8 @@ def get_asset_breakdown(
     by_capacity_h:    dict[str, dict] = {}
     by_failure_year:  dict[str, int]  = {}
     by_failure_year_h: dict[str, dict] = {}
+    by_replacement_year:  dict[str, int]  = {}
+    by_replacement_year_h: dict[str, dict] = {}
 
     _date_filter_active = bool(date_from or date_to)
 
@@ -333,6 +337,7 @@ def get_asset_breakdown(
     by_year_tests:         dict[str, int] = {}
     by_capacity_tests:     dict[str, int] = {}
     by_failure_year_tests: dict[str, int] = {}
+    by_replacement_year_tests: dict[str, int] = {}
 
     by_make_test_events:         dict[str, int] = {}
     by_type_test_events:         dict[str, int] = {}
@@ -340,6 +345,7 @@ def get_asset_breakdown(
     by_year_test_events:         dict[str, int] = {}
     by_capacity_test_events:     dict[str, int] = {}
     by_failure_year_test_events: dict[str, int] = {}
+    by_replacement_year_test_events: dict[str, int] = {}
 
     for eq in all_eq:
         tc  = eq_test_counts.get(str(eq.id), 0)
@@ -393,6 +399,19 @@ def get_asset_breakdown(
         by_capacity_tests[cap_bucket] = by_capacity_tests.get(cap_bucket, 0) + tested_n
         by_capacity_test_events[cap_bucket] = by_capacity_test_events.get(cap_bucket, 0) + tc
 
+        # Replacement-year breakdown — equipment installed to replace another
+        # unit (replaces_equipment_id set), bucketed by its own commissioned
+        # year, matching the "replacement_year" semantics used by
+        # /equipment's group_by and filters (extract("year", commissioned_date)
+        # restricted to replaces_equipment_id IS NOT NULL).
+        if eq.replaces_equipment_id is not None:
+            ry = str(eq.commissioned_date.year) if eq.commissioned_date else "Unknown"
+            by_replacement_year[ry] = by_replacement_year.get(ry, 0) + 1
+            by_replacement_year_h.setdefault(ry, _empty_health())
+            _add_health(by_replacement_year_h[ry], eq.id, tested, source=src)
+            by_replacement_year_tests[ry] = by_replacement_year_tests.get(ry, 0) + tested_n
+            by_replacement_year_test_events[ry] = by_replacement_year_test_events.get(ry, 0) + tc
+
     for eq in retired_eq:
         yr = str(eq.retired_date.year) if eq.retired_date else "Unknown"
         by_failure_year[yr] = by_failure_year.get(yr, 0) + 1
@@ -429,6 +448,10 @@ def get_asset_breakdown(
         "by_failure_year_health":   {k: _finalise(v) for k, v in by_failure_year_h.items()},
         "by_failure_year_tests":    dict(sorted(by_failure_year_tests.items())),
         "by_failure_year_test_events": dict(sorted(by_failure_year_test_events.items())),
+        "by_replacement_year":          dict(sorted(by_replacement_year.items())),
+        "by_replacement_year_health":   {k: _finalise(v) for k, v in by_replacement_year_h.items()},
+        "by_replacement_year_tests":    dict(sorted(by_replacement_year_tests.items())),
+        "by_replacement_year_test_events": dict(sorted(by_replacement_year_test_events.items())),
         "by_capacity_mva":          _sort(by_capacity),
         "by_capacity_mva_health":   {k: _finalise(v) for k, v in by_capacity_h.items()},
         "by_capacity_mva_tests":    _sort(by_capacity_tests),
