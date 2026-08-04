@@ -41,6 +41,8 @@ def create_recommendation(
 @router.get("/", response_model=List[RecommendationResponse])
 def list_recommendations(
     testing_request_id: Optional[UUID] = None,
+    equipment_id: Optional[UUID] = None,
+    tr_status: Optional[str] = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
@@ -52,6 +54,8 @@ def list_recommendations(
     return service.get_recommendations(
         testing_request_id=testing_request_id,
         organization_id=organization_id,
+        equipment_id=equipment_id,
+        tr_status=tr_status,
         skip=skip,
         limit=limit,
     )

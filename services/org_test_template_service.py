@@ -43,27 +43,38 @@ class OrgTestTemplateService:
             return True
         return td.get("is_active", True) is not False
 
-    def list_templates(self, org_id: Optional[UUID] = None, active_only: bool = False) -> List[OrgTestTemplate]:
-        """List global defaults (org_id=None) or org-specific rows.
-        Deduplicates by template_key — keeps the most recently updated row
-        when the same key was accidentally provisioned twice.
-        """
+    def list_templates(self, org_id: Optional[UUID] = None, active_only: bool = False):
         q = self.db.query(OrgTestTemplate)
+
         if org_id is None:
-            q = q.filter(OrgTestTemplate.org_id == None)  # noqa: E711
+            q = q.filter(OrgTestTemplate.org_id == None)
         else:
-            q = q.filter(OrgTestTemplate.org_id == org_id)
+            # Return both org-specific and global templates
+            q = q.filter(
+                or_(
+                    OrgTestTemplate.org_id == org_id,
+                    OrgTestTemplate.org_id == None,
+                )
+            )
+
         if active_only:
             q = q.filter(active_template_filter())
-        rows = q.order_by(OrgTestTemplate.template_key, OrgTestTemplate.version.desc()).all()
-        # Deduplicate: keep first (highest version) occurrence per key
-        seen_keys: set = set()
+
+        rows = q.order_by(
+            OrgTestTemplate.template_key,
+            OrgTestTemplate.version.desc()
+        ).all()
+
+        # Deduplicate: prefer org-specific over global
+        seen = set()
         unique = []
+
         for r in rows:
-            if r.template_key in seen_keys:
+            if r.template_key in seen:
                 continue
-            seen_keys.add(r.template_key)
+            seen.add(r.template_key)
             unique.append(r)
+
         return unique
 
     def canonical_templates_for_org(self, org_id: Optional[UUID] = None) -> dict[int, "OrgTestTemplate"]:
