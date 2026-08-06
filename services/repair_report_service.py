@@ -69,6 +69,47 @@ WORKFLOW_LABEL = {
 
 
 class RepairWorkflowReportService:
+    def generate_html(self, workflow_id):
+        wf = self._get_workflow(workflow_id)
+        data = self._collect(wf)
+
+        return f"""
+        <html>
+        <head>
+            <title>{data['workflow_label']}</title>
+        </head>
+        <body>
+            <h2>{data['workflow_label']}</h2>
+
+            <p><b>Workflow No:</b> {data['workflow_number']}</p>
+            <p><b>Status:</b> {data['status']}</p>
+            <p><b>Equipment:</b> {data['equipment_name']}</p>
+
+            <table border="1" cellpadding="5" cellspacing="0">
+                <tr>
+                    <th>Stage</th>
+                    <th>Status</th>
+                    <th>Assigned To</th>
+                    <th>Completed By</th>
+                </tr>
+
+                {''.join(
+                    f'''
+                    <tr>
+                        <td>{s['name']}</td>
+                        <td>{s['status']}</td>
+                        <td>{s['assigned_to']}</td>
+                        <td>{s['completed_by']}</td>
+                    </tr>
+                    '''
+                    for s in data["stages"]
+                )}
+
+            </table>
+        </body>
+        </html>
+        """
+    
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -92,9 +133,17 @@ class RepairWorkflowReportService:
         equip = self.db.query(Equipment).filter(Equipment.id == wf.equipment_id).first()
         equip_name, equip_ueic = "", ""
         if equip:
+            equip_ueic = equip.ueic
             np = equip.nameplate_data or {}
-            equip_name = equip.name or np.get("equipment_name") or np.get("substation_name") or str(equip.id)
-            equip_ueic = equip.ueic or ""
+            equip_name = (
+                getattr(equip, "equipment_name", None)
+                or getattr(equip, "asset_name", None)
+                or np.get("equipment_name")
+                or np.get("equipment_description")
+                or np.get("asset_name")
+                or equip.ueic
+                or str(equip.id)
+            )
 
         # Stage instances
         instances = (
@@ -190,18 +239,57 @@ class RepairWorkflowReportService:
                 ],
             })
 
+        workflow_number = getattr(wf, "workflow_number", None) \
+            or getattr(wf, "workflow_no", None) \
+            or getattr(wf, "workflow_code", None) \
+            or str(wf.id)
+
+        workflow_code = getattr(wf, "workflow_code", "")
+
+        workflow_label = WORKFLOW_LABEL.get(
+            getattr(wf, "workflow_type", ""),
+            getattr(wf, "workflow_type", "Repair Workflow")
+        )
+
+        status = getattr(wf, "status", "-")
+
+        progress = getattr(wf, "progress", 0)
+
+        priority = getattr(wf, "priority", None)
+
+        created_at = self._fmt(getattr(wf, "created_at", None))
+
+        generated_at = datetime.now().strftime("%d %b %Y %H:%M")
+
+        stages = stages_out
+
         return {
-            "workflow_number": wf.workflow_number or str(wf.id)[:8],
-            "workflow_code":   wf.workflow_code or "",
-            "workflow_label":  WORKFLOW_LABEL.get(wf.workflow_code or "", "Workflow Report"),
-            "status":          (wf.status or "").upper(),
-            "progress":        wf.progress or 0,
-            "priority":        (wf.priority or "").capitalize(),
-            "created_at":      self._fmt(wf.created_at),
-            "equipment_name":  equip_name,
-            "equipment_ueic":  equip_ueic,
-            "stages":          stages_out,
-            "generated_at":    datetime.now(timezone.utc).strftime("%d %b %Y  %H:%M UTC"),
+            "workflow_number": workflow_number,
+            "workflow_code": workflow_code,
+            "workflow_label": workflow_label,
+            "status": status,
+            "progress": progress,
+            "priority": priority,
+            "created_at": created_at,
+
+            "equipment_name": equip_name,
+            "equipment_ueic": equip_ueic,
+
+            # ADD THESE
+            "equipment": equip,
+            "department_name": (
+                equip.department.name
+                if equip and getattr(equip, "department", None)
+                else None
+            ),
+            "parent_department_id": (
+                equip.department.parent_department_id
+                if equip and getattr(equip, "department", None)
+                else None
+            ),
+
+            "stages": stages,
+            "generated_at": generated_at,
         }
 
     @staticmethod
