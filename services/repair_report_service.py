@@ -70,6 +70,47 @@ WORKFLOW_LABEL = {
 
 
 class RepairWorkflowReportService:
+    def generate_html(self, workflow_id):
+        wf = self._get_workflow(workflow_id)
+        data = self._collect(wf)
+
+        return f"""
+        <html>
+        <head>
+            <title>{data['workflow_label']}</title>
+        </head>
+        <body>
+            <h2>{data['workflow_label']}</h2>
+
+            <p><b>Workflow No:</b> {data['workflow_number']}</p>
+            <p><b>Status:</b> {data['status']}</p>
+            <p><b>Equipment:</b> {data['equipment_name']}</p>
+
+            <table border="1" cellpadding="5" cellspacing="0">
+                <tr>
+                    <th>Stage</th>
+                    <th>Status</th>
+                    <th>Assigned To</th>
+                    <th>Completed By</th>
+                </tr>
+
+                {''.join(
+                    f'''
+                    <tr>
+                        <td>{s['name']}</td>
+                        <td>{s['status']}</td>
+                        <td>{s['assigned_to']}</td>
+                        <td>{s['completed_by']}</td>
+                    </tr>
+                    '''
+                    for s in data["stages"]
+                )}
+
+            </table>
+        </body>
+        </html>
+        """
+    
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -94,6 +135,7 @@ class RepairWorkflowReportService:
         equip_name, equip_ueic = "", ""
         equip_capacity, equip_voltage_class, equip_voltage_ratio, equip_yom = "-", "-", "-", "-"
         if equip:
+            equip_ueic = equip.ueic
             np = equip.nameplate_data or {}
             equip_name = (
                 np.get("equipment_name") or np.get("substation_name")
@@ -200,6 +242,30 @@ class RepairWorkflowReportService:
                     for lg in stage_logs
                 ],
             })
+
+        workflow_number = getattr(wf, "workflow_number", None) \
+            or getattr(wf, "workflow_no", None) \
+            or getattr(wf, "workflow_code", None) \
+            or str(wf.id)
+
+        workflow_code = getattr(wf, "workflow_code", "")
+
+        workflow_label = WORKFLOW_LABEL.get(
+            getattr(wf, "workflow_type", ""),
+            getattr(wf, "workflow_type", "Repair Workflow")
+        )
+
+        status = getattr(wf, "status", "-")
+
+        progress = getattr(wf, "progress", 0)
+
+        priority = getattr(wf, "priority", None)
+
+        created_at = self._fmt(getattr(wf, "created_at", None))
+
+        generated_at = datetime.now().strftime("%d %b %Y %H:%M")
+
+        stages = stages_out
 
         return {
             "workflow_number": wf.workflow_number or str(wf.id)[:8],
