@@ -286,10 +286,14 @@ def get_asset_breakdown(
     # this filter, in-progress/draft requests were being counted here but not
     # there, making the two endpoints' totals silently disagree.
     eq_id_set = {e.id for e in all_eq}
-    if eq_id_set:
+    # by_failure_year (below) looks up test counts for retired_eq, not all_eq —
+    # eq_id_set alone would leave retired equipment's tests uncounted, so the
+    # "Year of failure" test breakdown was always empty. Union both sets here.
+    test_count_id_set = eq_id_set | {e.id for e in retired_eq}
+    if test_count_id_set:
         tc_q = db.query(TestingRequest.equipment_id, func.count(func.distinct(TestingRequest.id))) \
             .filter(
-                TestingRequest.equipment_id.in_(eq_id_set),
+                TestingRequest.equipment_id.in_(test_count_id_set),
                 TestingRequest.status.in_(("completed", "closed")),
             )
         tc_q = _apply_tested_at_filter(tc_q, date_from, date_to)
