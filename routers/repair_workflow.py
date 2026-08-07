@@ -1,5 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
+import logging
+import traceback
 
 from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -552,8 +554,9 @@ def download_workflow_pdf(
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
+        logging.exception("Report generation failed")
+        traceback.print_exc()
         raise HTTPException(500, f"Report generation failed: {e}")
-
 
 @router.get("/{workflow_id}/report/html", response_class=HTMLResponse)
 def view_qap_html(
@@ -566,10 +569,28 @@ def view_qap_html(
     Suitable for in-app web view rendering.
     """
     try:
-        from services.precommission_report_service import PreCommissionReportService
-        html = PreCommissionReportService(db).generate_html(workflow_id)
+        wf = db.query(RepairWorkflow).filter(
+    RepairWorkflow.id == workflow_id
+        ).first()
+
+        if not wf:
+            raise ValueError("Workflow not found.")
+
+        if wf.workflow_code == "PRE_COMMISSION":
+            from services.precommission_report_service import PreCommissionReportService
+            html = PreCommissionReportService(db).generate_html(workflow_id)
+        else:
+            from services.repair_workflow_html_service import RepairWorkflowHTMLService
+            html = RepairWorkflowHTMLService(db).generate_html(workflow_id)
+            with open("debug_report.html", "w", encoding="utf-8") as f:
+                f.write(html)
+
         return HTMLResponse(content=html)
+    
     except ValueError as e:
         raise HTTPException(400, str(e))
+    
     except Exception as e:
+        logging.exception("Report generation failed")
+        traceback.print_exc()
         raise HTTPException(500, f"Report generation failed: {e}")

@@ -37,6 +37,7 @@ from models import (
     RepairWorkflow,
     User,
 )
+from services.nameplate_helper import get_capacity, get_voltage_ratio
 
 # ── Brand colours ─────────────────────────────────────────────────────────────
 NAVY   = colors.HexColor("#0F2B6B")
@@ -69,6 +70,47 @@ WORKFLOW_LABEL = {
 
 
 class RepairWorkflowReportService:
+    def generate_html(self, workflow_id):
+        wf = self._get_workflow(workflow_id)
+        data = self._collect(wf)
+
+        return f"""
+        <html>
+        <head>
+            <title>{data['workflow_label']}</title>
+        </head>
+        <body>
+            <h2>{data['workflow_label']}</h2>
+
+            <p><b>Workflow No:</b> {data['workflow_number']}</p>
+            <p><b>Status:</b> {data['status']}</p>
+            <p><b>Equipment:</b> {data['equipment_name']}</p>
+
+            <table border="1" cellpadding="5" cellspacing="0">
+                <tr>
+                    <th>Stage</th>
+                    <th>Status</th>
+                    <th>Assigned To</th>
+                    <th>Completed By</th>
+                </tr>
+
+                {''.join(
+                    f'''
+                    <tr>
+                        <td>{s['name']}</td>
+                        <td>{s['status']}</td>
+                        <td>{s['assigned_to']}</td>
+                        <td>{s['completed_by']}</td>
+                    </tr>
+                    '''
+                    for s in data["stages"]
+                )}
+
+            </table>
+        </body>
+        </html>
+        """
+    
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -91,10 +133,21 @@ class RepairWorkflowReportService:
         # Equipment
         equip = self.db.query(Equipment).filter(Equipment.id == wf.equipment_id).first()
         equip_name, equip_ueic = "", ""
+        equip_capacity, equip_voltage_class, equip_voltage_ratio, equip_yom = "-", "-", "-", "-"
         if equip:
+            equip_ueic = equip.ueic
             np = equip.nameplate_data or {}
-            equip_name = equip.name or np.get("equipment_name") or np.get("substation_name") or str(equip.id)
+            equip_name = (
+                np.get("equipment_name") or np.get("substation_name")
+                or (equip.equipment_type.name if equip.equipment_type else None)
+                or (equip.department.name if equip.department else None)
+                or str(equip.id)
+            )
             equip_ueic = equip.ueic or ""
+            equip_capacity = get_capacity(np)
+            equip_voltage_class = equip.voltage_class or "-"
+            equip_voltage_ratio = get_voltage_ratio(np, equip.voltage_class)
+            equip_yom = str(equip.year_of_manufacture) if equip.year_of_manufacture else "-"
 
         # Stage instances
         instances = (
@@ -190,6 +243,30 @@ class RepairWorkflowReportService:
                 ],
             })
 
+        workflow_number = getattr(wf, "workflow_number", None) \
+            or getattr(wf, "workflow_no", None) \
+            or getattr(wf, "workflow_code", None) \
+            or str(wf.id)
+
+        workflow_code = getattr(wf, "workflow_code", "")
+
+        workflow_label = WORKFLOW_LABEL.get(
+            getattr(wf, "workflow_type", ""),
+            getattr(wf, "workflow_type", "Repair Workflow")
+        )
+
+        status = getattr(wf, "status", "-")
+
+        progress = getattr(wf, "progress", 0)
+
+        priority = getattr(wf, "priority", None)
+
+        created_at = self._fmt(getattr(wf, "created_at", None))
+
+        generated_at = datetime.now().strftime("%d %b %Y %H:%M")
+
+        stages = stages_out
+
         return {
             "workflow_number": wf.workflow_number or str(wf.id)[:8],
             "workflow_code":   wf.workflow_code or "",
@@ -200,6 +277,10 @@ class RepairWorkflowReportService:
             "created_at":      self._fmt(wf.created_at),
             "equipment_name":  equip_name,
             "equipment_ueic":  equip_ueic,
+            "equipment_capacity":       equip_capacity,
+            "equipment_voltage_class":  equip_voltage_class,
+            "equipment_voltage_ratio":  equip_voltage_ratio,
+            "equipment_yom":            equip_yom,
             "stages":          stages_out,
             "generated_at":    datetime.now(timezone.utc).strftime("%d %b %Y  %H:%M UTC"),
         }
@@ -281,6 +362,26 @@ class RepairWorkflowReportService:
             ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
         ]))
         story.append(meta)
+        story.append(Spacer(1, 2 * mm))
+
+        # ── Equipment nameplate row ────────────────────────────────────────────
+        nameplate = Table([[
+            Paragraph(f"<b>Capacity</b><br/>{d['equipment_capacity']}", normal),
+            Paragraph(f"<b>Voltage Class</b><br/>{d['equipment_voltage_class']}", normal),
+            Paragraph(f"<b>Voltage Ratio</b><br/>{d['equipment_voltage_ratio']}", normal),
+            Paragraph(f"<b>Year of Mfg</b><br/>{d['equipment_yom']}", normal),
+        ]], colWidths=[W * 0.25] * 4)
+        nameplate.setStyle(TableStyle([
+            ("BACKGROUND",   (0, 0), (-1, -1), LIGHT),
+            ("BOX",          (0, 0), (-1, -1), 0.5, GREY),
+            ("GRID",         (0, 0), (-1, -1), 0.3, colors.HexColor("#D1D5DB")),
+            ("VALIGN",       (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING",  (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING",   (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
+        ]))
+        story.append(nameplate)
         story.append(Spacer(1, 5 * mm))
 
         # ── Stage summary table ────────────────────────────────────────────────

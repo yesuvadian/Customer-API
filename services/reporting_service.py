@@ -363,12 +363,34 @@ class ReportingService:
 
     def _q_flagged_equipment(self, p: dict) -> list[dict]:
         org = _org_clause(self.org_id, "res")
+        # Same COALESCE key list as _q_equipment_condition / nameplate_helper.py
         sql = text(f"""
             SELECT DISTINCT ON (e.id)
                 e.ueic,
                 d.name                              AS substation,
                 cm.name                             AS equipment_type,
+                e.manufacturer,
+                e.factory_serial_number             AS serial_number,
+                e.year_of_manufacture,
                 e.voltage_class,
+                COALESCE(
+                    e.nameplate_data->>'rated_mva',
+                    e.nameplate_data->>'rated_mva_onan',
+                    e.nameplate_data->>'rated_mva_onan_mva',
+                    e.nameplate_data->>'capacity_mva',
+                    e.nameplate_data->>'mva_rating',
+                    e.nameplate_data->>'rated_capacity',
+                    e.nameplate_data->>'capacity',
+                    e.nameplate_data->>'kva_rating'
+                )                                    AS capacity,
+                COALESCE(
+                    e.nameplate_data->>'voltage_ratio',
+                    NULLIF(concat_ws('/',
+                        e.nameplate_data->>'hv_voltage',
+                        e.nameplate_data->>'mv_voltage',
+                        e.nameplate_data->>'lv_voltage'), ''),
+                    e.voltage_class
+                )                                    AS voltage_ratio,
                 res.evaluation_result->>'overall'   AS condition,
                 res.tested_at                       AS last_tested_at,
                 tr.zone,

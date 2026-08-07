@@ -29,6 +29,7 @@ PUBLIC_ENDPOINTS = [
     "/files/",
     "/zoho_register/",
     "/zohocontacts/",
+    "/health",      # external load-test monitoring poll - no auth token available
     "/billing/webhook",   # Razorpay webhook — no auth
     "/billing/plans",     # Plan list — no auth needed
 ]

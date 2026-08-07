@@ -1047,6 +1047,7 @@ def export_equipment_csv(
     import csv
     import io
     from datetime import datetime
+    from services.nameplate_helper import get_capacity, get_voltage_ratio
 
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_export")
@@ -1069,7 +1070,9 @@ def export_equipment_csv(
         ("Equipment Type",          lambda eq: eq.equipment_type.name if eq.equipment_type else ""),
         ("Department",              lambda eq: eq.department.name if eq.department else ""),
         ("Status",                  lambda eq: eq.status.value if eq.status else ""),
+        ("Capacity",                lambda eq: get_capacity(eq.nameplate_data, blank="")),
         ("Voltage Class (kV)",      lambda eq: eq.voltage_class or ""),
+        ("Voltage Ratio",           lambda eq: get_voltage_ratio(eq.nameplate_data, eq.voltage_class, blank="")),
         ("Bay Number",              lambda eq: eq.bay_number or ""),
         ("Manufacturer",            lambda eq: eq.manufacturer or ""),
         ("Model Number",            lambda eq: eq.model_number or ""),

@@ -26,6 +26,7 @@ reportlab
 apscheduler
 python-dateutil
 python-docx
+psutil
 
 # OCR / PDF Processing
 

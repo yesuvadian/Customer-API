@@ -10,6 +10,7 @@ from fastapi.security import HTTPBearer
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
+from routers.health import router as health_router
 from routers import (
     repair_workflow,
     surveillance_workflow,
@@ -1376,6 +1377,10 @@ app.middleware("http")(auth_and_privilege_middleware)
 security = HTTPBearer()
 
 # ── Routers ───────────────────────────────────────────────────────────────────
+
+# Health check - no auth (see PUBLIC_ENDPOINTS in middleware/auth_privilege.py) -
+# polled repeatedly by external load-testing tools during a live run.
+app.include_router(health_router)
 
 # Authentication & Token
 app.include_router(token.router)

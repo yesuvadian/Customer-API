@@ -314,9 +314,11 @@ class TestingRequestService:
 
             elif status_filter in ("closed", "wf_completed"):
                 completed_wf_ids = (
-                    self.db.query(TRWorkflowInstance.request_id)
-                    .filter(TRWorkflowInstance.status == WorkflowInstanceStatus.COMPLETED)
-                    .subquery()
+                    self.db.query(TrWfInstance.testing_request_id)
+                    .filter(
+                        TrWfInstance.status.in_(["completed", "terminated"])
+                    )
+                    .scalar_subquery()
                 )
 
                 query = query.filter(
