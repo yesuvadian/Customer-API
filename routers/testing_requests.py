@@ -352,6 +352,8 @@ def get_department_hierarchy(
     org_id: Optional[UUID] = None,
     parent_id: Optional[UUID] = None,
     category: Optional[str] = Query(None, description="failure_registry | taqc_inspection — count only that category"),
+    date_from: Optional[str] = Query(None, description="Filter request creation date >= YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="Filter request creation date <= YYYY-MM-DD"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -362,20 +364,32 @@ def get_department_hierarchy(
 
     When fetching root depts (no parent_id), org-admin sees all zones;
     dept-scoped users see only their root ancestor zone.
+
+    date_from/date_to restrict the request_count/open_count/closed_count
+    figures on each card to that range, so the department carousel stays in
+    sync with the date range filter applied elsewhere on the page.
     """
     svc = TestingRequestService(db)
 
+    def _parse_date(s: Optional[str]):
+        try:
+            return _date.fromisoformat(s) if s else None
+        except ValueError:
+            return None
+
+    df, dt = _parse_date(date_from), _parse_date(date_to)
+
     # When drilling into children, never restrict — parent_id is explicit
     if parent_id is not None:
-        return svc.get_department_hierarchy(org_id, parent_id, category=category)
+        return svc.get_department_hierarchy(org_id, parent_id, category=category, date_from=df, date_to=dt)
 
     # For root-level fetch, scope to user's zone if dept-scoped
     if org_id is not None:
         is_admin, user_dept_id = get_user_dept_scope(db, current_user.id, org_id)
         if not is_admin and user_dept_id:
-            return svc.get_department_hierarchy(org_id, parent_id=None, root_id=user_dept_id, category=category)
+            return svc.get_department_hierarchy(org_id, parent_id=None, root_id=user_dept_id, category=category, date_from=df, date_to=dt)
 
-    return svc.get_department_hierarchy(org_id, parent_id, category=category)
+    return svc.get_department_hierarchy(org_id, parent_id, category=category, date_from=df, date_to=dt)
 
 
 @router.get("/department_root/{dept_id}")
