@@ -12,6 +12,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from models import CategoryDetails, OrgTestTemplate
+from test_templates import TEST_TEMPLATES
 
 
 def active_template_filter():
@@ -23,6 +24,8 @@ def active_template_filter():
 
 
 class OrgTestTemplateService:
+
+    OVERALL_KEY = "overall_assessment"
 
     def __init__(self, db: Session):
         self.db = db
@@ -43,8 +46,20 @@ class OrgTestTemplateService:
             return True
         return td.get("is_active", True) is not False
 
-    def list_templates(self, org_id: Optional[UUID] = None, active_only: bool = False):
+    def list_templates(
+        self,
+        org_id: Optional[UUID] = None,
+        active_only: bool = False,
+        template_type: Optional[str] = None,
+        workflow_code: Optional[str] = None,
+    ):
+
         q = self.db.query(OrgTestTemplate)
+
+        if workflow_code:
+            q = q.filter(
+                OrgTestTemplate.template_data["workflow_code"].astext == workflow_code
+            )
 
         if org_id is None:
             q = q.filter(OrgTestTemplate.org_id == None)
@@ -59,6 +74,30 @@ class OrgTestTemplateService:
 
         if active_only:
             q = q.filter(active_template_filter())
+
+        if template_type == "test":
+            q = q.filter(
+                or_(
+                    OrgTestTemplate.template_data["template_type"].astext == "test",
+                    OrgTestTemplate.template_data["template_type"].astext.is_(None),
+                )
+            )
+
+        elif template_type == "stage_workflow":
+            q = q.filter(
+                OrgTestTemplate.template_data["template_type"].astext.in_([
+                    "repair_stage",
+                    "audit_stage",
+                    "calibration_stage",
+                    "overhaul_stage",
+                    "precommission_stage",
+                ])
+            )
+
+        elif template_type:
+            q = q.filter(
+                OrgTestTemplate.template_data["template_type"].astext == template_type
+            )
 
         rows = q.order_by(
             OrgTestTemplate.template_key,
@@ -75,28 +114,47 @@ class OrgTestTemplateService:
             seen.add(r.template_key)
             unique.append(r)
 
+        print("template_type =", template_type)
+        print("Rows found =", len(rows))
+
+        for r in rows:
+            print(
+                r.template_key,
+                r.template_data.get("template_type"),
+                r.test_type_id,
+            )
         return unique
 
     def canonical_templates_for_org(self, org_id: Optional[UUID] = None) -> dict[int, "OrgTestTemplate"]:
         """Return a test_type_id → template mapping that mirrors what the Template
         Designer renders: system templates as base, org-specific templates override
-        where they exist.  Only test types with a template in this map should appear
-        in the TR form (no template = no testing).
+        where they exist. Only ACTIVE templates should appear.
         """
-        # Start with system (global) templates
-        system = self.list_templates(org_id=None)
+
+        # Start with ACTIVE system templates only
+        system = self.list_templates(
+            org_id=None,
+            active_only=True,
+        )
+
         merged: dict[int, OrgTestTemplate] = {
-            t.test_type_id: t for t in system if t.test_type_id is not None
+            t.test_type_id: t
+            for t in system
+            if t.test_type_id is not None
         }
-        # Org templates override system for the same test_type_id
+
+        # ACTIVE org templates override ACTIVE system templates
         if org_id:
-            org_tpls = self.list_templates(org_id=org_id)
+            org_tpls = self.list_templates(
+                org_id=org_id,
+                active_only=True,
+            )
+
             for t in org_tpls:
                 if t.test_type_id is not None:
                     merged[t.test_type_id] = t
-        return merged
 
-    OVERALL_KEY = "overall_assessment"
+        return merged
 
     def get_overall_assessment(self, org_id: Optional[UUID] = None) -> OrgTestTemplate:
         """Return the overall assessment template (org-specific → global fallback)."""
@@ -126,40 +184,48 @@ class OrgTestTemplateService:
             detail="Overall assessment template not found — run /provision/global first",
         )
 
-    def get_for_test_type(self, test_type_id: int, org_id: Optional[UUID] = None) -> OrgTestTemplate:
+    def get_for_test_type(
+        self,
+        test_type_id: int,
+        org_id: Optional[UUID] = None,
+    ) -> OrgTestTemplate:
         """
-        Return the best-match template:
-          1. org-specific row (if org_id given)
-          2. global default
-          3. 404 if nothing found
+        Return the best-match ACTIVE template:
+        1. active org-specific row (if org_id given)
+        2. active global default
+        3. 404 if nothing found
         """
+
         if org_id:
             tmpl = (
                 self.db.query(OrgTestTemplate)
                 .filter(
                     OrgTestTemplate.org_id == org_id,
                     OrgTestTemplate.test_type_id == test_type_id,
+                    active_template_filter(),
                 )
                 .first()
             )
             if tmpl:
                 return tmpl
 
-        # fallback → global default
+        # fallback → active global default
         tmpl = (
             self.db.query(OrgTestTemplate)
             .filter(
                 OrgTestTemplate.org_id == None,  # noqa: E711
                 OrgTestTemplate.test_type_id == test_type_id,
+                active_template_filter(),
             )
             .first()
         )
+
         if tmpl:
             return tmpl
 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No template found for test_type_id={test_type_id}",
+            detail=f"No active template found for test_type_id={test_type_id}",
         )
 
     def get_by_template_key(self, template_key: str, respect_active: bool = True) -> OrgTestTemplate:
@@ -204,6 +270,7 @@ class OrgTestTemplateService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Template with this key already exists for this org",
             )
+        template_data.setdefault("template_type", "test")
         tmpl = OrgTestTemplate(
             org_id=org_id,
             template_key=template_key,
@@ -461,6 +528,9 @@ class OrgTestTemplateService:
             if not template_data:
                 continue
 
+            template_data = dict(template_data)
+            template_data["template_type"] = "test"
+
             if template_key in seen_keys:
                 continue  # already handled this key in this run
 
@@ -511,6 +581,9 @@ class OrgTestTemplateService:
             template_data = NAMEPLATE_TEMPLATES.get(template_key)
             if not template_data:
                 continue
+
+            template_data = dict(template_data)
+            template_data["template_type"] = "nameplate"
 
             # "Nameplate" CategoryDetails under this equipment's CategoryMaster
             detail = (

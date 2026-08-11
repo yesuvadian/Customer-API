@@ -3,6 +3,7 @@ import os
 import json
 import uuid as _uuid
 from io import BytesIO
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 from uuid import UUID
 from fastapi.responses import JSONResponse
@@ -949,6 +950,9 @@ def list_equipment(
     replacement_year: Optional[int] = None,
     replacement_year_from: Optional[int] = None,
     replacement_year_to: Optional[int] = None,
+    # Registration date range (Equipment.cts — when the record was registered)
+    date_from: Optional[date] = Query(None, description="Filter to equipment registered on/after this date (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="Filter to equipment registered on/before this date (YYYY-MM-DD)"),
     has_tests: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -989,6 +993,8 @@ def list_equipment(
         replacement_year=replacement_year,
         replacement_year_from=replacement_year_from,
         replacement_year_to=replacement_year_to,
+        date_from=date_from,
+        date_to=date_to,
         has_tests=has_tests,
     )
     responses = []
@@ -1131,6 +1137,9 @@ def get_equipment_counts(
     replacement_year: Optional[int] = None,
     replacement_year_from: Optional[int] = None,
     replacement_year_to: Optional[int] = None,
+    # Registration date range (Equipment.cts)
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1265,7 +1274,13 @@ def get_equipment_counts(
             Equipment.replaces_equipment_id.isnot(None),
             extract('year', Equipment.commissioned_date) <= replacement_year_to
         )
-    
+
+    # ── Registration date range filters (Equipment.cts) ───────────────────
+    if date_from:
+        query = query.filter(Equipment.cts >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        query = query.filter(Equipment.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+
     # ── Execute and build response ────────────────────────────────────────
     rows = query.group_by(Equipment.status).all()
     from models import EquipmentStatus
@@ -1299,6 +1314,8 @@ def get_equipment_group_counts(
     replacement_year: Optional[int] = None,
     replacement_year_from: Optional[int] = None,
     replacement_year_to: Optional[int] = None,
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1397,6 +1414,10 @@ def get_equipment_group_counts(
         query = query.filter(extract("year", Equipment.commissioned_date) >= replacement_year_from)
     if replacement_year_to:
         query = query.filter(extract("year", Equipment.commissioned_date) <= replacement_year_to)
+    if date_from:
+        query = query.filter(Equipment.cts >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        query = query.filter(Equipment.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
 
     rows = query.group_by(group_col).all()
     result = {}
@@ -1594,6 +1615,8 @@ def get_department_hierarchy_with_counts(
     replacement_year: Optional[int] = None,
     replacement_year_from: Optional[int] = None,
     replacement_year_to: Optional[int] = None,
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1697,6 +1720,10 @@ def get_department_hierarchy_with_counts(
                 Equipment.replaces_equipment_id.isnot(None),
                 extract('year', Equipment.commissioned_date) <= replacement_year_to,
             )
+        if date_from:
+            query = query.filter(Equipment.cts >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            query = query.filter(Equipment.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
 
         count = query.scalar() or 0
 
@@ -2168,6 +2195,8 @@ def get_department_hierarchy_with_counts(
     replacement_year: Optional[int] = None,
     replacement_year_from: Optional[int] = None,
     replacement_year_to: Optional[int] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2251,6 +2280,10 @@ def get_department_hierarchy_with_counts(
             q = q.filter(sa_extract('year', Equipment.commissioned_date) >= replacement_year_from)
         if replacement_year_to:
             q = q.filter(sa_extract('year', Equipment.commissioned_date) <= replacement_year_to)
+        if date_from:
+            q = q.filter(Equipment.cts >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            q = q.filter(Equipment.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
 
         count = q.scalar() or 0
 

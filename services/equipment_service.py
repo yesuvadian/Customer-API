@@ -402,9 +402,13 @@ class EquipmentService:
         replacement_year: Optional[int] = None,
         replacement_year_from: Optional[int] = None,
         replacement_year_to: Optional[int] = None,
+        # ── registration date range (Equipment.cts) ───────────────────────────
+        date_from=None,
+        date_to=None,
         has_tests: bool = False,
     ) -> List[Equipment]:
         from sqlalchemy import extract
+        from datetime import datetime, timedelta
 
         query = (
             db.query(Equipment)
@@ -511,6 +515,12 @@ class EquipmentService:
                 Equipment.replaces_equipment_id.isnot(None),
                 extract('year', Equipment.commissioned_date) <= replacement_year_to
             )
+
+        # ── Registration date range filters ──────────────────────────────────
+        if date_from:
+            query = query.filter(Equipment.cts >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            query = query.filter(Equipment.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
 
         if has_tests:
             from models import TestingRequest

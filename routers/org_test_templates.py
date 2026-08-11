@@ -36,15 +36,22 @@ browser_router = APIRouter(
 
 # ─── List ────────────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=List[OrgTestTemplateResponse])
+@router.get("/")
 def list_templates(
-    org_id: Optional[UUID] = Query(None, description="Filter by org; omit for global defaults"),
-    active_only: bool = Query(False, description="When true, exclude disabled templates"),
+    org_id: Optional[UUID] = Query(None),
+    active_only: bool = Query(False),
+    template_type: Optional[str] = Query(None),
+    workflow_code: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     svc = OrgTestTemplateService(db)
-    return svc.list_templates(org_id=org_id, active_only=active_only)
+    return svc.list_templates(
+        org_id=org_id,
+        active_only=active_only,
+        template_type=template_type,
+        workflow_code=workflow_code,
+    )
 
 
 # ─── Overall Assessment (global appended section) ────────────────────────────

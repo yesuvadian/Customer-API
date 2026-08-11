@@ -18,6 +18,7 @@ All queries are org-scoped when org_id is provided.
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime, timezone, date
 from typing import Optional
 from uuid import UUID
@@ -214,21 +215,48 @@ class ReportingService:
             "compliance_status_report":       self._q_compliance_status,
             "tester_performance_report":          self._q_tester_performance,
             "monthly_kpi_report":                 self._q_monthly_kpi,
-            # Stubs — not yet implemented, return empty gracefully
-            "equipment_failure_annual_report":    self._q_stub,
-            "transformer_repair_status_report":   self._q_stub,
-            "pm_compliance_report":               self._q_stub,
-            "taqc_compliance_report":             self._q_stub,
-            "repairer_performance_report":        self._q_stub,
-            "oltc_cb_operations_report":          self._q_stub,
         }
         fn = registry.get(query_key)
-        if not fn:
-            raise ValueError(f"Unknown query_key: '{query_key}'")
-        return fn(params)
+        if fn:
+            return fn(params)
+        return self._run_dynamic_query(query_key, params)
 
-    def _q_stub(self, p: dict) -> list[dict]:
-        return []
+    def _run_dynamic_query(self, query_key: str, params: dict) -> list[dict]:
+        """
+        Fallback for any query_key not hardcoded above: execute the
+        ReportQueryKey.sql_template directly. This is the architecture the
+        model docstring describes — "adding a new report type = one new
+        row here, zero Python code change" — previously unimplemented.
+        """
+        from models import ReportQueryKey
+        qk = (
+            self.db.query(ReportQueryKey)
+            .filter_by(key=query_key, is_active=True)
+            .first()
+        )
+        if not qk or not qk.sql_template:
+            raise ValueError(f"Unknown query_key: '{query_key}'")
+
+        org_clause = _org_clause(self.org_id, qk.org_alias) if qk.org_alias else ""
+        sql = qk.sql_template.replace("{org_clause}", org_clause)
+        # SQLAlchemy's text() bind-parameter tokenizer misreads ":name::type"
+        # (no space) as a syntax error — insert a space so the Postgres cast
+        # stays semantically identical but parses correctly.
+        sql = re.sub(r"(:\w+)::", r"\1 ::", sql)
+
+        bind = {}
+        for pname, ptype in (qk.parameters_schema or {}).items():
+            raw = _p(params, pname)
+            if ptype == "date":
+                bind[pname] = _date(raw)
+            elif ptype == "int" and raw is not None:
+                bind[pname] = int(raw)
+            else:
+                bind[pname] = raw
+
+        result = self.db.execute(text(sql), bind)
+        keys = list(result.keys())
+        return [dict(zip(keys, row)) for row in result.fetchall()]
 
     # ── 14 Query Functions ─────────────────────────────────────────────────
 
