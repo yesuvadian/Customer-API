@@ -1681,9 +1681,11 @@ class OrgTestTemplateCreate(BaseModel):
     test_type_id: Optional[int] = None
     template_data: dict
     org_id: Optional[UUID] = None
+    template_type: str = "test"
 
 class OrgTestTemplateUpdate(BaseModel):
     template_data: dict
+    template_type: str = "test"
 
 class OrgTestTemplateResponse(BaseModel):
     id: UUID
@@ -1693,6 +1695,7 @@ class OrgTestTemplateResponse(BaseModel):
     template_data: dict
     is_system: bool = True
     version: int = 1
+    template_type: str = "test"
 
 
 # ==========================================

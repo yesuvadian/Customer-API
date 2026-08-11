@@ -21,9 +21,12 @@ from models import (
     RepairStageRole,
     RepairStageTemplate,
     RepairStageTransition,
+    RepairStageInstance,
     RepairWorkflowDefinition,
+    RepairWorkflow,
     User,
 )
+
 from schemas_workflow_config import (
     ReorderRequest,
     RoleOption,
@@ -113,6 +116,29 @@ def _build_stage_out(stage: RepairStageDefinition, db: Session) -> StageOut:
         transitions=transitions_out,
     )
 
+def _get_active_repair_workflow_count(
+    workflow_definition: RepairWorkflowDefinition,
+    db: Session,
+) -> int:
+    """
+    Count active repair workflow instances belonging to
+    the supplied workflow definition.
+
+    repair_workflows is linked to the definition by workflow_code,
+    not workflow_definition_id.
+    """
+
+    return (
+        db.query(RepairWorkflow)
+        .filter(
+            RepairWorkflow.workflow_code == workflow_definition.workflow_code,
+            RepairWorkflow.status.in_([
+                "active",
+                "in_progress",
+            ]),
+        )
+        .count()
+    )
 
 # ---------------------------------------------------------------------------
 # Workflow endpoints
@@ -140,6 +166,33 @@ def list_workflows(
         ))
     return result
 
+@router.get("/workflows/{workflow_id}/active-instance-count")
+def get_active_instance_count(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    wf = (
+        db.query(RepairWorkflowDefinition)
+        .filter_by(id=workflow_id)
+        .first()
+    )
+
+    if not wf:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found.",
+        )
+
+    count = _get_active_repair_workflow_count(
+        wf,
+        db,
+    )
+
+    return {
+        "count": count,
+        "locked": count > 0,
+    }
 
 @router.post("/workflows", response_model=WorkflowOut, status_code=status.HTTP_201_CREATED)
 def create_workflow(
@@ -155,7 +208,7 @@ def create_workflow(
         id=uuid4(),
         workflow_code=body.workflow_code,
         name=body.name,
-        is_active=True,
+        is_active=False,
         created_by=current_user.id,
         modified_by=current_user.id,
     )
@@ -230,27 +283,69 @@ def list_stages(
 ):
     stages = (
         db.query(RepairStageDefinition)
-        .filter_by(workflow_definition_id=workflow_id)
+        .filter(
+            RepairStageDefinition.workflow_definition_id == workflow_id,
+            RepairStageDefinition.is_active == True,
+        )
         .order_by(RepairStageDefinition.sequence)
         .all()
     )
     return [_build_stage_out(s, db) for s in stages]
 
 
-@router.post("/workflows/{workflow_id}/stages", response_model=StageOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/workflows/{workflow_id}/stages",
+    response_model=StageOut,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_stage(
     workflow_id: UUID,
     body: StageCreate,
     db: Session = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
-    wf = db.query(RepairWorkflowDefinition).filter_by(id=workflow_id).first()
+    # ---------------------------------------------------------
+    # Get workflow
+    # ---------------------------------------------------------
+    wf = (
+        db.query(RepairWorkflowDefinition)
+        .filter_by(id=workflow_id)
+        .first()
+    )
+
     if not wf:
-        raise HTTPException(status_code=404, detail="Workflow not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found.",
+        )
 
-    if db.query(RepairStageDefinition).filter_by(code=body.code).first():
-        raise HTTPException(status_code=400, detail=f"Stage code '{body.code}' already exists.")
+    # ---------------------------------------------------------
+    # Lock stage creation when workflow is ACTIVE
+    # ---------------------------------------------------------
+    active_count = _get_active_repair_workflow_count(wf, db)
 
+    if active_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot add a stage while active requests are in progress.",
+        )
+
+    # ---------------------------------------------------------
+    # Check duplicate stage code
+    # ---------------------------------------------------------
+    if (
+        db.query(RepairStageDefinition)
+        .filter_by(code=body.code)
+        .first()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stage code '{body.code}' already exists.",
+        )
+
+    # ---------------------------------------------------------
+    # Create stage
+    # ---------------------------------------------------------
     stage = RepairStageDefinition(
         id=uuid4(),
         name=body.name,
@@ -262,18 +357,28 @@ def create_stage(
         default_duration_days=body.default_duration_days,
         workflow_definition_id=workflow_id,
     )
+
     db.add(stage)
     db.flush()
 
+    # ---------------------------------------------------------
+    # Add template if provided
+    # ---------------------------------------------------------
     if body.template_id:
-        db.add(RepairStageTemplate(
-            id=uuid4(),
-            stage_id=stage.id,
-            template_id=body.template_id,
-        ))
+        db.add(
+            RepairStageTemplate(
+                id=uuid4(),
+                stage_id=stage.id,
+                template_id=body.template_id,
+            )
+        )
 
+    # ---------------------------------------------------------
+    # Save
+    # ---------------------------------------------------------
     db.commit()
     db.refresh(stage)
+
     return _build_stage_out(stage, db)
 
 
@@ -284,41 +389,258 @@ def patch_stage(
     db: Session = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
-    stage = db.query(RepairStageDefinition).filter_by(id=stage_id).first()
-    if not stage:
-        raise HTTPException(status_code=404, detail="Stage not found.")
+    # ---------------------------------------------------------
+    # Get stage
+    # ---------------------------------------------------------
+    stage = (
+        db.query(RepairStageDefinition)
+        .filter_by(id=stage_id)
+        .first()
+    )
 
-    for field in ("name", "sequence", "weight", "is_active", "is_mandatory", "default_duration_days"):
+    if not stage:
+        raise HTTPException(
+            status_code=404,
+            detail="Stage not found.",
+        )
+
+    # ---------------------------------------------------------
+    # Get parent workflow
+    # ---------------------------------------------------------
+    workflow = (
+        db.query(RepairWorkflowDefinition)
+        .filter_by(id=stage.workflow_definition_id)
+        .first()
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found.",
+        )
+
+    # ---------------------------------------------------------
+    # LOCK STAGE MODIFICATION WHEN WORKFLOW IS ACTIVE
+    # ---------------------------------------------------------
+    active_count = _get_active_repair_workflow_count(
+        workflow,
+        db,
+    )
+
+    if active_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot modify this stage while active requests are in progress.",
+        )
+
+    # ---------------------------------------------------------
+    # Update stage fields
+    # ---------------------------------------------------------
+    for field in (
+        "name",
+        "weight",
+        "is_active",
+        "is_mandatory",
+        "default_duration_days",
+    ):
         val = getattr(body, field)
+
         if val is not None:
             setattr(stage, field, val)
 
+    # ---------------------------------------------------------
+    # Template handling
+    # ---------------------------------------------------------
     if body.remove_template:
-        db.query(RepairStageTemplate).filter_by(stage_id=stage_id).delete()
+        (
+            db.query(RepairStageTemplate)
+            .filter_by(stage_id=stage_id)
+            .delete()
+        )
+
     elif body.template_id is not None:
-        existing_tmpl = db.query(RepairStageTemplate).filter_by(stage_id=stage_id).first()
+        existing_tmpl = (
+            db.query(RepairStageTemplate)
+            .filter_by(stage_id=stage_id)
+            .first()
+        )
+
         if existing_tmpl:
             existing_tmpl.template_id = body.template_id
         else:
-            db.add(RepairStageTemplate(id=uuid4(), stage_id=stage_id, template_id=body.template_id))
+            db.add(
+                RepairStageTemplate(
+                    id=uuid4(),
+                    stage_id=stage_id,
+                    template_id=body.template_id,
+                )
+            )
 
+    # ---------------------------------------------------------
+    # Save
+    # ---------------------------------------------------------
     db.commit()
     db.refresh(stage)
+
     return _build_stage_out(stage, db)
 
-
-@router.delete("/stages/{stage_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/stages/{stage_id}")
 def delete_stage(
     stage_id: UUID,
     db: Session = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
-    stage = db.query(RepairStageDefinition).filter_by(id=stage_id).first()
+    # ---------------------------------------------------------
+    # 1. Get stage
+    # ---------------------------------------------------------
+    stage = (
+        db.query(RepairStageDefinition)
+        .filter(
+            RepairStageDefinition.id == stage_id
+        )
+        .first()
+    )
+
     if not stage:
-        raise HTTPException(status_code=404, detail="Stage not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Stage not found",
+        )
+
+    # ---------------------------------------------------------
+    # 2. Get parent workflow
+    # ---------------------------------------------------------
+    workflow = (
+        db.query(RepairWorkflowDefinition)
+        .filter(
+            RepairWorkflowDefinition.id
+            == stage.workflow_definition_id
+        )
+        .first()
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found",
+        )
+
+    # ---------------------------------------------------------
+    # 3. Workflow must always have at least ONE
+    #    active stage
+    # ---------------------------------------------------------
+    stage_count = (
+        db.query(RepairStageDefinition)
+        .filter(
+            RepairStageDefinition.workflow_definition_id
+            == workflow.id,
+            RepairStageDefinition.is_active == True,
+        )
+        .count()
+    )
+
+    if stage_count <= 1:
+        raise HTTPException(
+            status_code=409,
+            detail="A workflow must have at least one stage.",
+        )
+
+    # ---------------------------------------------------------
+    # 4. Check active workflow requests
+    #
+    # repair_workflows does NOT have workflow_definition_id.
+    # It is linked using workflow_code.
+    # ---------------------------------------------------------
+    active_count = _get_active_repair_workflow_count(
+        workflow,
+        db,
+    )
+
+    if active_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot delete a stage while this workflow "
+                "has active requests."
+            ),
+        )
+
+    # ---------------------------------------------------------
+    # 5. Check historical stage instances
+    #
+    # If this stage has already been used by a workflow,
+    # don't physically delete it because historical records
+    # may still reference this stage.
+    # ---------------------------------------------------------
+    instance_count = (
+        db.query(RepairStageInstance)
+        .filter(
+            RepairStageInstance.stage_id == stage.id
+        )
+        .count()
+    )
+
+    if instance_count > 0:
+        stage.is_active = False
+
+        db.commit()
+        db.refresh(stage)
+
+        return {
+            "message": (
+                "Stage deactivated because it has "
+                "historical workflow instances."
+            ),
+            "deleted": False,
+            "deactivated": True,
+        }
+
+    # ---------------------------------------------------------
+    # 6. No historical instances
+    #
+    # Remove stage configuration records before deleting
+    # the stage itself.
+    # ---------------------------------------------------------
+
+    # Stage roles
+    db.query(RepairStageRole).filter(
+        RepairStageRole.stage_id == stage.id
+    ).delete(
+        synchronize_session=False
+    )
+
+    # Stage templates
+    db.query(RepairStageTemplate).filter(
+        RepairStageTemplate.stage_id == stage.id
+    ).delete(
+        synchronize_session=False
+    )
+
+    # Stage transitions
+    #
+    # Remove transitions where this stage is either:
+    # - the source stage
+    # - the destination stage
+    #
+    db.query(RepairStageTransition).filter(
+        (RepairStageTransition.from_stage_id == stage.id)
+        |
+        (RepairStageTransition.to_stage_id == stage.id)
+    ).delete(
+        synchronize_session=False
+    )
+
+    # ---------------------------------------------------------
+    # 7. Physically delete stage
+    # ---------------------------------------------------------
     db.delete(stage)
     db.commit()
 
+    return {
+        "message": "Stage deleted successfully.",
+        "deleted": True,
+        "deactivated": False,
+    }
 
 @router.post("/stages/reorder", status_code=status.HTTP_204_NO_CONTENT)
 def reorder_stages(
@@ -327,14 +649,64 @@ def reorder_stages(
     _: User = Depends(require_super_admin),
 ):
     ids = [item.stage_id for item in body.stages]
-    stages = {s.id: s for s in db.query(RepairStageDefinition).filter(RepairStageDefinition.id.in_(ids)).all()}
 
+    stages = {
+        s.id: s
+        for s in db.query(RepairStageDefinition)
+        .filter(RepairStageDefinition.id.in_(ids))
+        .all()
+    }
+
+    if not stages:
+        return
+
+    workflow_ids = {
+        stage.workflow_definition_id
+        for stage in stages.values()
+    }
+
+    if len(workflow_ids) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Stages must belong to the same workflow.",
+        )
+
+    workflow_id = next(iter(workflow_ids))
+
+    # ---------------------------------------------------------
+    # Lock stage reordering when the workflow itself is ACTIVE
+    # ---------------------------------------------------------
+    workflow = (
+        db.query(RepairWorkflowDefinition)
+        .filter_by(id=workflow_id)
+        .first()
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found.",
+        )
+
+    active_count = _get_active_repair_workflow_count(
+        workflow,
+        db,
+    )
+
+    if active_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reorder stages while active requests are in progress.",
+        )
+
+    # ---------------------------------------------------------
+    # Reorder stages
+    # ---------------------------------------------------------
     for item in body.stages:
         if item.stage_id in stages:
             stages[item.stage_id].sequence = item.sequence
 
     db.commit()
-
 
 # ---------------------------------------------------------------------------
 # Stage role permissions
@@ -362,22 +734,81 @@ def get_stage_roles(
     ]
 
 
-@router.put("/stages/{stage_id}/roles", response_model=List[StageRoleOut])
+@router.put(
+    "/stages/{stage_id}/roles",
+    response_model=List[StageRoleOut],
+)
 def replace_stage_roles(
     stage_id: UUID,
     body: StageRolesReplace,
     db: Session = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
-    if not db.query(RepairStageDefinition).filter_by(id=stage_id).first():
-        raise HTTPException(status_code=404, detail="Stage not found.")
+    # ---------------------------------------------------------
+    # Get stage
+    # ---------------------------------------------------------
+    stage = (
+        db.query(RepairStageDefinition)
+        .filter_by(id=stage_id)
+        .first()
+    )
 
-    db.query(RepairStageRole).filter_by(stage_id=stage_id).delete()
+    if not stage:
+        raise HTTPException(
+            status_code=404,
+            detail="Stage not found.",
+        )
 
+    # ---------------------------------------------------------
+    # Get parent workflow
+    # ---------------------------------------------------------
+    workflow = (
+        db.query(RepairWorkflowDefinition)
+        .filter_by(id=stage.workflow_definition_id)
+        .first()
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found.",
+        )
+
+    # ---------------------------------------------------------
+    # Lock role modification when workflow is ACTIVE
+    # ---------------------------------------------------------
+    active_count = _get_active_repair_workflow_count(workflow, db)
+
+    if active_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot modify transitions while active requests are in progress.",
+        )
+
+    # ---------------------------------------------------------
+    # Replace existing roles
+    # ---------------------------------------------------------
+    db.query(RepairStageRole).filter_by(
+        stage_id=stage_id
+    ).delete()
+
+    # ---------------------------------------------------------
+    # Validate / load organization roles
+    # ---------------------------------------------------------
     role_ids = [item.role_id for item in body.roles]
-    org_roles = {r.id: r for r in db.query(OrgRole).filter(OrgRole.id.in_(role_ids)).all()}
 
+    org_roles = {
+        r.id: r
+        for r in db.query(OrgRole)
+        .filter(OrgRole.id.in_(role_ids))
+        .all()
+    }
+
+    # ---------------------------------------------------------
+    # Create new stage roles
+    # ---------------------------------------------------------
     result = []
+
     for item in body.roles:
         sr = RepairStageRole(
             id=uuid4(),
@@ -387,18 +818,29 @@ def replace_stage_roles(
             can_approve=item.can_approve,
             can_assign=item.can_assign,
         )
+
         db.add(sr)
-        result.append(StageRoleOut(
-            role_id=item.role_id,
-            role_name=org_roles[item.role_id].name if item.role_id in org_roles else "Unknown",
-            can_edit=item.can_edit,
-            can_approve=item.can_approve,
-            can_assign=item.can_assign,
-        ))
 
+        result.append(
+            StageRoleOut(
+                role_id=item.role_id,
+                role_name=(
+                    org_roles[item.role_id].name
+                    if item.role_id in org_roles
+                    else "Unknown"
+                ),
+                can_edit=item.can_edit,
+                can_approve=item.can_approve,
+                can_assign=item.can_assign,
+            )
+        )
+
+    # ---------------------------------------------------------
+    # Save
+    # ---------------------------------------------------------
     db.commit()
-    return result
 
+    return result
 
 # ---------------------------------------------------------------------------
 # Stage transitions
@@ -418,29 +860,90 @@ def get_stage_transitions(
     )
 
 
-@router.put("/stages/{stage_id}/transitions", response_model=TransitionOut)
+@router.put(
+    "/stages/{stage_id}/transitions",
+    response_model=TransitionOut,
+)
 def upsert_stage_transitions(
     stage_id: UUID,
     body: TransitionUpsert,
     db: Session = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
-    if not db.query(RepairStageDefinition).filter_by(id=stage_id).first():
-        raise HTTPException(status_code=404, detail="Stage not found.")
+    # ---------------------------------------------------------
+    # Get stage
+    # ---------------------------------------------------------
+    stage = (
+        db.query(RepairStageDefinition)
+        .filter_by(id=stage_id)
+        .first()
+    )
 
-    for action, to_id in [("approve", body.approve_to_stage_id), ("reject", body.reject_to_stage_id)]:
-        existing = db.query(RepairStageTransition).filter_by(from_stage_id=stage_id, action=action).first()
+    if not stage:
+        raise HTTPException(
+            status_code=404,
+            detail="Stage not found.",
+        )
+
+    # ---------------------------------------------------------
+    # Get parent workflow
+    # ---------------------------------------------------------
+    workflow = (
+        db.query(RepairWorkflowDefinition)
+        .filter_by(id=stage.workflow_definition_id)
+        .first()
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found.",
+        )
+
+    # ---------------------------------------------------------
+    # Lock when workflow is active
+    # ---------------------------------------------------------
+    active_count = _get_active_repair_workflow_count(
+        workflow,
+        db,
+    )
+
+    if active_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot modify stage roles while active requests are in progress.",
+        )
+
+    # ---------------------------------------------------------
+    # Update transitions
+    # ---------------------------------------------------------
+    for action, to_id in [
+        ("approve", body.approve_to_stage_id),
+        ("reject", body.reject_to_stage_id),
+    ]:
+        existing = (
+            db.query(RepairStageTransition)
+            .filter_by(
+                from_stage_id=stage_id,
+                action=action,
+            )
+            .first()
+        )
+
         if existing:
             existing.to_stage_id = to_id
         else:
-            db.add(RepairStageTransition(
-                id=uuid4(),
-                from_stage_id=stage_id,
-                to_stage_id=to_id,
-                action=action,
-            ))
+            db.add(
+                RepairStageTransition(
+                    id=uuid4(),
+                    from_stage_id=stage_id,
+                    to_stage_id=to_id,
+                    action=action,
+                )
+            )
 
     db.commit()
+
     return TransitionOut(
         approve_to_stage_id=body.approve_to_stage_id,
         reject_to_stage_id=body.reject_to_stage_id,

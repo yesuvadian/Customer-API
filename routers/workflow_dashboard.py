@@ -73,9 +73,23 @@ def get_workflow_dashboard(
     definitions = (
         db.query(RepairWorkflowDefinition)
         .filter(RepairWorkflowDefinition.is_active.is_(True))
-        .order_by(RepairWorkflowDefinition.created_at)
+        .order_by(
+            RepairWorkflowDefinition.workflow_code,
+            RepairWorkflowDefinition.created_at.desc(),
+        )
         .all()
     )
+
+    # Only one dashboard entry per workflow code.
+    # Counts are already aggregated by workflow_code, so duplicate
+    # active definitions must not cause the same count to be added twice.
+    unique_definitions = {}
+    for defn in definitions:
+        code = defn.workflow_code or ""
+        if code and code not in unique_definitions:
+            unique_definitions[code] = defn
+
+    definitions = list(unique_definitions.values())
 
     # ── 2. Per-definition stats ───────────────────────────────────────────────
     # Single aggregation query: (workflow_code, status) → count
@@ -91,14 +105,18 @@ def get_workflow_dashboard(
             RepairWorkflow.status,
             func.count(RepairWorkflow.id).label("cnt"),
         )
-        .outerjoin(Equipment, Equipment.id == RepairWorkflow.equipment_id)
-        .filter(
-            or_(_eq_filter(), RepairWorkflow.organization_id == org_id) if not dept_ids
-            else _eq_filter()
+        .outerjoin(
+            Equipment,
+            Equipment.id == RepairWorkflow.equipment_id,
         )
-        .group_by(RepairWorkflow.workflow_code, RepairWorkflow.status)
+        .filter(_eq_filter())
+        .group_by(
+            RepairWorkflow.workflow_code,
+            RepairWorkflow.status,
+        )
         .all()
     )
+
     # Build lookup: { code: { status: count } }
     counts: dict[str, dict[str, int]] = {}
     for code, status, cnt in counts_raw:
@@ -112,8 +130,7 @@ def get_workflow_dashboard(
         )
         .outerjoin(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .filter(
-            or_(_eq_filter(), RepairWorkflow.organization_id == org_id) if not dept_ids
-            else _eq_filter(),
+            _eq_filter(),
             RepairWorkflow.status == "active",
             RepairWorkflow.assignment_pending.is_(True),
         )
@@ -123,39 +140,61 @@ def get_workflow_dashboard(
     pending: dict[str, int] = {code: cnt for code, cnt in pending_raw}
 
     workflow_types = []
-    total_active = total_completed = total_cancelled = total_scheduled = total_pending = 0
+
+    # Use actual workflow codes as the source of truth.
+    all_codes = set(counts.keys()) | set(pending.keys())
+
+    # Build definition lookup only for display names.
+    definition_by_code = {}
 
     for defn in definitions:
         code = defn.workflow_code or ""
+        if code and code not in definition_by_code:
+            definition_by_code[code] = defn
+
+    for code in sorted(all_codes):
         stat = counts.get(code, {})
-        active    = stat.get("active", 0)
+
+        active = stat.get("active", 0)
         completed = stat.get("completed", 0)
         cancelled = stat.get("cancelled", 0)
         scheduled = stat.get("scheduled", 0)
-        pend      = pending.get(code, 0)
+        pend = pending.get(code, 0)
 
-        total_active    += active
-        total_completed += completed
-        total_cancelled += cancelled
-        total_scheduled += scheduled
-        total_pending   += pend
+        defn = definition_by_code.get(code)
 
         workflow_types.append({
-            "code":               code,
-            "name":               defn.name,
-            "active":             active,
-            "completed":          completed,
-            "cancelled":          cancelled,
-            "scheduled":          scheduled,
+            "code": code,
+            "name": defn.name if defn else code,
+            "active": active,
+            "completed": completed,
+            "cancelled": cancelled,
+            "scheduled": scheduled,
             "pending_assignment": pend,
         })
 
+    # Dashboard totals are calculated directly from the same
+    # RepairWorkflow aggregation used to build workflow_types.
     totals = {
-        "active":             total_active,
-        "completed":          total_completed,
-        "cancelled":          total_cancelled,
-        "scheduled":          total_scheduled,
-        "pending_assignment": total_pending,
+        "active": sum(
+            stat.get("active", 0)
+            for stat in counts.values()
+        ),
+        "completed": sum(
+            stat.get("completed", 0)
+            for stat in counts.values()
+        ),
+        "cancelled": sum(
+            stat.get("cancelled", 0)
+            for stat in counts.values()
+        ),
+        "scheduled": sum(
+            stat.get("scheduled", 0)
+            for stat in counts.values()
+        ),
+        "pending_assignment": sum(
+            pending.values()
+        ),
     }
 
     # ── 3. Stage breakdown — active workflows only ────────────────────────────
@@ -309,7 +348,11 @@ def get_workflow_dashboard(
         )
         .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .filter(_eq_filter())
-        .group_by(Equipment.department_id, RepairWorkflow.workflow_code, RepairWorkflow.status)
+        .group_by(
+            Equipment.department_id,
+            RepairWorkflow.workflow_code,
+            RepairWorkflow.status,
+        )
         .all()
     )
 
@@ -345,16 +388,36 @@ def get_workflow_dashboard(
 
     # Also pending assignment per dept
     dept_pending_raw = (
-        db.query(Equipment.department_id, func.count(RepairWorkflow.id).label("cnt"))
-        .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
-        .filter(_eq_filter(), RepairWorkflow.status == "active",
-                RepairWorkflow.assignment_pending.is_(True))
-        .group_by(Equipment.department_id)
+        db.query(
+            Equipment.department_id,
+            RepairWorkflow.workflow_code,
+            func.count(RepairWorkflow.id).label("cnt"),
+        )
+        .join(
+            Equipment,
+            Equipment.id == RepairWorkflow.equipment_id,
+        )
+        .filter(
+            _eq_filter(),
+            RepairWorkflow.status == "active",
+            RepairWorkflow.assignment_pending.is_(True),
+        )
+        .group_by(
+            Equipment.department_id,
+            RepairWorkflow.workflow_code,
+        )
         .all()
     )
-    for dept_id, cnt in dept_pending_raw:
+
+    dept_pending_by_code = defaultdict(int)
+
+    for dept_id, code, cnt in dept_pending_raw:
         if dept_id:
-            dept_total[str(dept_id)]["pending_assignment"] += cnt
+            key = str(dept_id)
+
+            dept_total[key]["pending_assignment"] += cnt
+
+            dept_pending_by_code[(key, code or "")] += cnt
 
     by_department = []
     for dept_id_str, totals_d in dept_total.items():
@@ -363,10 +426,15 @@ def get_workflow_dashboard(
         for code in sorted(codes):
             stat = dept_agg[dept_id_str][code]
             by_type.append({
-                "code":      code,
-                "active":    stat.get("active", 0),
+                "code": code,
+                "active": stat.get("active", 0),
                 "completed": stat.get("completed", 0),
                 "cancelled": stat.get("cancelled", 0),
+                "scheduled": stat.get("scheduled", 0),
+                "pending_assignment": dept_pending_by_code.get(
+                    (dept_id_str, code),
+                    0,
+                ),
             })
         by_department.append({
             "department_id":   dept_id_str,

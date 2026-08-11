@@ -3956,10 +3956,10 @@ class OrgTestTemplate(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), nullable=True)   # NULL = global default
+    org_id = Column(UUID(as_uuid=True), nullable=True)
     template_key = Column(String(100), nullable=False)
-    test_type_id = Column(Integer, nullable=True)            # soft ref to CategoryDetails.id
-    template_data = Column(MutableDict.as_mutable(JSONB), nullable=False)  # full template JSON
+    test_type_id = Column(Integer, nullable=True)
+    template_data = Column(MutableDict.as_mutable(JSONB), nullable=False)
     is_system = Column(Boolean, default=True)
     version = Column(Integer, default=1)
 

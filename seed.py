@@ -6318,36 +6318,86 @@ ORDER  BY failure_count DESC
                                "voltage_class": "string",
                                "date_from": "date", "date_to": "date"},
             sort_order=20,
-            org_alias="fr",
+            org_alias="e",
             sql_template="""
+WITH fleet AS (
+    SELECT
+        cm.name              AS equipment_type,
+        e.manufacturer       AS make,
+        e.voltage_class,
+        CASE
+            WHEN (DATE_PART('year', NOW()) - e.year_of_manufacture::int)
+                 BETWEEN 0  AND 10 THEN '0-10 years'
+            WHEN (DATE_PART('year', NOW()) - e.year_of_manufacture::int)
+                 BETWEEN 11 AND 20 THEN '11-20 years'
+            ELSE '>20 years'
+        END                  AS age_band,
+        COUNT(DISTINCT e.id) AS fleet_unit_count,
+        COUNT(DISTINCT e.id) FILTER (WHERE ea.risk_level = 'CRITICAL')
+                             AS units_currently_critical
+    FROM   public.equipment e
+    LEFT JOIN public."CategoryMaster"    cm ON cm.id = e.equipment_type_id
+    LEFT JOIN public.equipment_analytics ea ON ea.equipment_id = e.id
+    WHERE  e.status != 'retired'
+      {org_clause}
+      AND  (:equipment_type IS NULL
+            OR cm.name ILIKE '%' || :equipment_type || '%')
+      AND  (:make           IS NULL
+            OR e.manufacturer ILIKE '%' || :make || '%')
+      AND  (:voltage_class  IS NULL OR e.voltage_class = :voltage_class)
+    GROUP  BY cm.name, e.manufacturer, e.voltage_class, age_band
+),
+failures AS (
+    SELECT
+        cm.name               AS equipment_type,
+        e.manufacturer        AS make,
+        e.voltage_class,
+        CASE
+            WHEN (DATE_PART('year', NOW()) - e.year_of_manufacture::int)
+                 BETWEEN 0  AND 10 THEN '0-10 years'
+            WHEN (DATE_PART('year', NOW()) - e.year_of_manufacture::int)
+                 BETWEEN 11 AND 20 THEN '11-20 years'
+            ELSE '>20 years'
+        END                   AS age_band,
+        COUNT(DISTINCT fr.id) AS failure_count
+    FROM   public.testing_requests fr
+    JOIN   public.equipment        e   ON e.id   = fr.equipment_id
+    LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+    WHERE  (
+             fr.request_category = 'failure_registry'
+             OR EXISTS (
+                 SELECT 1 FROM public.test_results tres
+                 WHERE tres.testing_request_id = fr.id
+                   AND tres.evaluation_result->>'overall' = 'CRITICAL'
+             )
+           )
+      {org_clause}
+      AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
+      AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
+      AND  (:equipment_type  IS NULL
+            OR cm.name ILIKE '%' || :equipment_type || '%')
+      AND  (:make            IS NULL
+            OR e.manufacturer ILIKE '%' || :make || '%')
+      AND  (:voltage_class   IS NULL OR e.voltage_class = :voltage_class)
+    GROUP  BY cm.name, e.manufacturer, e.voltage_class, age_band
+)
 SELECT
-    cm.name                     AS equipment_type,
-    e.manufacturer              AS make,
-    e.voltage_class,
-    CASE
-        WHEN (DATE_PART('year', NOW()) - e.year_of_manufacture::int)
-             BETWEEN 0  AND 10 THEN '0-10 years'
-        WHEN (DATE_PART('year', NOW()) - e.year_of_manufacture::int)
-             BETWEEN 11 AND 20 THEN '11-20 years'
-        ELSE '>20 years'
-    END                         AS age_band,
-    COUNT(fr.id)                AS failure_count,
-    COUNT(DISTINCT e.id)        AS unit_count,
-    ROUND(COUNT(fr.id)::numeric / NULLIF(COUNT(DISTINCT e.id), 0), 2)
-                                AS failure_rate_per_unit
-FROM   public.testing_requests fr
-JOIN   public.equipment        e   ON e.id   = fr.equipment_id
-LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
-WHERE  fr.request_category = 'failure_registry'
-  {org_clause}
-  AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
-  AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
-  AND  (:equipment_type  IS NULL
-        OR cm.name ILIKE '%' || :equipment_type || '%')
-  AND  (:make            IS NULL
-        OR e.manufacturer ILIKE '%' || :make || '%')
-  AND  (:voltage_class   IS NULL OR e.voltage_class = :voltage_class)
-GROUP  BY cm.name, e.manufacturer, e.voltage_class, age_band
+    fleet.equipment_type,
+    fleet.make,
+    fleet.voltage_class,
+    fleet.age_band,
+    COALESCE(failures.failure_count, 0)      AS failure_count,
+    fleet.fleet_unit_count                   AS unit_count,
+    ROUND(COALESCE(failures.failure_count, 0)::numeric
+          / NULLIF(fleet.fleet_unit_count, 0), 4)
+                                              AS failure_rate_per_unit,
+    fleet.units_currently_critical           AS units_currently_critical
+FROM   fleet
+LEFT JOIN failures
+  ON  fleet.equipment_type IS NOT DISTINCT FROM failures.equipment_type
+  AND fleet.make           IS NOT DISTINCT FROM failures.make
+  AND fleet.voltage_class  IS NOT DISTINCT FROM failures.voltage_class
+  AND fleet.age_band       IS NOT DISTINCT FROM failures.age_band
 ORDER  BY failure_rate_per_unit DESC NULLS LAST
 """),
 
@@ -7462,6 +7512,7 @@ def seed_direct_submission_templates(session) -> int:
         "taqc_inspection": {
             "key": "taqc_inspection",
             "name": "TA&QC Inspection",
+            "template_type": "ta_qc",
             "description": "Substation Inspection — record observations and compliance actions.",
             "sections": [
                 {
@@ -7493,6 +7544,7 @@ def seed_direct_submission_templates(session) -> int:
         "failure_registry": {
             "key": "failure_registry",
             "name": "Equipment Failure Registry",
+            "template_type": "failure_registry",
             "description": "Record equipment failures for tracking and root-cause analysis.",
             "sections": [
                 {
