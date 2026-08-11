@@ -1104,6 +1104,8 @@ class TestingRequestService:
         parent_id: Optional[UUID] = None,
         root_id: Optional[UUID] = None,
         category: Optional[str] = None,
+        date_from=None,
+        date_to=None,
     ) -> list:
         """Return organisations (when org_id is None) or departments.
 
@@ -1174,6 +1176,21 @@ class TestingRequestService:
                 # Default TR view: exclude direct submissions (FR/TAQC)
                 _cat_filter = [TestingRequest.is_direct_submission.is_not(True)]
 
+            # Restrict counts to the selected date range (by request creation
+            # date), same as the "Open/Assigned/Overdue" cts-based filter used
+            # for the request list itself — keeps the department carousel's
+            # counts in sync with whatever date range is currently selected.
+            _date_filter = []
+            if date_from:
+                _date_filter.append(
+                    TestingRequest.cts >= datetime.combine(date_from, datetime.min.time())
+                )
+            if date_to:
+                _date_filter.append(
+                    TestingRequest.cts
+                    < datetime.combine(date_to + timedelta(days=1), datetime.min.time())
+                )
+
             # Total requests
             request_count = (
                 self.db.query(func.count(TestingRequest.id))
@@ -1181,6 +1198,7 @@ class TestingRequestService:
                     TestingRequest.department_id.in_(subtree_ids),
                     TestingRequest.is_schedule_template.is_(False),
                     *_cat_filter,
+                    *_date_filter,
                 )
                 .scalar()
             ) or 0
@@ -1192,6 +1210,7 @@ class TestingRequestService:
                     TestingRequest.department_id.in_(subtree_ids),
                     TestingRequest.is_schedule_template.is_(False),
                     *_cat_filter,
+                    *_date_filter,
                     TestingRequest.status.in_([
                         TestingRequestStatus.draft,
                         TestingRequestStatus.submitted,
@@ -1212,6 +1231,7 @@ class TestingRequestService:
                     TestingRequest.department_id.in_(subtree_ids),
                     TestingRequest.is_schedule_template.is_(False),
                     *_cat_filter,
+                    *_date_filter,
                     TestingRequest.status.in_([
                         TestingRequestStatus.approved,
                         TestingRequestStatus.completed,
