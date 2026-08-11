@@ -1487,13 +1487,21 @@ def get_parameter_history(
     """
     # Trend always shows full history — the date filter controls the equipment list,
     # not the time-series chart. date_from / date_to are accepted but ignored here.
+    #
+    # Ordered by the actual test date (TestResult.tested_at, falling back to cts),
+    # not ParameterAnalytics.calculated_at — calculated_at reflects when the
+    # analytics row was computed, which can lag or precede the real test date
+    # when results are imported/backfilled out of chronological order, producing
+    # a chart that plots points in the wrong sequence despite correct date labels.
     q = (
         db.query(ParameterAnalytics)
+        .join(TestResult, TestResult.id == ParameterAnalytics.test_result_id)
         .filter(
             ParameterAnalytics.equipment_id  == equipment_id,
             ParameterAnalytics.parameter_key == parameter_key,
         )
-        .order_by(ParameterAnalytics.calculated_at.asc())
+        .order_by(func.coalesce(TestResult.tested_at, TestResult.cts,
+                                 ParameterAnalytics.calculated_at).asc())
     )
     if template_key:
         q = q.filter(ParameterAnalytics.template_key == template_key)
