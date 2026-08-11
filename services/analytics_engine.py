@@ -729,7 +729,13 @@ class AnalyticsEngine:
                         for row_id, current_val, row_idx, row_unit in rows_to_track:
                             # Build a stable parameter key scoped to this row
                             param_key = f"{field_key}.{row_id}.{col_key}"
-                            row_label = f"{field.get('label', field_key)} — {row_id} — {col_label}"
+                            # Uniqueness comes from param_key (field_key.row_id.col_key),
+                            # not this label — the table field's own label (e.g. "IDAX
+                            # Test Data") is redundant here since every row from this
+                            # table already shares it in any UI list that shows them
+                            # together, and it was crowding out row_id/col_label in
+                            # truncated displays.
+                            row_label = f"{row_id} — {col_label}"
 
                             # Per-row status from col_results
                             row_statuses = [
