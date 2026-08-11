@@ -199,10 +199,8 @@ class TestScheduleDashboardService:
             self.db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.equipment_id.in_(eq_ids),
-                TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
                 _request_category_filter(request_category),
-                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
             )
             .all()
         )
@@ -347,11 +345,12 @@ class TestScheduleDashboardService:
         kpis = self._compute_kpis(rows, columns)
 
         # 8. Upcoming schedule counts per time window
-        # Each schedule is counted in exactly ONE band, based on how many days
-        # until its next run: 0–30 → "30", 31–180 → "180", 181+ → "365"
-        # (the 365d bucket is effectively "365 days or beyond" so every
-        # non-overdue schedule — including longer-cadence ones like triennial
-        # tests due 3 years out — is represented in exactly one bucket).
+        # Each schedule is counted in exactly ONE non-overlapping band:
+        # 0–30 days   -> "30"
+        # 31–180 days -> "180"
+        # 181–365 days -> "365"
+        # Schedules due after 365 days are not included in these
+        # upcoming windows.
         # (Previously each bucket re-counted everything due within its window,
         # so a schedule due in 7 days was tallied under 30d AND 180d AND 365d —
         # inflating the wider buckets instead of showing a clean breakdown.)
@@ -377,12 +376,12 @@ class TestScheduleDashboardService:
             if days < 0:
                 continue  # overdue — not "upcoming"
 
-            if days <= 30:
+            if 0 <= days <= 30:
                 d30 += 1
-            elif days <= 180:
+            elif 31 <= days <= 180:
                 d180 += 1
-            else:
-                d365 += 1  # 181 days and beyond, no upper bound
+            elif 181 <= days <= 365:
+                d365 += 1
 
         upcoming_counts = {"30": d30, "180": d180, "365": d365}
 
@@ -742,14 +741,19 @@ class TestScheduleDashboardService:
         critical_alert = 0
 
         for row in rows:
-            status = row["overall_status"]
-            if status == "OVERDUE":
-                overdue += 1
-                critical_alert += 1
-            elif status == "ALERT":
-                critical_alert += 1
-            if status == "DUE":
-                due_30 += 1
+            for cell in row.get("cells", {}).values():
+                status = cell.get("status")
+
+                if status == "overdue":
+                    overdue += 1
+                    critical_alert += 1
+
+                elif status == "due_imminent":
+                    critical_alert += 1
+                    due_30 += 1
+
+                elif status == "due_soon":
+                    due_30 += 1
 
         # Count distinct equipment that had at least one completed test this month
         eq_ids = [row["equipment_id"] for row in rows if row.get("equipment_id")]

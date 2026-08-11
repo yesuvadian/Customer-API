@@ -585,10 +585,9 @@ class TestingService:
         try:
             _org_tmpl = svc.get_for_test_type(test_type_id=test_type_id, org_id=org_id)
             template_data = copy.deepcopy(_org_tmpl.template_data)
-        except FHE:
-            # Fallback 1: another template for the same equipment type + category.
-            # Only for maintenance/inspection/repair — NOT for 'test', where each
-            # test type has its own specific template and a sibling would be wrong.
+        except FHE as e:
+            if e.status_code != 404:
+                raise
             if detail.category_master_id and detail.category_type and detail.category_type != "test":
                 sibling_ids = [
                     row.id
@@ -604,8 +603,10 @@ class TestingService:
                     try:
                         _org_tmpl = svc.get_for_test_type(test_type_id=sid, org_id=org_id)
                         break
-                    except FHE:
-                        continue
+                    except FHE as e:
+                        if e.status_code == 404:
+                            continue
+                        raise
                 if _org_tmpl:
                     template_data = copy.deepcopy(_org_tmpl.template_data)
                 else:

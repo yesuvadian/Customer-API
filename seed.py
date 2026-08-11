@@ -7462,6 +7462,7 @@ def seed_direct_submission_templates(session) -> int:
         "taqc_inspection": {
             "key": "taqc_inspection",
             "name": "TA&QC Inspection",
+            "template_type": "ta_qc",
             "description": "Substation Inspection — record observations and compliance actions.",
             "sections": [
                 {
@@ -7493,6 +7494,7 @@ def seed_direct_submission_templates(session) -> int:
         "failure_registry": {
             "key": "failure_registry",
             "name": "Equipment Failure Registry",
+            "template_type": "failure_registry",
             "description": "Record equipment failures for tracking and root-cause analysis.",
             "sections": [
                 {
