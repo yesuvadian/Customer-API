@@ -1440,6 +1440,15 @@ def get_parameter_analytics(
     if date_to:
         q = q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
     rows = q.order_by(ParameterAnalytics.calculated_at.desc()).all()
+
+    # Hide "Previous Test" parameters from the parameter list.
+    # Historical values of the actual parameter are still preserved
+    # and available through the history endpoint.
+    rows = [
+        r for r in rows
+        if "previous test" not in (r.parameter_label or "").lower()
+        and "previous_test" not in (r.parameter_key or "").lower()
+    ]
     result_ids = [r.test_result_id for r in rows]
     tested_at_map = {
         r.id: (r.tested_at or r.cts)
