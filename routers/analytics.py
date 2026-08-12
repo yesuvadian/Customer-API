@@ -1424,6 +1424,15 @@ def get_parameter_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    """
+    ParameterAnalytics has one row per (test_result_id, parameter_key)  -  an
+    equipment with N historical tests for "Acidity" has N separate Acidity
+    rows, one per test. This endpoint surfaces the equipment's *current*
+    snapshot per parameter, so it must collapse to the single most-recently
+    -tested row per (parameter_key, template_key)  -  ordering by tested_at
+    (not calculated_at, which is write time and can lag behind ingestion/
+    recompute order) and keeping only the first row seen per group.
+    """
     from sqlalchemy.orm import aliased
     TR = aliased(TestResult)
     q = (
@@ -1439,13 +1448,29 @@ def get_parameter_analytics(
         q = q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
         q = q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
-    rows = q.order_by(ParameterAnalytics.calculated_at.desc()).all()
+    rows = q.order_by(
+        ParameterAnalytics.parameter_key,
+        ParameterAnalytics.template_key,
+        coalesced.desc(),
+    ).all()
     result_ids = [r.test_result_id for r in rows]
     tested_at_map = {
         r.id: (r.tested_at or r.cts)
         for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
     }
-    return [_serialize_parameter_analytics(r, tested_at_map.get(r.test_result_id)) for r in rows]
+
+    # Collapse to the latest row per (parameter_key, template_key)  -  the
+    # ORDER BY above puts the most-recently-tested row of each group first.
+    latest: dict[tuple, ParameterAnalytics] = {}
+    for r in rows:
+        gkey = (r.parameter_key, r.template_key)
+        if gkey not in latest:
+            latest[gkey] = r
+
+    return [
+        _serialize_parameter_analytics(r, tested_at_map.get(r.test_result_id))
+        for r in latest.values()
+    ]
 
 
 @router.get(
