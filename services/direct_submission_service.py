@@ -375,11 +375,31 @@ class DirectSubmissionService:
 
         # Apply department scope — explicit filter takes priority over user scope
         if department_id is not None:
-            query = query.filter(TestingRequest.department_id == department_id)
+            from utils.common_service import get_dept_subtree_ids
+
+            dept_ids = get_dept_subtree_ids(
+                self.db,
+                department_id,
+                user.organization_id,
+            )
+
+            query = query.filter(
+                TestingRequest.department_id.in_(dept_ids)
+            )
         else:
             is_org_admin, dept_id = self._get_user_scope(user)
             if not is_org_admin and dept_id:
-                query = query.filter(TestingRequest.department_id == dept_id)
+                from utils.common_service import get_dept_subtree_ids
+
+                dept_ids = get_dept_subtree_ids(
+                    self.db,
+                    dept_id,
+                    user.organization_id,
+                )
+
+                query = query.filter(
+                    TestingRequest.department_id.in_(dept_ids)
+                )
 
         if own_only:
             query = query.filter(TestingRequest.originator_id == user.id)
