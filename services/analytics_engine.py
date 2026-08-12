@@ -551,6 +551,24 @@ class AnalyticsEngine:
 
         equipment_id = request.equipment_id
 
+        # organization_id is sometimes missing on the TestResult itself
+        # (e.g. rows created by an import path that didn't set it) — fall
+        # back to the testing request's, then the equipment's, before
+        # giving up. TestAnalytics.organization_id is NOT NULL, so an
+        # unresolved value here must not proceed to the insert below.
+        if not organization_id:
+            organization_id = request.organization_id
+        if not organization_id:
+            equipment_for_org = self.db.get(Equipment, equipment_id)
+            organization_id = equipment_for_org.organization_id if equipment_for_org else None
+        if not organization_id:
+            logger.warning(
+                "run_for_test: could not resolve organization_id for TestResult %s "
+                "(equipment %s, testing_request %s)",
+                test_result_id, equipment_id, result.testing_request_id,
+            )
+            return None
+
         # Load template
         template_data = self._load_template(template_key, organization_id)
         if not template_data:
