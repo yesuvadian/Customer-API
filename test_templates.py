@@ -2820,6 +2820,16 @@ TEST_TEMPLATES = {
                                             "IEC 60599:2022": {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
                                         },
                                     },
+                                    "remedial_action_text": {
+                                        "Methane":         "Elevated methane indicates a low-temperature thermal fault - investigate for local overheating (e.g. bad connections, circulating currents).",
+                                        "Ethane":           "Elevated ethane indicates a thermal fault - investigate oil/paper overheating; correlate with methane and ethylene trends.",
+                                        "Ethylene":         "Elevated ethylene indicates a higher-temperature thermal fault - investigate hot spots, core faults, or circulating currents.",
+                                        "Acetylene":        "Acetylene indicates arcing / high-energy electrical discharge - the most severe DGA finding; schedule urgent inspection for possible internal arcing.",
+                                        "Hydrogen":         "Elevated hydrogen indicates partial discharge / corona activity - check for low-energy electrical discharge and elevated oil moisture.",
+                                        "Carbon Dioxide":   "Elevated CO2 indicates thermal aging of cellulose (paper) insulation - review loading history and consider a follow-up DGA trend.",
+                                        "Carbon Monoxide":  "Elevated CO indicates overheating of solid (paper) insulation - review loading history and consider a follow-up DGA trend.",
+                                        "TGC":              "Elevated total combustible gas indicates an overall active fault condition - schedule a follow-up DGA sample to confirm the trend and identify the dominant gas.",
+                                    },
                                 },
                             },
                         },
@@ -3033,6 +3043,16 @@ TEST_TEMPLATES = {
                                             "IS 10593:2000":  {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
                                             "IEC 60599:2022": {"Normal": [0, 200],   "Alert": [200,   500],   "Abnormal / Critical": [500,   None]},
                                         },
+                                    },
+                                    "remedial_action_text": {
+                                        "Methane":         "Elevated methane indicates a low-temperature thermal fault - investigate for local overheating (e.g. bad connections, circulating currents).",
+                                        "Ethane":           "Elevated ethane indicates a thermal fault - investigate oil/paper overheating; correlate with methane and ethylene trends.",
+                                        "Ethylene":         "Elevated ethylene indicates a higher-temperature thermal fault - investigate hot spots, core faults, or circulating currents.",
+                                        "Acetylene":        "Acetylene indicates arcing / high-energy electrical discharge - the most severe DGA finding; schedule urgent inspection for possible internal arcing.",
+                                        "Hydrogen":         "Elevated hydrogen indicates partial discharge / corona activity - check for low-energy electrical discharge and elevated oil moisture.",
+                                        "Carbon Dioxide":   "Elevated CO2 indicates thermal aging of cellulose (paper) insulation - review loading history and consider a follow-up DGA trend.",
+                                        "Carbon Monoxide":  "Elevated CO indicates overheating of solid (paper) insulation - review loading history and consider a follow-up DGA trend.",
+                                        "TGC":              "Elevated total combustible gas indicates an overall active fault condition - schedule a follow-up DGA sample to confirm the trend and identify the dominant gas.",
                                     },
                                 },
                             },
@@ -3379,7 +3399,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 0.5,
-                                "alert_min":  0.5,  "alert_max":  0.7,
+                                "alert_min":  None, "alert_max":  0.7,
                                 "critical_below": None, "critical_above": 0.7,
                                 "trend_watch": True,
                                 "weight": 1.5,
@@ -3479,7 +3499,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 0.5,
-                                "alert_min":  0.5,  "alert_max":  0.7,
+                                "alert_min":  None, "alert_max":  0.7,
                                 "critical_below": None, "critical_above": 0.7,
                                 "trend_watch": True,
                                 "weight": 1.5,
@@ -3577,7 +3597,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 0.7,
-                                "alert_min":  0.7,  "alert_max":  1.0,
+                                "alert_min":  None, "alert_max":  1.0,
                                 "critical_below": None, "critical_above": 1.0,
                                 "trend_watch": True,
                                 "weight": 1.5,
@@ -3675,7 +3695,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 1.0,
-                                "alert_min":  1.0,  "alert_max":  1.5,
+                                "alert_min":  None, "alert_max":  1.5,
                                 "critical_below": None, "critical_above": 1.5,
                                 "trend_watch": True,
                                 "weight": 1.0,
@@ -3773,7 +3793,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 1.0,
-                                "alert_min":  1.0,  "alert_max":  1.5,
+                                "alert_min":  None, "alert_max":  1.5,
                                 "critical_below": None, "critical_above": 1.5,
                                 "trend_watch": True,
                                 "weight": 1.0,
@@ -6791,3 +6811,56 @@ def get_template_for_test_type(test_type_name: str):
 def get_template_by_key(template_key: str):
     """Look up a template by its unique key."""
     return TEST_TEMPLATES.get(template_key)
+
+
+# ── Row-identifier normalization ──────────────────────────────────────────
+# winding_test_results / idax_test_results row identifiers ("test_configuration"
+# column) are free text. Historical/legacy data commonly uses the classic
+# capacitance-bridge codes (CHG, CHL, ...) instead of this template's default
+# row names (HV-GND, HV-LV, ...) for the same physical measurement point,
+# which fragments trend history since ParameterAnalytics keys on the raw
+# row_id. Import paths should normalize through this before writing test_data.
+#
+# "MV" is treated as an alias for the LV (secondary) winding node -- some
+# older reports use HV/MV/TV nomenclature where MV is explicitly the same
+# physical 66kV winding other reports call LV (e.g. an annotated "HV-MV
+# (HV=220kV,MV=66kV,TV=11kV)" row). "IV" is intentionally NOT merged into
+# LV here: some reports test HV-IV/IV-LV/IV-GND as genuinely distinct rows
+# alongside HV-LV/LV-TV/etc (an autotransformer intermediate-voltage node),
+# matching this codebase's existing PDF extractor which already keeps IV
+# rows on their own canonical labels (see _WINDING_CFG_PATTERNS_IV in
+# seed_tandelta_from_pdf.py) rather than folding them into LV.
+import re as _re
+
+_ROW_ID_ALIASES: list[tuple[str, "_re.Pattern"]] = [
+    ("HV-GND",      _re.compile(r"^(?:CHG|HV\s*[-–&]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("HV-LV",       _re.compile(r"^(?:CHL|HV\s*[-–&]\s*(?:LV|MV))$", _re.I)),
+    ("LV-GND",      _re.compile(r"^(?:CLG|(?:LV|MV)\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("LV-TV",       _re.compile(r"^(?:CLT|(?:LV|MV)\s*[-–]\s*TV)$", _re.I)),
+    ("TV-GND",      _re.compile(r"^(?:CTG|TV\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("HV-TV",       _re.compile(r"^(?:CTH|(?:HV|TV)\s*[-–]\s*(?:TV|HV))$", _re.I)),
+    ("(HV+LV)-GND", _re.compile(r"^\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*(?:GND|Grd|Grnd|Ground)$", _re.I)),
+    ("(HV+LV)-TV",  _re.compile(r"^\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*TV$", _re.I)),
+]
+
+
+_TRAILING_VOLTAGE_NOTE = _re.compile(r"\s*\([^()]*=[^()]*\)\s*$")
+
+
+def normalize_row_id(raw: str) -> str:
+    """
+    Map a legacy/alternate row-identifier spelling (CHG, HV-Ground, ...) to
+    this template's canonical row name (HV-GND, ...). Already-canonical
+    values match themselves and pass through unchanged; anything unrecognized
+    (custom rows a user added) is returned as-is.
+    """
+    text = (raw or "").strip()
+    # Some reports append a trailing voltage-mapping note, e.g.
+    # "HV-MV (HV=220kV,MV=66kV,TV=11kV)" - strip it before matching so the
+    # underlying "HV-MV" still resolves. Only strips a trailing "(...)" that
+    # contains "=" (a note), never a structural prefix like "(HV+LV)-GND".
+    stripped = _TRAILING_VOLTAGE_NOTE.sub("", text)
+    for canonical, pattern in _ROW_ID_ALIASES:
+        if pattern.match(stripped):
+            return canonical
+    return raw

@@ -1424,6 +1424,15 @@ def get_parameter_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    """
+    ParameterAnalytics has one row per (test_result_id, parameter_key)  -  an
+    equipment with N historical tests for "Acidity" has N separate Acidity
+    rows, one per test. This endpoint surfaces the equipment's *current*
+    snapshot per parameter, so it must collapse to the single most-recently
+    -tested row per (parameter_key, template_key)  -  ordering by tested_at
+    (not calculated_at, which is write time and can lag behind ingestion/
+    recompute order) and keeping only the first row seen per group.
+    """
     from sqlalchemy.orm import aliased
     TR = aliased(TestResult)
     q = (
@@ -1439,13 +1448,42 @@ def get_parameter_analytics(
         q = q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
         q = q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
-    rows = q.order_by(ParameterAnalytics.calculated_at.desc()).all()
+    rows = q.order_by(
+        ParameterAnalytics.parameter_key,
+        ParameterAnalytics.template_key,
+        coalesced.desc(),
+    ).all()
     result_ids = [r.test_result_id for r in rows]
     tested_at_map = {
         r.id: (r.tested_at or r.cts)
         for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
     }
-    return [_serialize_parameter_analytics(r, tested_at_map.get(r.test_result_id)) for r in rows]
+
+    # Collapse to the latest row per (parameter_key, template_key)  -  the
+    # ORDER BY above puts the most-recently-tested row of each group first.
+    latest: dict[tuple, ParameterAnalytics] = {}
+    for r in rows:
+        gkey = (r.parameter_key, r.template_key)
+        if gkey not in latest:
+            latest[gkey] = r
+
+    # CRITICAL/ALERT first, then within each severity tier parameters with a
+    # computable trend before ones stuck on "Insufficient_Data" (too few
+    # readings for a regression), then alphabetical by parameter_key.
+    severity_rank = {"CRITICAL": 0, "ALERT": 1}
+    ordered = sorted(
+        latest.values(),
+        key=lambda r: (
+            severity_rank.get(r.status, 2),
+            r.trend == "Insufficient_Data",
+            r.parameter_key or "",
+        ),
+    )
+
+    return [
+        _serialize_parameter_analytics(r, tested_at_map.get(r.test_result_id))
+        for r in ordered
+    ]
 
 
 @router.get(
@@ -1487,13 +1525,21 @@ def get_parameter_history(
     """
     # Trend always shows full history — the date filter controls the equipment list,
     # not the time-series chart. date_from / date_to are accepted but ignored here.
+    #
+    # Ordered by the actual test date (TestResult.tested_at, falling back to cts),
+    # not ParameterAnalytics.calculated_at — calculated_at reflects when the
+    # analytics row was computed, which can lag or precede the real test date
+    # when results are imported/backfilled out of chronological order, producing
+    # a chart that plots points in the wrong sequence despite correct date labels.
     q = (
         db.query(ParameterAnalytics)
+        .join(TestResult, TestResult.id == ParameterAnalytics.test_result_id)
         .filter(
             ParameterAnalytics.equipment_id  == equipment_id,
             ParameterAnalytics.parameter_key == parameter_key,
         )
-        .order_by(ParameterAnalytics.calculated_at.asc())
+        .order_by(func.coalesce(TestResult.tested_at, TestResult.cts,
+                                 ParameterAnalytics.calculated_at).asc())
     )
     if template_key:
         q = q.filter(ParameterAnalytics.template_key == template_key)
@@ -1893,6 +1939,7 @@ def _serialize_parameter_analytics(row: ParameterAnalytics, tested_at=None) -> d
         "is_anomaly":           row.is_anomaly,
         "anomaly_type":         row.anomaly_type,
         "anomaly_detail":       row.anomaly_detail,
+        "remedial_action_text": row.remedial_action_text,
         "calculated_at":        row.calculated_at.isoformat() if row.calculated_at else None,
         "links": {
             "test_result":   f"/analytics/test-results/{row.test_result_id}",

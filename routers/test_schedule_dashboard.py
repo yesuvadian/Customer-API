@@ -88,19 +88,21 @@ def compliance_matrix(
 def equipment_detail(
     equipment_id: UUID,
     org_id: UUID = Query(...),
+    request_category: Optional[str] = Query(
+        "test",
+        description="'test' for CM Schedules, 'maintenance' for PM Schedules",
+    ),
     db: Session = Depends(get_db),
 ):
-    """
-    Upcoming tests (next 60 days) and recent completed results
-    for a single equipment — shown in the detail panel when a
-    row is tapped in the compliance matrix.
-    """
     result = TestScheduleDashboardService(db).get_equipment_detail(
         equipment_id=equipment_id,
         org_id=org_id,
+        request_category=request_category or "test",
     )
+
     if not result:
         raise HTTPException(404, "Equipment not found.")
+
     return result
 
 

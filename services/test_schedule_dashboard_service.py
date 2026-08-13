@@ -199,6 +199,7 @@ class TestScheduleDashboardService:
             self.db.query(TestRequestSchedule)
             .filter(
                 TestRequestSchedule.equipment_id.in_(eq_ids),
+                TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
                 _request_category_filter(request_category),
             )
@@ -342,7 +343,7 @@ class TestScheduleDashboardService:
             })
 
         # 7. KPIs
-        kpis = self._compute_kpis(rows, columns)
+        kpis = self._compute_kpis(rows, columns, schedules)
 
         # 8. Upcoming schedule counts per time window
         # Each schedule is counted in exactly ONE non-overlapping band:
@@ -391,7 +392,12 @@ class TestScheduleDashboardService:
     # Public — equipment detail (upcoming + recent)
     # ─────────────────────────────────────────────────────────────
 
-    def get_equipment_detail(self, equipment_id: UUID, org_id: UUID) -> dict:
+    def get_equipment_detail(
+        self,
+        equipment_id: UUID,
+        org_id: UUID,
+        request_category: str = "test",
+    ) -> dict:
         """
         Returns upcoming scheduled tests (next 60 days) and
         the 10 most recent completed test requests for the equipment.
@@ -414,7 +420,11 @@ class TestScheduleDashboardService:
                 TestRequestSchedule.equipment_id == equipment_id,
                 TestRequestSchedule.is_active == True,
                 TestRequestSchedule.is_deleted == False,
-                (TestRequestSchedule.end_date.is_(None) | (TestRequestSchedule.end_date > _now)),
+                _request_category_filter(request_category),
+                (
+                    TestRequestSchedule.end_date.is_(None)
+                    | (TestRequestSchedule.end_date > _now)
+                ),
             )
             .all()
         )
@@ -730,30 +740,47 @@ class TestScheduleDashboardService:
                     queue.append(child_id)
         return visited
 
-    def _compute_kpis(self, rows: list, columns: list) -> dict:
+    def _compute_kpis(
+        self,
+        rows: list,
+        columns: list,
+        schedules: list,
+    ) -> dict:
         from models import TestingRequest
         today = self._today
         month_start = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
 
-        total          = len(rows)
+        active_schedules = [
+            s for s in schedules
+            if s.is_active and not s.is_deleted
+        ]
+
+        total = len(active_schedules)
         overdue        = 0
         due_30         = 0
         critical_alert = 0
 
-        for row in rows:
-            for cell in row.get("cells", {}).values():
-                status = cell.get("status")
+        for s in active_schedules:
+            next_run = s.next_run_date
 
-                if status == "overdue":
-                    overdue += 1
-                    critical_alert += 1
+            if not next_run:
+                continue
 
-                elif status == "due_imminent":
-                    critical_alert += 1
-                    due_30 += 1
+            next_date = (
+                next_run.date()
+                if isinstance(next_run, datetime)
+                else next_run
+            )
 
-                elif status == "due_soon":
-                    due_30 += 1
+            days = (next_date - today).days
+
+            if days <= 0:
+                overdue += 1
+            elif days <= 15:
+                critical_alert += 1
+                due_30 += 1
+            elif days <= 30:
+                due_30 += 1
 
         # Count distinct equipment that had at least one completed test this month
         eq_ids = [row["equipment_id"] for row in rows if row.get("equipment_id")]
