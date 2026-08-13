@@ -735,6 +735,7 @@ class AnalyticsEngine:
                         status          = status,
                         score           = score,
                         analysis        = analysis,
+                        remedial_action_text = field_ev.get("remedial_action_text") if field_ev else None,
                     )
                     if pa:
                         param_rows.append(pa)
@@ -754,6 +755,22 @@ class AnalyticsEngine:
                         None,
                     )
 
+                    # Tables evaluated via _eval_threshold_table (e.g. DGA -
+                    # one THRESHOLD-rule column per row, keyed by row_id/gas
+                    # name, not by column+row_idx) return their per-row
+                    # results in "row_results" instead of "column_results".
+                    # Only the column that rule actually classifies (its
+                    # input_field) should pick up that status.
+                    threshold_input_field = next(
+                        (
+                            (c.get("rule") or {}).get("config", {}).get("input_field")
+                            for c in cols
+                            if c.get("type") == "calculated"
+                            and (c.get("rule") or {}).get("type") == "THRESHOLD"
+                        ),
+                        None,
+                    )
+
                     for col in cols:
                         if col.get("type") not in ("number", "calculated"):
                             continue
@@ -763,6 +780,7 @@ class AnalyticsEngine:
 
                         field_ev    = ev_fields_map.get(field_key) or {}
                         col_results = field_ev.get("column_results", []) if field_ev else []
+                        row_results = field_ev.get("row_results", []) if field_ev else []
 
                         # Track per-row separately when a row-identifier exists
                         rows_to_track = []
@@ -803,14 +821,22 @@ class AnalyticsEngine:
                             row_label = f"{table_label} — {row_id} — {col_label}"
 
                             # Per-row status (+ breach limit, when the eval
-                            # engine flagged this cell) from col_results
+                            # engine flagged this cell) from col_results, or
+                            # from row_results (_eval_threshold_table shape)
+                            # when this column is the one that rule classifies.
                             row_matches = [
                                 r for r in col_results
                                 if r.get("column") == col_key
                                 and r.get("row") == row_idx
                             ]
+                            if not row_matches and col_key == threshold_input_field:
+                                row_matches = [
+                                    r for r in row_results
+                                    if str(r.get("row_id", "")).strip().lower() == row_id.lower()
+                                ]
                             status    = next((r.get("status") for r in reversed(row_matches) if r.get("status")), None)
                             row_breach_limit = next((r.get("breach_limit") for r in reversed(row_matches) if r.get("breach_limit") is not None), None)
+                            row_remedial_text = next((r.get("remedial_action_text") for r in reversed(row_matches) if r.get("remedial_action_text")), None)
                             condition = _CONDITION.get(status, "Poor") if status else None
                             score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
 
@@ -839,6 +865,7 @@ class AnalyticsEngine:
                                 score           = score,
                                 analysis        = analysis,
                                 static_breach_limit = row_breach_limit,
+                                remedial_action_text = row_remedial_text,
                             )
                             if pa:
                                 param_rows.append(pa)
@@ -1206,6 +1233,7 @@ class AnalyticsEngine:
         score,
         analysis,
         static_breach_limit=None,
+        remedial_action_text=None,
     ) -> ParameterAnalytics:
         key = field.get("key")
         pa  = (
@@ -1261,6 +1289,7 @@ class AnalyticsEngine:
         pa.is_anomaly         = analysis.get("is_anomaly", False)
         pa.anomaly_type       = analysis.get("anomaly_type")
         pa.anomaly_detail     = analysis.get("anomaly_detail")
+        pa.remedial_action_text = remedial_action_text
         pa.calculated_at      = datetime.now(timezone.utc)
         return pa
 
