@@ -250,6 +250,8 @@ class EvaluationService:
                             "value":        num_val,
                             "status":       col_status,
                             "breach_limit": col_breach_limit,
+                            "remedial_action_text": col_ev.get("remedial_action_text")
+                                if col_status in (ALERT, CRITICAL) else None,
                         })
                         if _STATUS_RANK[col_status] > _STATUS_RANK[agg_status]:
                             agg_status = col_status
@@ -340,6 +342,9 @@ class EvaluationService:
         input_field   = cfg.get("input_field")
         lookup_fields = cfg.get("lookup_fields", [])
         thresholds    = cfg.get("thresholds", {})
+        # Optional: { row_id: "remedial text" }, e.g. per-gas DGA guidance -
+        # keyed the same way as thresholds (row_id, case-insensitive).
+        remedial_by_row = cfg.get("remedial_action_text", {})
 
         if not input_field or not thresholds:
             return None
@@ -490,12 +495,20 @@ class EvaluationService:
             if rank > worst_rank:
                 worst_rank = rank
 
+            remedial_text = None
+            if row_status in (ALERT, CRITICAL):
+                for rkey, rtext in remedial_by_row.items():
+                    if rkey.lower() == str(row_id).lower():
+                        remedial_text = rtext
+                        break
+
             row_results.append({
                 "row_id":       row_id,
                 "value":        value,
                 "unit":         row.get("unit"),
                 "status":       row_status,
                 "breach_limit": row_breach_limit,
+                "remedial_action_text": remedial_text,
             })
 
         if not row_results:
