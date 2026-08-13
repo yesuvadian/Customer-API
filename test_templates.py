@@ -6824,6 +6824,9 @@ _ROW_ID_ALIASES: list[tuple[str, "_re.Pattern"]] = [
 ]
 
 
+_TRAILING_VOLTAGE_NOTE = _re.compile(r"\s*\([^()]*=[^()]*\)\s*$")
+
+
 def normalize_row_id(raw: str) -> str:
     """
     Map a legacy/alternate row-identifier spelling (CHG, HV-Ground, ...) to
@@ -6832,7 +6835,12 @@ def normalize_row_id(raw: str) -> str:
     (custom rows a user added) is returned as-is.
     """
     text = (raw or "").strip()
+    # Some reports append a trailing voltage-mapping note, e.g.
+    # "HV-MV (HV=220kV,MV=66kV,TV=11kV)" - strip it before matching so the
+    # underlying "HV-MV" still resolves. Only strips a trailing "(...)" that
+    # contains "=" (a note), never a structural prefix like "(HV+LV)-GND".
+    stripped = _TRAILING_VOLTAGE_NOTE.sub("", text)
     for canonical, pattern in _ROW_ID_ALIASES:
-        if pattern.match(text):
+        if pattern.match(stripped):
             return canonical
     return raw
