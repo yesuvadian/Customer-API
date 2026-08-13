@@ -1284,7 +1284,7 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
     (not table, not calculated), so they're picked up by the generic
     scalar-field branch at the bottom of the field loop, via _ITC_FIELD_MAP.
     """
-    from test_templates import TEST_TEMPLATES
+    from test_templates import TEST_TEMPLATES, normalize_row_id
     template  = TEST_TEMPLATES.get("capacitance_tandelta_transformer", {})
     test_data: dict = {}
 
@@ -1321,7 +1321,8 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
                                 parsed_val = src.get(ck)
                                 row[ck] = _str(parsed_val) if parsed_val is not None else None
                             elif ck in src and src[ck] is not None:
-                                row[ck] = _str(src[ck])
+                                val = _str(src[ck])
+                                row[ck] = normalize_row_id(val) if ck == "test_configuration" else val
                             else:
                                 row[ck] = ""
                         rows.append(row)

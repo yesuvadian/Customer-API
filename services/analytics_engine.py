@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import mean, stdev
 from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from models import (
@@ -128,7 +128,7 @@ class ParameterAnalyzer:
     """
 
     # Minimum readings needed for trend calculation
-    MIN_TREND_POINTS = 3
+    MIN_TREND_POINTS = 1
     # Slope considered "stable" if |slope * 365| < this fraction of the value range
     STABLE_FRACTION  = 0.05
     # Z-score threshold for anomaly
@@ -138,10 +138,14 @@ class ParameterAnalyzer:
     def analyse(
         history: list[tuple[datetime, float]],
         evaluation: dict,
+        current_value: Optional[float] = None,
+        current_date:  Optional[datetime] = None,
     ) -> dict:
         """
         history  : [(tested_at, float_value), ...] sorted oldest-first
         evaluation: the field's `evaluation` dict from template
+        current_value/current_date: the reading being analysed right now -
+          only needed for the single-prior-reading case below.
 
         Returns a dict with trend, slope, r_squared, annual_change,
         pct_change_annual, breach_threshold, breach_predicted_at,
@@ -174,6 +178,39 @@ class ParameterAnalyzer:
             ParameterAnalyzer._detect_anomaly(values, result)
 
         if len(history) < ParameterAnalyzer.MIN_TREND_POINTS:
+            return result
+
+        # A single prior reading can't feed a real OLS regression - fitting a
+        # line through one point is degenerate and _linear_regression()
+        # returns slope=0.0 for it, which would misreport every 2-reading
+        # parameter as "Stable" regardless of the actual direction. Compare
+        # directly against the current reading instead, when available.
+        if len(history) == 1 and current_value is not None and current_date is not None:
+            prior_date, prior_value = history[0]
+            elapsed_days = (current_date - prior_date).total_seconds() / 86400.0
+            slope = (current_value - prior_value) / elapsed_days if elapsed_days > 0 else 0.0
+            result["trend_slope"] = round(slope, 8)
+            # Not a real goodness-of-fit measure for a 2-point line - leave unset.
+            result["trend_r_squared"] = None
+
+            annual_change = slope * 365
+            result["annual_change"] = round(annual_change, 6)
+            if prior_value:
+                result["pct_change_annual"] = round(annual_change / abs(prior_value) * 100, 2)
+
+            val_range = abs(prior_value) or abs(current_value) or 1
+            stable_threshold = val_range * ParameterAnalyzer.STABLE_FRACTION
+            if annual_change > stable_threshold:
+                result["trend"] = "Increasing"
+            elif annual_change < -stable_threshold:
+                result["trend"] = "Decreasing"
+            else:
+                result["trend"] = "Stable"
+
+            if slope != 0:
+                ParameterAnalyzer._forecast_breach(
+                    current_value, current_date, slope, evaluation, result
+                )
             return result
 
         # Build x-axis as elapsed days from first observation
@@ -576,7 +613,11 @@ class AnalyticsEngine:
             return None
 
         # Load historical test data for trend analysis
-        history_map = self._fetch_history_map(equipment_id, template_key, test_result_id)
+        history_map = self._fetch_history_map(
+            equipment_id, template_key, test_result_id,
+            before=result.tested_at or result.cts,
+            template_data=template_data,
+        )
 
         # Score the test
         health_score, critical_findings = HealthScorer.score_test(
@@ -677,7 +718,11 @@ class AnalyticsEngine:
 
 
                     history  = history_map.get(field_key, [])
-                    analysis = ParameterAnalyzer.analyse(history, ev)
+                    analysis = ParameterAnalyzer.analyse(
+                        history, ev,
+                        current_value=current_val,
+                        current_date=result.tested_at or result.cts,
+                    )
 
                     pa = self._upsert_parameter_analytics(
                         test_result_id  = test_result_id,
@@ -744,25 +789,28 @@ class AnalyticsEngine:
                                 except (ValueError, TypeError):
                                     continue
 
+                        table_label = field.get("label") or field_key
+
                         for row_id, current_val, row_idx, row_unit in rows_to_track:
                             # Build a stable parameter key scoped to this row
                             param_key = f"{field_key}.{row_id}.{col_key}"
-                            # Uniqueness comes from param_key (field_key.row_id.col_key),
-                            # not this label — the table field's own label (e.g. "IDAX
-                            # Test Data") is redundant here since every row from this
-                            # table already shares it in any UI list that shows them
-                            # together, and it was crowding out row_id/col_label in
-                            # truncated displays.
-                            row_label = f"{row_id} — {col_label}"
+                            # Prefixed with the table's own label because row
+                            # identifiers (e.g. "B Phase") are only unique
+                            # within their own table — a template can have
+                            # multiple tables (220kV vs 66kV bushing, etc.)
+                            # that reuse the same row names, which otherwise
+                            # renders as indistinguishable duplicate entries.
+                            row_label = f"{table_label} — {row_id} — {col_label}"
 
-                            # Per-row status from col_results
-                            row_statuses = [
-                                r.get("status") for r in col_results
+                            # Per-row status (+ breach limit, when the eval
+                            # engine flagged this cell) from col_results
+                            row_matches = [
+                                r for r in col_results
                                 if r.get("column") == col_key
                                 and r.get("row") == row_idx
-                                and r.get("status")
                             ]
-                            status    = row_statuses[-1] if row_statuses else None
+                            status    = next((r.get("status") for r in reversed(row_matches) if r.get("status")), None)
+                            row_breach_limit = next((r.get("breach_limit") for r in reversed(row_matches) if r.get("breach_limit") is not None), None)
                             condition = _CONDITION.get(status, "Poor") if status else None
                             score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
 
@@ -773,7 +821,11 @@ class AnalyticsEngine:
                                 synth_field["unit"] = effective_unit
 
                             history  = history_map.get(param_key, [])
-                            analysis = ParameterAnalyzer.analyse(history, {})
+                            analysis = ParameterAnalyzer.analyse(
+                                history, {},
+                                current_value=current_val,
+                                current_date=result.tested_at or result.cts,
+                            )
 
                             pa = self._upsert_parameter_analytics(
                                 test_result_id  = test_result_id,
@@ -786,6 +838,7 @@ class AnalyticsEngine:
                                 status          = status,
                                 score           = score,
                                 analysis        = analysis,
+                                static_breach_limit = row_breach_limit,
                             )
                             if pa:
                                 param_rows.append(pa)
@@ -1015,13 +1068,50 @@ class AnalyticsEngine:
         equipment_id:    uuid.UUID,
         template_key:    str,
         exclude_result:  uuid.UUID,
+        before:          Optional[datetime] = None,
+        template_data:   Optional[dict] = None,
     ) -> dict[str, list[tuple[datetime, float]]]:
         """
         Returns {param_key: [(tested_at, value), ...]} sorted oldest-first
         for all historical results of this equipment + template, excluding
         the current test result.
+
+        [before] must be the current test's own tested_at (or cts fallback).
+        Without it, "history" means every *other* result regardless of its
+        own date - so recomputing an old result would see readings taken
+        years after it, scrambling history_count/trend for anything but
+        the most recently-recomputed row (e.g. after a bulk recompute that
+        doesn't process results in chronological order). Trend analysis
+        must only ever look at what came before the point being evaluated.
+
+        [template_data], when given, is used to resolve each table field's
+        identifier column from the template's own column definitions - the
+        same source of truth run_for_test()'s main loop uses. Without it,
+        history built from a plain field_key.row_id.col_key guess (scanning
+        the row dict for "the first string column") is unreliable: JSONB
+        does not preserve key insertion order, so which column comes first
+        when iterating a stored row dict is arbitrary and can silently pick
+        a different column (e.g. voltage_kv) than the real identifier
+        (e.g. test_configuration) - producing history keys that never match
+        the parameter_key the main loop actually generates, so trend/
+        history_count silently stay wrong for table fields.
         """
-        rows = (
+        id_col_map: dict[str, Optional[str]] = {}
+        if template_data:
+            for section in template_data.get("sections", []):
+                for field in section.get("fields", []):
+                    if field.get("type") != "table":
+                        continue
+                    cols = field.get("columns", [])
+                    id_col_map[field.get("key", "")] = next(
+                        (c.get("key") for c in cols
+                         if c.get("type") in ("text", "dropdown", "readonly")
+                         and c.get("key") not in ("unit", "remarks", "formula")),
+                        None,
+                    )
+
+        coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
+        q = (
             self.db.query(TestResult)
             .join(TestingRequest, TestResult.testing_request_id == TestingRequest.id)
             .filter(
@@ -1030,9 +1120,10 @@ class AnalyticsEngine:
                 TestResult.id               != exclude_result,
                 TestResult.test_data.isnot(None),
             )
-            .order_by(TestResult.tested_at.asc())
-            .all()
         )
+        if before is not None:
+            q = q.filter(coalesced < before)
+        rows = q.order_by(TestResult.tested_at.asc()).all()
 
         history_map: dict[str, list[tuple[datetime, float]]] = {}
         for row in rows:
@@ -1053,18 +1144,22 @@ class AnalyticsEngine:
 
                 # Table column: raw is a list of row dicts — key per row identifier
                 if isinstance(raw, list):
-                    # Determine the identifier column (first non-unit/remarks text col)
-                    _ID_SKIP = {"unit", "remarks", "formula"}
-                    id_col_hist = None
-                    for row_dict in raw:
-                        if not isinstance(row_dict, dict):
-                            continue
-                        for k2, v2 in row_dict.items():
-                            if k2 not in _ID_SKIP and isinstance(v2, str) and v2.strip():
-                                id_col_hist = k2
+                    if key in id_col_map:
+                        id_col_hist = id_col_map[key]
+                    else:
+                        # No template available for this field — fall back to
+                        # scanning row dict order (unreliable, see docstring).
+                        _ID_SKIP = {"unit", "remarks", "formula"}
+                        id_col_hist = None
+                        for row_dict in raw:
+                            if not isinstance(row_dict, dict):
+                                continue
+                            for k2, v2 in row_dict.items():
+                                if k2 not in _ID_SKIP and isinstance(v2, str) and v2.strip():
+                                    id_col_hist = k2
+                                    break
+                            if id_col_hist:
                                 break
-                        if id_col_hist:
-                            break
 
                     for row_idx, row_dict in enumerate(raw):
                         if not isinstance(row_dict, dict):
@@ -1110,6 +1205,7 @@ class AnalyticsEngine:
         status,
         score,
         analysis,
+        static_breach_limit=None,
     ) -> ParameterAnalytics:
         key = field.get("key")
         pa  = (
@@ -1148,7 +1244,18 @@ class AnalyticsEngine:
         pa.annual_change      = analysis.get("annual_change")
         # NUMERIC(8,2) → max ±999999.99
         pa.pct_change_annual  = _clamp(analysis.get("pct_change_annual"), -999999.99, 999999.99)
-        pa.breach_threshold   = analysis.get("breach_threshold")
+        # Prefer the static evaluation-rule limit (the fixed pass/fail line
+        # from the template, e.g. "alert above 0.7%") over the trend-forecast
+        # crossing value - it's what "is above the alert limit of X" on the
+        # UI card actually means. The forecast one (when will the current
+        # trend cross a limit) is a different, narrower signal that's often
+        # unset (needs a non-zero slope), which is why this field showed no
+        # number at all for ALERT-status parameters before this fix.
+        pa.breach_threshold   = (
+            static_breach_limit
+            if static_breach_limit is not None
+            else analysis.get("breach_threshold")
+        )
         pa.breach_predicted_at= analysis.get("breach_predicted_at")
         pa.days_to_breach     = analysis.get("days_to_breach")
         pa.is_anomaly         = analysis.get("is_anomaly", False)

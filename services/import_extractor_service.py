@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from models import CategoryDetails, Equipment
 from category_labels import RequestCategoryLabels
+from test_templates import normalize_row_id
 
 
 # ── UI category → DB category_type mapping ───────────────────────────────────
@@ -278,7 +279,8 @@ def _read_table_sheets(wb, main_sheet_title: str) -> dict[str, list[dict]]:
             tbl_row: dict = {}
             for h, v in zip(t_headers, trow):
                 if h:  # None sentinel means skip
-                    tbl_row[h] = str(v) if v is not None else ""
+                    cell = str(v) if v is not None else ""
+                    tbl_row[h] = normalize_row_id(cell) if h == "test_configuration" else cell
             if any(v for v in tbl_row.values()):
                 tbl_rows.append(tbl_row)
         if tbl_rows:
