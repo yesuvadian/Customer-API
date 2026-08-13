@@ -1939,6 +1939,7 @@ def _serialize_parameter_analytics(row: ParameterAnalytics, tested_at=None) -> d
         "is_anomaly":           row.is_anomaly,
         "anomaly_type":         row.anomaly_type,
         "anomaly_detail":       row.anomaly_detail,
+        "remedial_action_text": row.remedial_action_text,
         "calculated_at":        row.calculated_at.isoformat() if row.calculated_at else None,
         "links": {
             "test_result":   f"/analytics/test-results/{row.test_result_id}",
