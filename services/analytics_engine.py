@@ -579,6 +579,7 @@ class AnalyticsEngine:
         history_map = self._fetch_history_map(
             equipment_id, template_key, test_result_id,
             before=result.tested_at or result.cts,
+            template_data=template_data,
         )
 
         # Score the test
@@ -1023,6 +1024,7 @@ class AnalyticsEngine:
         template_key:    str,
         exclude_result:  uuid.UUID,
         before:          Optional[datetime] = None,
+        template_data:   Optional[dict] = None,
     ) -> dict[str, list[tuple[datetime, float]]]:
         """
         Returns {param_key: [(tested_at, value), ...]} sorted oldest-first
@@ -1036,7 +1038,33 @@ class AnalyticsEngine:
         the most recently-recomputed row (e.g. after a bulk recompute that
         doesn't process results in chronological order). Trend analysis
         must only ever look at what came before the point being evaluated.
+
+        [template_data], when given, is used to resolve each table field's
+        identifier column from the template's own column definitions - the
+        same source of truth run_for_test()'s main loop uses. Without it,
+        history built from a plain field_key.row_id.col_key guess (scanning
+        the row dict for "the first string column") is unreliable: JSONB
+        does not preserve key insertion order, so which column comes first
+        when iterating a stored row dict is arbitrary and can silently pick
+        a different column (e.g. voltage_kv) than the real identifier
+        (e.g. test_configuration) - producing history keys that never match
+        the parameter_key the main loop actually generates, so trend/
+        history_count silently stay wrong for table fields.
         """
+        id_col_map: dict[str, Optional[str]] = {}
+        if template_data:
+            for section in template_data.get("sections", []):
+                for field in section.get("fields", []):
+                    if field.get("type") != "table":
+                        continue
+                    cols = field.get("columns", [])
+                    id_col_map[field.get("key", "")] = next(
+                        (c.get("key") for c in cols
+                         if c.get("type") in ("text", "dropdown", "readonly")
+                         and c.get("key") not in ("unit", "remarks", "formula")),
+                        None,
+                    )
+
         coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
         q = (
             self.db.query(TestResult)
@@ -1071,18 +1099,22 @@ class AnalyticsEngine:
 
                 # Table column: raw is a list of row dicts — key per row identifier
                 if isinstance(raw, list):
-                    # Determine the identifier column (first non-unit/remarks text col)
-                    _ID_SKIP = {"unit", "remarks", "formula"}
-                    id_col_hist = None
-                    for row_dict in raw:
-                        if not isinstance(row_dict, dict):
-                            continue
-                        for k2, v2 in row_dict.items():
-                            if k2 not in _ID_SKIP and isinstance(v2, str) and v2.strip():
-                                id_col_hist = k2
+                    if key in id_col_map:
+                        id_col_hist = id_col_map[key]
+                    else:
+                        # No template available for this field — fall back to
+                        # scanning row dict order (unreliable, see docstring).
+                        _ID_SKIP = {"unit", "remarks", "formula"}
+                        id_col_hist = None
+                        for row_dict in raw:
+                            if not isinstance(row_dict, dict):
+                                continue
+                            for k2, v2 in row_dict.items():
+                                if k2 not in _ID_SKIP and isinstance(v2, str) and v2.strip():
+                                    id_col_hist = k2
+                                    break
+                            if id_col_hist:
                                 break
-                        if id_col_hist:
-                            break
 
                     for row_idx, row_dict in enumerate(raw):
                         if not isinstance(row_dict, dict):
