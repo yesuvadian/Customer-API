@@ -1,5 +1,6 @@
 from uuid import UUID
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -426,6 +427,67 @@ def get_department_ancestors(dept_id: UUID, db: Session = Depends(get_db)):
         node = parent
     chain.reverse()  # root first
     return chain
+
+
+@router.get("/department_search")
+def search_departments(
+    q: str = Query(..., min_length=1, description="Search text — matches department/zone/substation name, e.g. 'Hoody' or '110kv' or '220 kv'"),
+    org_id: Optional[UUID] = None,
+    limit: int = Query(30, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Search departments by name across the whole hierarchy (not just one level).
+
+    Matches zone/circle/division/substation names, including voltage-class
+    tokens embedded in the name (e.g. "220kV Mangaluru" matches "220kv",
+    "220 kv", or "220"). Used by the common location search box so users can
+    jump straight to a substation instead of drilling down level by level.
+
+    Results are scoped to the caller's organization and, for dept-scoped
+    users, restricted to their own sub-tree (same rule as /department_hierarchy).
+    """
+    from models import OrgDepartment
+    from utils.common_service import get_dept_subtree_ids
+
+    resolved_org_id = org_id or current_user.organization_id
+    if resolved_org_id is None:
+        return []
+
+    # Normalize "220 kv" / "220kV" / "220" queries to a single loose token so
+    # they all match a name like "220kV Mangaluru".
+    normalized = re.sub(r"\s*kv\b", "kv", q.strip(), flags=re.IGNORECASE)
+
+    query = db.query(OrgDepartment).filter(
+        OrgDepartment.organization_id == resolved_org_id,
+        OrgDepartment.is_active.is_(True),
+        OrgDepartment.name.ilike(f"%{normalized}%"),
+    )
+
+    is_admin, user_dept_id = get_user_dept_scope(db, current_user.id, resolved_org_id)
+    if not is_admin and user_dept_id:
+        allowed_ids = set(get_dept_subtree_ids(db, user_dept_id))
+        query = query.filter(OrgDepartment.id.in_(allowed_ids))
+
+    depts = query.order_by(OrgDepartment.name).limit(limit).all()
+
+    results = []
+    for d in depts:
+        has_children = (
+            db.query(OrgDepartment.id)
+            .filter(
+                OrgDepartment.parent_department_id == d.id,
+                OrgDepartment.is_active.is_(True),
+            )
+            .first()
+            is not None
+        )
+        results.append({
+            "id": str(d.id),
+            "name": d.name,
+            "has_children": has_children,
+        })
+    return results
 
 
 # ─── Equipment Types (for form dropdowns) ───────────────────
