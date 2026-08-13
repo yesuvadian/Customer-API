@@ -6800,13 +6800,23 @@ def get_template_by_key(template_key: str):
 # row names (HV-GND, HV-LV, ...) for the same physical measurement point,
 # which fragments trend history since ParameterAnalytics keys on the raw
 # row_id. Import paths should normalize through this before writing test_data.
+#
+# "MV" is treated as an alias for the LV (secondary) winding node -- some
+# older reports use HV/MV/TV nomenclature where MV is explicitly the same
+# physical 66kV winding other reports call LV (e.g. an annotated "HV-MV
+# (HV=220kV,MV=66kV,TV=11kV)" row). "IV" is intentionally NOT merged into
+# LV here: some reports test HV-IV/IV-LV/IV-GND as genuinely distinct rows
+# alongside HV-LV/LV-TV/etc (an autotransformer intermediate-voltage node),
+# matching this codebase's existing PDF extractor which already keeps IV
+# rows on their own canonical labels (see _WINDING_CFG_PATTERNS_IV in
+# seed_tandelta_from_pdf.py) rather than folding them into LV.
 import re as _re
 
 _ROW_ID_ALIASES: list[tuple[str, "_re.Pattern"]] = [
     ("HV-GND",      _re.compile(r"^(?:CHG|HV\s*[-–&]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
-    ("HV-LV",       _re.compile(r"^(?:CHL|HV\s*[-–&]\s*(?:LV|IV|MV))$", _re.I)),
-    ("LV-GND",      _re.compile(r"^(?:CLG|(?:LV|IV|MV)\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
-    ("LV-TV",       _re.compile(r"^(?:CLT|(?:LV|IV|MV)\s*[-–]\s*TV)$", _re.I)),
+    ("HV-LV",       _re.compile(r"^(?:CHL|HV\s*[-–&]\s*(?:LV|MV))$", _re.I)),
+    ("LV-GND",      _re.compile(r"^(?:CLG|(?:LV|MV)\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("LV-TV",       _re.compile(r"^(?:CLT|(?:LV|MV)\s*[-–]\s*TV)$", _re.I)),
     ("TV-GND",      _re.compile(r"^(?:CTG|TV\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
     ("HV-TV",       _re.compile(r"^(?:CTH|(?:HV|TV)\s*[-–]\s*(?:TV|HV))$", _re.I)),
     ("(HV+LV)-GND", _re.compile(r"^\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*(?:GND|Grd|Grnd|Ground)$", _re.I)),
