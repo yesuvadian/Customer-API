@@ -1203,7 +1203,25 @@ class TestingRequestService:
                 .scalar()
             ) or 0
 
-            # Open requests
+            # Open/closed requests. Uses the same "not closed" definition as
+            # _base_request_query's is_closed filter (legacy terminal statuses
+            # OR a completed/terminated TrWfInstance) instead of an open-status
+            # whitelist. A whitelist silently drops any status it doesn't
+            # enumerate — e.g. pending_approval, pending_assignment,
+            # scheduled, under_review, finance_pending — into neither bucket,
+            # so open_count + closed_count could fall short of request_count
+            # and undercount "Open" on the zone carousel relative to the
+            # /breakdown tiles (which use this same complement logic).
+            _LEGACY_CLOSED_STATUSES = [
+                TestingRequestStatus.approved,
+                TestingRequestStatus.completed,
+                TestingRequestStatus.closed,
+                TestingRequestStatus.rejected,
+            ]
+            wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
+                TrWfInstance.status.in_(["completed", "terminated"])
+            ).scalar_subquery()
+
             open_count = (
                 self.db.query(func.count(TestingRequest.id))
                 .filter(
@@ -1211,20 +1229,12 @@ class TestingRequestService:
                     TestingRequest.is_schedule_template.is_(False),
                     *_cat_filter,
                     *_date_filter,
-                    TestingRequest.status.in_([
-                        TestingRequestStatus.draft,
-                        TestingRequestStatus.submitted,
-                        TestingRequestStatus.assigned,
-                        TestingRequestStatus.accepted,
-                        TestingRequestStatus.in_progress,
-                        TestingRequestStatus.under_approval,
-                        TestingRequestStatus.outcome_active,
-                    ]),
+                    TestingRequest.status.notin_(_LEGACY_CLOSED_STATUSES),
+                    TestingRequest.id.notin_(wf_done_ids),
                 )
                 .scalar()
             ) or 0
 
-            # Closed requests
             closed_count = (
                 self.db.query(func.count(TestingRequest.id))
                 .filter(
@@ -1232,12 +1242,10 @@ class TestingRequestService:
                     TestingRequest.is_schedule_template.is_(False),
                     *_cat_filter,
                     *_date_filter,
-                    TestingRequest.status.in_([
-                        TestingRequestStatus.approved,
-                        TestingRequestStatus.completed,
-                        TestingRequestStatus.closed,
-                        TestingRequestStatus.rejected,
-                    ]),
+                    or_(
+                        TestingRequest.status.in_(_LEGACY_CLOSED_STATUSES),
+                        TestingRequest.id.in_(wf_done_ids),
+                    ),
                 )
                 .scalar()
             ) or 0
