@@ -1467,9 +1467,22 @@ def get_parameter_analytics(
         if gkey not in latest:
             latest[gkey] = r
 
+    # CRITICAL/ALERT first, then within each severity tier parameters with a
+    # computable trend before ones stuck on "Insufficient_Data" (too few
+    # readings for a regression), then alphabetical by parameter_key.
+    severity_rank = {"CRITICAL": 0, "ALERT": 1}
+    ordered = sorted(
+        latest.values(),
+        key=lambda r: (
+            severity_rank.get(r.status, 2),
+            r.trend == "Insufficient_Data",
+            r.parameter_key or "",
+        ),
+    )
+
     return [
         _serialize_parameter_analytics(r, tested_at_map.get(r.test_result_id))
-        for r in latest.values()
+        for r in ordered
     ]
 
 
