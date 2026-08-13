@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import mean, stdev
 from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from models import (
@@ -576,7 +576,10 @@ class AnalyticsEngine:
             return None
 
         # Load historical test data for trend analysis
-        history_map = self._fetch_history_map(equipment_id, template_key, test_result_id)
+        history_map = self._fetch_history_map(
+            equipment_id, template_key, test_result_id,
+            before=result.tested_at or result.cts,
+        )
 
         # Score the test
         health_score, critical_findings = HealthScorer.score_test(
@@ -744,25 +747,28 @@ class AnalyticsEngine:
                                 except (ValueError, TypeError):
                                     continue
 
+                        table_label = field.get("label") or field_key
+
                         for row_id, current_val, row_idx, row_unit in rows_to_track:
                             # Build a stable parameter key scoped to this row
                             param_key = f"{field_key}.{row_id}.{col_key}"
-                            # Uniqueness comes from param_key (field_key.row_id.col_key),
-                            # not this label — the table field's own label (e.g. "IDAX
-                            # Test Data") is redundant here since every row from this
-                            # table already shares it in any UI list that shows them
-                            # together, and it was crowding out row_id/col_label in
-                            # truncated displays.
-                            row_label = f"{row_id} — {col_label}"
+                            # Prefixed with the table's own label because row
+                            # identifiers (e.g. "B Phase") are only unique
+                            # within their own table — a template can have
+                            # multiple tables (220kV vs 66kV bushing, etc.)
+                            # that reuse the same row names, which otherwise
+                            # renders as indistinguishable duplicate entries.
+                            row_label = f"{table_label} — {row_id} — {col_label}"
 
-                            # Per-row status from col_results
-                            row_statuses = [
-                                r.get("status") for r in col_results
+                            # Per-row status (+ breach limit, when the eval
+                            # engine flagged this cell) from col_results
+                            row_matches = [
+                                r for r in col_results
                                 if r.get("column") == col_key
                                 and r.get("row") == row_idx
-                                and r.get("status")
                             ]
-                            status    = row_statuses[-1] if row_statuses else None
+                            status    = next((r.get("status") for r in reversed(row_matches) if r.get("status")), None)
+                            row_breach_limit = next((r.get("breach_limit") for r in reversed(row_matches) if r.get("breach_limit") is not None), None)
                             condition = _CONDITION.get(status, "Poor") if status else None
                             score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
 
@@ -786,6 +792,7 @@ class AnalyticsEngine:
                                 status          = status,
                                 score           = score,
                                 analysis        = analysis,
+                                static_breach_limit = row_breach_limit,
                             )
                             if pa:
                                 param_rows.append(pa)
@@ -1015,13 +1022,23 @@ class AnalyticsEngine:
         equipment_id:    uuid.UUID,
         template_key:    str,
         exclude_result:  uuid.UUID,
+        before:          Optional[datetime] = None,
     ) -> dict[str, list[tuple[datetime, float]]]:
         """
         Returns {param_key: [(tested_at, value), ...]} sorted oldest-first
         for all historical results of this equipment + template, excluding
         the current test result.
+
+        [before] must be the current test's own tested_at (or cts fallback).
+        Without it, "history" means every *other* result regardless of its
+        own date - so recomputing an old result would see readings taken
+        years after it, scrambling history_count/trend for anything but
+        the most recently-recomputed row (e.g. after a bulk recompute that
+        doesn't process results in chronological order). Trend analysis
+        must only ever look at what came before the point being evaluated.
         """
-        rows = (
+        coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
+        q = (
             self.db.query(TestResult)
             .join(TestingRequest, TestResult.testing_request_id == TestingRequest.id)
             .filter(
@@ -1030,9 +1047,10 @@ class AnalyticsEngine:
                 TestResult.id               != exclude_result,
                 TestResult.test_data.isnot(None),
             )
-            .order_by(TestResult.tested_at.asc())
-            .all()
         )
+        if before is not None:
+            q = q.filter(coalesced < before)
+        rows = q.order_by(TestResult.tested_at.asc()).all()
 
         history_map: dict[str, list[tuple[datetime, float]]] = {}
         for row in rows:
@@ -1110,6 +1128,7 @@ class AnalyticsEngine:
         status,
         score,
         analysis,
+        static_breach_limit=None,
     ) -> ParameterAnalytics:
         key = field.get("key")
         pa  = (
@@ -1148,7 +1167,18 @@ class AnalyticsEngine:
         pa.annual_change      = analysis.get("annual_change")
         # NUMERIC(8,2) → max ±999999.99
         pa.pct_change_annual  = _clamp(analysis.get("pct_change_annual"), -999999.99, 999999.99)
-        pa.breach_threshold   = analysis.get("breach_threshold")
+        # Prefer the static evaluation-rule limit (the fixed pass/fail line
+        # from the template, e.g. "alert above 0.7%") over the trend-forecast
+        # crossing value - it's what "is above the alert limit of X" on the
+        # UI card actually means. The forecast one (when will the current
+        # trend cross a limit) is a different, narrower signal that's often
+        # unset (needs a non-zero slope), which is why this field showed no
+        # number at all for ALERT-status parameters before this fix.
+        pa.breach_threshold   = (
+            static_breach_limit
+            if static_breach_limit is not None
+            else analysis.get("breach_threshold")
+        )
         pa.breach_predicted_at= analysis.get("breach_predicted_at")
         pa.days_to_breach     = analysis.get("days_to_breach")
         pa.is_anomaly         = analysis.get("is_anomaly", False)
