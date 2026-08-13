@@ -438,7 +438,15 @@ class HealthScorer:
             weighted_sum  += score  * weight
             total_weight  += weight
 
-            if condition == "Poor":
+            # "Poor" (CRITICAL overall) or "Fair" (ALERT overall) - gating on
+            # "Poor" alone meant a table field whose worst row was only ALERT
+            # never reached this block at all, no matter how many ALERT rows
+            # it had. Individual row status is still filtered explicitly
+            # below (CRITICAL/ALERT only), so widening this gate doesn't
+            # pull in NORMAL rows - it just stops silently dropping every
+            # ALERT-only field's findings depending on whether some unrelated
+            # sibling row in the same table happened to also be CRITICAL.
+            if condition in ("Poor", "Fair"):
                 value       = ef.get("value")
                 unit        = ef.get("unit") or field.get("unit")
                 thresholds  = ef.get("thresholds") or {}
