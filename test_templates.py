@@ -6791,3 +6791,56 @@ def get_template_for_test_type(test_type_name: str):
 def get_template_by_key(template_key: str):
     """Look up a template by its unique key."""
     return TEST_TEMPLATES.get(template_key)
+
+
+# ── Row-identifier normalization ──────────────────────────────────────────
+# winding_test_results / idax_test_results row identifiers ("test_configuration"
+# column) are free text. Historical/legacy data commonly uses the classic
+# capacitance-bridge codes (CHG, CHL, ...) instead of this template's default
+# row names (HV-GND, HV-LV, ...) for the same physical measurement point,
+# which fragments trend history since ParameterAnalytics keys on the raw
+# row_id. Import paths should normalize through this before writing test_data.
+#
+# "MV" is treated as an alias for the LV (secondary) winding node -- some
+# older reports use HV/MV/TV nomenclature where MV is explicitly the same
+# physical 66kV winding other reports call LV (e.g. an annotated "HV-MV
+# (HV=220kV,MV=66kV,TV=11kV)" row). "IV" is intentionally NOT merged into
+# LV here: some reports test HV-IV/IV-LV/IV-GND as genuinely distinct rows
+# alongside HV-LV/LV-TV/etc (an autotransformer intermediate-voltage node),
+# matching this codebase's existing PDF extractor which already keeps IV
+# rows on their own canonical labels (see _WINDING_CFG_PATTERNS_IV in
+# seed_tandelta_from_pdf.py) rather than folding them into LV.
+import re as _re
+
+_ROW_ID_ALIASES: list[tuple[str, "_re.Pattern"]] = [
+    ("HV-GND",      _re.compile(r"^(?:CHG|HV\s*[-–&]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("HV-LV",       _re.compile(r"^(?:CHL|HV\s*[-–&]\s*(?:LV|MV))$", _re.I)),
+    ("LV-GND",      _re.compile(r"^(?:CLG|(?:LV|MV)\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("LV-TV",       _re.compile(r"^(?:CLT|(?:LV|MV)\s*[-–]\s*TV)$", _re.I)),
+    ("TV-GND",      _re.compile(r"^(?:CTG|TV\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("HV-TV",       _re.compile(r"^(?:CTH|(?:HV|TV)\s*[-–]\s*(?:TV|HV))$", _re.I)),
+    ("(HV+LV)-GND", _re.compile(r"^\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*(?:GND|Grd|Grnd|Ground)$", _re.I)),
+    ("(HV+LV)-TV",  _re.compile(r"^\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*TV$", _re.I)),
+]
+
+
+_TRAILING_VOLTAGE_NOTE = _re.compile(r"\s*\([^()]*=[^()]*\)\s*$")
+
+
+def normalize_row_id(raw: str) -> str:
+    """
+    Map a legacy/alternate row-identifier spelling (CHG, HV-Ground, ...) to
+    this template's canonical row name (HV-GND, ...). Already-canonical
+    values match themselves and pass through unchanged; anything unrecognized
+    (custom rows a user added) is returned as-is.
+    """
+    text = (raw or "").strip()
+    # Some reports append a trailing voltage-mapping note, e.g.
+    # "HV-MV (HV=220kV,MV=66kV,TV=11kV)" - strip it before matching so the
+    # underlying "HV-MV" still resolves. Only strips a trailing "(...)" that
+    # contains "=" (a note), never a structural prefix like "(HV+LV)-GND".
+    stripped = _TRAILING_VOLTAGE_NOTE.sub("", text)
+    for canonical, pattern in _ROW_ID_ALIASES:
+        if pattern.match(stripped):
+            return canonical
+    return raw

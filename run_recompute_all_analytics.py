@@ -14,6 +14,7 @@ Run once:
 from database import VendorSessionLocal
 from models import TestResult, TestingRequest, TestingRequestStatus, TrWfInstance
 from services.analytics_engine import AnalyticsEngine
+from services.evaluation_service import EvaluationService
 
 
 def run_recompute_all():
@@ -43,9 +44,22 @@ def run_recompute_all():
         ]
 
         engine = AnalyticsEngine(db)
+        template_cache: dict = {}
         done, failed = 0, 0
         for tr in results:
             try:
+                cache_key = (tr.template_key, tr.organization_id)
+                if cache_key not in template_cache:
+                    template_cache[cache_key] = EvaluationService.get_template_data(
+                        tr.template_key, db, org_id=tr.organization_id
+                    )
+                template_data = template_cache[cache_key]
+                if template_data:
+                    tr.evaluation_result = EvaluationService.evaluate_test_data(
+                        template_data, tr.test_data or {}
+                    )
+                    db.flush()
+
                 engine.run_for_test(tr.id)
                 done += 1
             except Exception as exc:
