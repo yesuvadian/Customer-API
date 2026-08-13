@@ -459,6 +459,12 @@ class EvaluationService:
                 key=lambda b: b[1] if b[1] is not None else float("-inf")
             )
 
+            def _band_rank(name: str) -> int:
+                key = name.lower().strip()
+                return _cond_rank.get(key, _cond_rank.get(key.split()[0], 0))
+
+            band_ranks = [_band_rank(b[0]) for b in numeric_bands]
+
             row_status = NORMAL
             row_breach_limit = None
             for idx, (band_name, lo, hi) in enumerate(numeric_bands):
@@ -483,12 +489,23 @@ class EvaluationService:
                 if not (min_ok and max_ok):
                     continue
 
-                band_key = band_name.lower().strip()
-                rank = _cond_rank.get(band_key, _cond_rank.get(band_key.split()[0], 0))
+                rank = band_ranks[idx]
                 row_status = [NORMAL, ALERT, CRITICAL][min(rank, 2)]
-                # breach_limit: the boundary that was exceeded
+                # breach_limit: the boundary adjacent to a BETTER neighboring
+                # band - direction depends on whether this parameter is
+                # ascending-is-bad (e.g. DGA gases: better band is below,
+                # so lo is the value crossed) or descending-is-bad (e.g.
+                # oil BDV: better band is above, so hi is the value needed
+                # to improve - using lo there would show a meaningless "0").
                 if rank >= 1:
-                    row_breach_limit = lo  # value fell into this band from below
+                    next_rank = band_ranks[idx + 1] if idx + 1 < len(band_ranks) else None
+                    prev_rank = band_ranks[idx - 1] if idx > 0 else None
+                    if next_rank is not None and next_rank < rank:
+                        row_breach_limit = hi
+                    elif prev_rank is not None and prev_rank < rank:
+                        row_breach_limit = lo
+                    else:
+                        row_breach_limit = lo
                 break
 
             rank = _STATUS_RANK.get(row_status, 0)
