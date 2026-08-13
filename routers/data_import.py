@@ -18,6 +18,7 @@ Endpoints:
 from __future__ import annotations
 
 import io
+import logging
 import traceback
 from typing import Any, List, Optional
 from uuid import UUID
@@ -37,6 +38,7 @@ from models import (
     PendingDataImport,
     TestingRequest,
     TestingRequestStatus,
+    TestResult,
     User,
 )
 from services.import_extractor_service import (
@@ -47,6 +49,8 @@ from services.import_extractor_service import (
     get_test_types_for_category,
     resolve_equipment,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/data-import",
@@ -267,6 +271,30 @@ def _create_tr_from_record(
         {"d": tested_at, "rid": tr.id},
     )
     db.flush()
+
+    # create_structured_result() already ran analytics once, but using
+    # tested_at=now() (it always stamps the current time, correct for a
+    # live test submission but wrong for a historical import) - the raw
+    # UPDATE above fixes TestResult.tested_at afterward without going
+    # through the ORM, so TestAnalytics/ParameterAnalytics from that first
+    # pass are still keyed to the wrong date. Expire so the next query sees
+    # the corrected value, then rerun analytics so trend/history and the
+    # equipment-level "latest per template" health aggregation - both of
+    # which depend on tested_at, not just import order - are correct
+    # immediately rather than only after the next full recompute.
+    db.expire_all()
+    imported_result = (
+        db.query(TestResult)
+        .filter(TestResult.testing_request_id == tr.id)
+        .first()
+    )
+    if imported_result:
+        try:
+            from services.analytics_engine import AnalyticsEngine
+            AnalyticsEngine(db).run_for_test(imported_result.id)
+            db.commit()
+        except Exception as _analytics_err:
+            logger.warning(f"Post-import analytics re-run failed for result {imported_result.id}: {_analytics_err}")
 
     recommendation = rec_svc.create_recommendation(
         testing_request_id=tr.id,

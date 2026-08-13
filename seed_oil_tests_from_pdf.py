@@ -649,6 +649,27 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
         )
         session.flush()
 
+        # create_structured_result() already ran analytics once using
+        # tested_at=now() (it always stamps current time; the raw UPDATE
+        # above backdates it afterward without going through the ORM), so
+        # TestAnalytics/ParameterAnalytics from that first pass are keyed to
+        # the wrong date. Rerun with the corrected date so trend/history and
+        # equipment-level health aggregation (both keyed off tested_at) are
+        # right immediately rather than only after the next full recompute.
+        session.expire_all()
+        seeded_result = (
+            session.query(TestResult)
+            .filter(TestResult.testing_request_id == tr.id)
+            .first()
+        )
+        if seeded_result:
+            try:
+                from services.analytics_engine import AnalyticsEngine
+                AnalyticsEngine(session).run_for_test(seeded_result.id)
+                session.commit()
+            except Exception as _analytics_err:
+                print(f"[WARN] Post-seed analytics re-run failed for {seeded_result.id}: {_analytics_err}")
+
         rec = rec_svc.create_recommendation(
             testing_request_id=tr.id,
             recommendation_type="pass",
