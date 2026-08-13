@@ -6791,3 +6791,38 @@ def get_template_for_test_type(test_type_name: str):
 def get_template_by_key(template_key: str):
     """Look up a template by its unique key."""
     return TEST_TEMPLATES.get(template_key)
+
+
+# ── Row-identifier normalization ──────────────────────────────────────────
+# winding_test_results / idax_test_results row identifiers ("test_configuration"
+# column) are free text. Historical/legacy data commonly uses the classic
+# capacitance-bridge codes (CHG, CHL, ...) instead of this template's default
+# row names (HV-GND, HV-LV, ...) for the same physical measurement point,
+# which fragments trend history since ParameterAnalytics keys on the raw
+# row_id. Import paths should normalize through this before writing test_data.
+import re as _re
+
+_ROW_ID_ALIASES: list[tuple[str, "_re.Pattern"]] = [
+    ("HV-GND",      _re.compile(r"^(?:CHG|HV\s*[-–&]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("HV-LV",       _re.compile(r"^(?:CHL|HV\s*[-–&]\s*(?:LV|IV|MV))$", _re.I)),
+    ("LV-GND",      _re.compile(r"^(?:CLG|(?:LV|IV|MV)\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("LV-TV",       _re.compile(r"^(?:CLT|(?:LV|IV|MV)\s*[-–]\s*TV)$", _re.I)),
+    ("TV-GND",      _re.compile(r"^(?:CTG|TV\s*[-–]\s*(?:GND|Grd|Grnd|Ground))$", _re.I)),
+    ("HV-TV",       _re.compile(r"^(?:CTH|(?:HV|TV)\s*[-–]\s*(?:TV|HV))$", _re.I)),
+    ("(HV+LV)-GND", _re.compile(r"^\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*(?:GND|Grd|Grnd|Ground)$", _re.I)),
+    ("(HV+LV)-TV",  _re.compile(r"^\(HV\s*\+\s*(?:LV|MV)\)\s*[-–]\s*TV$", _re.I)),
+]
+
+
+def normalize_row_id(raw: str) -> str:
+    """
+    Map a legacy/alternate row-identifier spelling (CHG, HV-Ground, ...) to
+    this template's canonical row name (HV-GND, ...). Already-canonical
+    values match themselves and pass through unchanged; anything unrecognized
+    (custom rows a user added) is returned as-is.
+    """
+    text = (raw or "").strip()
+    for canonical, pattern in _ROW_ID_ALIASES:
+        if pattern.match(text):
+            return canonical
+    return raw
