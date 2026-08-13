@@ -3379,7 +3379,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 0.5,
-                                "alert_min":  0.5,  "alert_max":  0.7,
+                                "alert_min":  None, "alert_max":  0.7,
                                 "critical_below": None, "critical_above": 0.7,
                                 "trend_watch": True,
                                 "weight": 1.5,
@@ -3479,7 +3479,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 0.5,
-                                "alert_min":  0.5,  "alert_max":  0.7,
+                                "alert_min":  None, "alert_max":  0.7,
                                 "critical_below": None, "critical_above": 0.7,
                                 "trend_watch": True,
                                 "weight": 1.5,
@@ -3577,7 +3577,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 0.7,
-                                "alert_min":  0.7,  "alert_max":  1.0,
+                                "alert_min":  None, "alert_max":  1.0,
                                 "critical_below": None, "critical_above": 1.0,
                                 "trend_watch": True,
                                 "weight": 1.5,
@@ -3675,7 +3675,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 1.0,
-                                "alert_min":  1.0,  "alert_max":  1.5,
+                                "alert_min":  None, "alert_max":  1.5,
                                 "critical_below": None, "critical_above": 1.5,
                                 "trend_watch": True,
                                 "weight": 1.0,
@@ -3773,7 +3773,7 @@ TEST_TEMPLATES = {
                         "column_evaluations": {
                             "df_corrected_20c": {
                                 "normal_min": None, "normal_max": 1.0,
-                                "alert_min":  1.0,  "alert_max":  1.5,
+                                "alert_min":  None, "alert_max":  1.5,
                                 "critical_below": None, "critical_above": 1.5,
                                 "trend_watch": True,
                                 "weight": 1.0,
