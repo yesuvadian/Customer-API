@@ -128,7 +128,7 @@ class ParameterAnalyzer:
     """
 
     # Minimum readings needed for trend calculation
-    MIN_TREND_POINTS = 3
+    MIN_TREND_POINTS = 2
     # Slope considered "stable" if |slope * 365| < this fraction of the value range
     STABLE_FRACTION  = 0.05
     # Z-score threshold for anomaly
