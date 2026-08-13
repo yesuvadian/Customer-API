@@ -128,7 +128,7 @@ class ParameterAnalyzer:
     """
 
     # Minimum readings needed for trend calculation
-    MIN_TREND_POINTS = 2
+    MIN_TREND_POINTS = 1
     # Slope considered "stable" if |slope * 365| < this fraction of the value range
     STABLE_FRACTION  = 0.05
     # Z-score threshold for anomaly
@@ -138,10 +138,14 @@ class ParameterAnalyzer:
     def analyse(
         history: list[tuple[datetime, float]],
         evaluation: dict,
+        current_value: Optional[float] = None,
+        current_date:  Optional[datetime] = None,
     ) -> dict:
         """
         history  : [(tested_at, float_value), ...] sorted oldest-first
         evaluation: the field's `evaluation` dict from template
+        current_value/current_date: the reading being analysed right now -
+          only needed for the single-prior-reading case below.
 
         Returns a dict with trend, slope, r_squared, annual_change,
         pct_change_annual, breach_threshold, breach_predicted_at,
@@ -174,6 +178,39 @@ class ParameterAnalyzer:
             ParameterAnalyzer._detect_anomaly(values, result)
 
         if len(history) < ParameterAnalyzer.MIN_TREND_POINTS:
+            return result
+
+        # A single prior reading can't feed a real OLS regression - fitting a
+        # line through one point is degenerate and _linear_regression()
+        # returns slope=0.0 for it, which would misreport every 2-reading
+        # parameter as "Stable" regardless of the actual direction. Compare
+        # directly against the current reading instead, when available.
+        if len(history) == 1 and current_value is not None and current_date is not None:
+            prior_date, prior_value = history[0]
+            elapsed_days = (current_date - prior_date).total_seconds() / 86400.0
+            slope = (current_value - prior_value) / elapsed_days if elapsed_days > 0 else 0.0
+            result["trend_slope"] = round(slope, 8)
+            # Not a real goodness-of-fit measure for a 2-point line - leave unset.
+            result["trend_r_squared"] = None
+
+            annual_change = slope * 365
+            result["annual_change"] = round(annual_change, 6)
+            if prior_value:
+                result["pct_change_annual"] = round(annual_change / abs(prior_value) * 100, 2)
+
+            val_range = abs(prior_value) or abs(current_value) or 1
+            stable_threshold = val_range * ParameterAnalyzer.STABLE_FRACTION
+            if annual_change > stable_threshold:
+                result["trend"] = "Increasing"
+            elif annual_change < -stable_threshold:
+                result["trend"] = "Decreasing"
+            else:
+                result["trend"] = "Stable"
+
+            if slope != 0:
+                ParameterAnalyzer._forecast_breach(
+                    current_value, current_date, slope, evaluation, result
+                )
             return result
 
         # Build x-axis as elapsed days from first observation
@@ -681,7 +718,11 @@ class AnalyticsEngine:
 
 
                     history  = history_map.get(field_key, [])
-                    analysis = ParameterAnalyzer.analyse(history, ev)
+                    analysis = ParameterAnalyzer.analyse(
+                        history, ev,
+                        current_value=current_val,
+                        current_date=result.tested_at or result.cts,
+                    )
 
                     pa = self._upsert_parameter_analytics(
                         test_result_id  = test_result_id,
@@ -780,7 +821,11 @@ class AnalyticsEngine:
                                 synth_field["unit"] = effective_unit
 
                             history  = history_map.get(param_key, [])
-                            analysis = ParameterAnalyzer.analyse(history, {})
+                            analysis = ParameterAnalyzer.analyse(
+                                history, {},
+                                current_value=current_val,
+                                current_date=result.tested_at or result.cts,
+                            )
 
                             pa = self._upsert_parameter_analytics(
                                 test_result_id  = test_result_id,
