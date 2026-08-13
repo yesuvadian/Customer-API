@@ -18,6 +18,7 @@ All queries are org-scoped when org_id is provided.
 from __future__ import annotations
 
 import io
+import os
 import re
 from datetime import datetime, timezone, date
 from typing import Optional
@@ -27,6 +28,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from models import ReportDefinition, ReportLog
+
+REPORTS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "reports")
 
 # ── Optional rendering deps ────────────────────────────────────────────────
 
@@ -179,6 +182,10 @@ class ReportingService:
             else:
                 raw, content_type = self._render_excel(rows, defn)
                 filename = f"{safe_name}_{ts}.xlsx"
+
+            os.makedirs(REPORTS_DIR, exist_ok=True)
+            with open(os.path.join(REPORTS_DIR, filename), "wb") as f:
+                f.write(raw)
 
             log.status       = "completed"
             log.file_name    = filename

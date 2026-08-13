@@ -282,7 +282,8 @@ def download_report_file(
     """Serve a previously generated scheduled report file."""
     # Sanitise: strip any path traversal
     safe_name = os.path.basename(filename)
-    path = os.path.join("uploads", "reports", safe_name)
+    reports_dir = os.path.join(os.path.dirname(__file__), "..", "uploads", "reports")
+    path = os.path.join(reports_dir, safe_name)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Report file not found or expired")
     if filename.endswith(".xlsx"):
