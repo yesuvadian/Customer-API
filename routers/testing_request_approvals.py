@@ -406,10 +406,14 @@ def approve_and_assign_tester(
         )
     # Validate state
     # Using submitted for testing (pending_approval requires migration)
-    if testing_request.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
+    if testing_request.status not in [
+        TestingRequestStatus.pending_approval,
+        TestingRequestStatus.submitted,
+        TestingRequestStatus.under_approval,
+    ]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Request must be in 'pending_approval' or 'submitted' state, currently: {testing_request.status}"
+            detail=f"Request must be in 'pending_approval', 'submitted', or 'under_approval' state, currently: {testing_request.status}"
         )
 
     # Validate tester exists and has the role
@@ -518,6 +522,7 @@ def batch_approve_and_assign(
         if testing_request.status not in [
             TestingRequestStatus.pending_approval,
             TestingRequestStatus.submitted,
+            TestingRequestStatus.under_approval,
         ]:
             results.append(BatchApprovalResult(
                 request_id=str(req_id),

@@ -5290,6 +5290,12 @@ class ParameterAnalytics(Base):
     anomaly_type        = Column(String(50), nullable=True)    # sudden_increase | sudden_decrease | outlier
     anomaly_detail      = Column(Text, nullable=True)
 
+    # Template author's field-specific guidance for an ALERT/CRITICAL
+    # reading, e.g. "High oil conductivity - arrange oil reconditioning
+    # or replacement." Sourced from the evaluation config's
+    # remedial_action_text, not user-entered.
+    remedial_action_text = Column(Text, nullable=True)
+
     calculated_at       = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships

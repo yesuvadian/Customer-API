@@ -393,9 +393,14 @@ class TestingRequestWorkflowService:
         """
         try:
             # 1. Validate current state
-            # Using submitted for testing (pending_approval requires migration)
-            if testing_request.status not in [TestingRequestStatus.pending_approval, TestingRequestStatus.submitted]:
-                return False, f"Request must be in 'pending_approval' or 'submitted' state, currently: {testing_request.status}"
+            # under_approval included: that's the status FR Pass 1 (initial-approve) leaves the
+            # request in, and Pass 2 (this method) must accept it to run right after Pass 1.
+            if testing_request.status not in [
+                TestingRequestStatus.pending_approval,
+                TestingRequestStatus.submitted,
+                TestingRequestStatus.under_approval,
+            ]:
+                return False, f"Request must be in 'pending_approval', 'submitted', or 'under_approval' state, currently: {testing_request.status}"
 
             # 2. Verify tester exists and is active
             from models import User

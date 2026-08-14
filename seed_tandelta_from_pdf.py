@@ -19,6 +19,7 @@ from models import (
     Organization,
     TestingRequest,
     TestingRequestStatus,
+    TestResult,
     User,
 )
 from report_skeleton import empty_report, resolve_context_binding
@@ -1284,7 +1285,7 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
     (not table, not calculated), so they're picked up by the generic
     scalar-field branch at the bottom of the field loop, via _ITC_FIELD_MAP.
     """
-    from test_templates import TEST_TEMPLATES
+    from test_templates import TEST_TEMPLATES, normalize_row_id
     template  = TEST_TEMPLATES.get("capacitance_tandelta_transformer", {})
     test_data: dict = {}
 
@@ -1321,7 +1322,8 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
                                 parsed_val = src.get(ck)
                                 row[ck] = _str(parsed_val) if parsed_val is not None else None
                             elif ck in src and src[ck] is not None:
-                                row[ck] = _str(src[ck])
+                                val = _str(src[ck])
+                                row[ck] = normalize_row_id(val) if ck == "test_configuration" else val
                             else:
                                 row[ck] = ""
                         rows.append(row)
@@ -1526,6 +1528,27 @@ def seed_reports(session, reports: list[dict], dry_run: bool = False):
             {"d": tested_at, "rid": tr.id},
         )
         session.flush()
+
+        # create_structured_result() already ran analytics once using
+        # tested_at=now() (it always stamps current time; the raw UPDATE
+        # above backdates it afterward without going through the ORM), so
+        # TestAnalytics/ParameterAnalytics from that first pass are keyed to
+        # the wrong date. Rerun with the corrected date so trend/history and
+        # equipment-level health aggregation (both keyed off tested_at) are
+        # right immediately rather than only after the next full recompute.
+        session.expire_all()
+        seeded_result = (
+            session.query(TestResult)
+            .filter(TestResult.testing_request_id == tr.id)
+            .first()
+        )
+        if seeded_result:
+            try:
+                from services.analytics_engine import AnalyticsEngine
+                AnalyticsEngine(session).run_for_test(seeded_result.id)
+                session.commit()
+            except Exception as _analytics_err:
+                print(f"[WARN] Post-seed analytics re-run failed for {seeded_result.id}: {_analytics_err}")
 
         rec = rec_svc.create_recommendation(
             testing_request_id=tr.id,

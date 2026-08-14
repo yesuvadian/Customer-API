@@ -226,17 +226,6 @@ class EvaluationService:
             None,
         )
 
-        # Build breach-limit lookup from column_evaluations
-        _col_limits: dict = {}
-        for _ck, _cev in (ev.get("column_evaluations") or {}).items():
-            _lim = (
-                _cev.get("critical_above")
-                or _cev.get("normal_max")
-                or _cev.get("alert_max")
-            )
-            if _lim is not None:
-                _col_limits[_ck] = _lim
-
         if table_ev_enabled:
             # Aggregate evaluation
             if ev.get("aggregate_type") and ev.get("aggregate_column"):
@@ -252,7 +241,7 @@ class EvaluationService:
                         continue
                     try:
                         num_val = float(val)
-                        col_status = EvaluationService._classify_number(num_val, col_ev)
+                        col_status, col_breach_limit = EvaluationService._classify_number_with_limit(num_val, col_ev)
                         _row_label = (row.get(_label_col) if _label_col else None) or f"Row {row_idx + 1}"
                         col_results.append({
                             "column":       col_key,
@@ -260,7 +249,9 @@ class EvaluationService:
                             "row_label":    _row_label,
                             "value":        num_val,
                             "status":       col_status,
-                            "breach_limit": _col_limits.get(col_key),
+                            "breach_limit": col_breach_limit,
+                            "remedial_action_text": col_ev.get("remedial_action_text")
+                                if col_status in (ALERT, CRITICAL) else None,
                         })
                         if _STATUS_RANK[col_status] > _STATUS_RANK[agg_status]:
                             agg_status = col_status
@@ -303,7 +294,6 @@ class EvaluationService:
             "status": agg_status,
             "aggregate_result": agg_result,
             "column_results": col_results,
-            "column_evaluations": _col_limits,
             "remedial_action_text": ev.get("remedial_action_text")
                 if agg_status in (ALERT, CRITICAL) else None,
             "suggested_products": ev.get("suggested_products") or []
@@ -352,6 +342,9 @@ class EvaluationService:
         input_field   = cfg.get("input_field")
         lookup_fields = cfg.get("lookup_fields", [])
         thresholds    = cfg.get("thresholds", {})
+        # Optional: { row_id: "remedial text" }, e.g. per-gas DGA guidance -
+        # keyed the same way as thresholds (row_id, case-insensitive).
+        remedial_by_row = cfg.get("remedial_action_text", {})
 
         if not input_field or not thresholds:
             return None
@@ -466,6 +459,12 @@ class EvaluationService:
                 key=lambda b: b[1] if b[1] is not None else float("-inf")
             )
 
+            def _band_rank(name: str) -> int:
+                key = name.lower().strip()
+                return _cond_rank.get(key, _cond_rank.get(key.split()[0], 0))
+
+            band_ranks = [_band_rank(b[0]) for b in numeric_bands]
+
             row_status = NORMAL
             row_breach_limit = None
             for idx, (band_name, lo, hi) in enumerate(numeric_bands):
@@ -490,17 +489,35 @@ class EvaluationService:
                 if not (min_ok and max_ok):
                     continue
 
-                band_key = band_name.lower().strip()
-                rank = _cond_rank.get(band_key, _cond_rank.get(band_key.split()[0], 0))
+                rank = band_ranks[idx]
                 row_status = [NORMAL, ALERT, CRITICAL][min(rank, 2)]
-                # breach_limit: the boundary that was exceeded
+                # breach_limit: the boundary adjacent to a BETTER neighboring
+                # band - direction depends on whether this parameter is
+                # ascending-is-bad (e.g. DGA gases: better band is below,
+                # so lo is the value crossed) or descending-is-bad (e.g.
+                # oil BDV: better band is above, so hi is the value needed
+                # to improve - using lo there would show a meaningless "0").
                 if rank >= 1:
-                    row_breach_limit = lo  # value fell into this band from below
+                    next_rank = band_ranks[idx + 1] if idx + 1 < len(band_ranks) else None
+                    prev_rank = band_ranks[idx - 1] if idx > 0 else None
+                    if next_rank is not None and next_rank < rank:
+                        row_breach_limit = hi
+                    elif prev_rank is not None and prev_rank < rank:
+                        row_breach_limit = lo
+                    else:
+                        row_breach_limit = lo
                 break
 
             rank = _STATUS_RANK.get(row_status, 0)
             if rank > worst_rank:
                 worst_rank = rank
+
+            remedial_text = None
+            if row_status in (ALERT, CRITICAL):
+                for rkey, rtext in remedial_by_row.items():
+                    if rkey.lower() == str(row_id).lower():
+                        remedial_text = rtext
+                        break
 
             row_results.append({
                 "row_id":       row_id,
@@ -508,6 +525,7 @@ class EvaluationService:
                 "unit":         row.get("unit"),
                 "status":       row_status,
                 "breach_limit": row_breach_limit,
+                "remedial_action_text": remedial_text,
             })
 
         if not row_results:
@@ -682,6 +700,40 @@ class EvaluationService:
             return ALERT
 
         return NORMAL
+
+    @staticmethod
+    def _classify_number_with_limit(value: float, ev: dict) -> tuple[str, Optional[float]]:
+        """
+        Same classification as _classify_number, but also returns the
+        specific boundary that was actually crossed to reach that status -
+        e.g. an ALERT from crossing normal_max returns normal_max, not
+        critical_above. Mirrors _classify_number's priority order exactly
+        so the two can never disagree on the status itself; only this one
+        also reports which limit is relevant to explain *why*.
+        """
+        cb = _f(ev.get("critical_below"))
+        ca = _f(ev.get("critical_above"))
+        al_min = _f(ev.get("alert_min"))
+        al_max = _f(ev.get("alert_max"))
+        nm_min = _f(ev.get("normal_min"))
+        nm_max = _f(ev.get("normal_max"))
+
+        if cb is not None and value < cb:
+            return CRITICAL, cb
+        if ca is not None and value > ca:
+            return CRITICAL, ca
+
+        if al_min is not None and value < al_min:
+            return ALERT, al_min
+        if al_max is not None and value > al_max:
+            return ALERT, al_max
+
+        if nm_min is not None and value < nm_min:
+            return ALERT, nm_min
+        if nm_max is not None and value > nm_max:
+            return ALERT, nm_max
+
+        return NORMAL, None
 
     # ─── Helper extractors ────────────────────────────────────────────────────
 
