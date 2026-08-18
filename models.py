@@ -1550,6 +1550,10 @@ class Organization(Base):
     billing_unit_recompute_error   = Column(Text, nullable=True)
     billing_unit_recompute_retries = Column(Integer, default=0, nullable=False)
 
+    # License Server integration
+    license_server_org_id = Column(String(64), nullable=True, index=True)
+    upgrade_token          = Column(String(64), nullable=True)
+
     # Relationships
     plan = relationship("Plan", back_populates="organizations", foreign_keys=[plan_id])
     billing_scope = relationship("BillingScope", foreign_keys=[billing_scope_id], lazy="joined")

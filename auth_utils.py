@@ -374,6 +374,11 @@ def _check_dept_level_billing(user, org, db, now):
     """
     from routers.billing import get_dept_depth, walk_up_tree
 
+    # Orgs managed by the license server handle expiry via the banner+upgrade
+    # flow — skip all local billing checks for them.
+    if org.license_server_org_id:
+        return
+
     # Trial still active → skip all dept billing checks
     if org.is_trial and org.trial_end_date and org.trial_end_date >= now:
         return
@@ -537,20 +542,20 @@ def login_user(db: Session, email: str, password: str):
 
         # Step 2b: Block login if the organisation is disabled or trial has expired
         if user.organization_id:
+            import os
             from models import Organization
             org = db.query(Organization).filter_by(id=user.organization_id).first()
-            if org and not org.is_active:
+            license_enforce = os.getenv("LICENSE_ENFORCE", "false").lower() == "true"
+            if org and not org.is_active and license_enforce:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Your organisation has been disabled. Please contact support.",
                 )
-            print(f"[TRIAL-LOGIN] org={org and org.name} is_trial={org and org.is_trial} trial_end={org and org.trial_end_date} now={now}")
 
             # Dept-level mode: hand off ALL checks (trial + subscription) to dept path
             is_dept_level = org and org.billing_scope and org.billing_scope.code == "department_level"
 
-            if org and org.is_trial and org.trial_end_date:
-                print(f"[TRIAL-LOGIN] expired={org.trial_end_date < now}")
+            if license_enforce and org and not org.license_server_org_id and org.is_trial and org.trial_end_date:
                 if org.trial_end_date < now:
                     if is_dept_level:
                         # Dept-level trial expiry handled by _check_dept_level_billing below
@@ -588,7 +593,7 @@ def login_user(db: Session, email: str, password: str):
                                 headers={"X-Org-Name": org.name},
                             )
 
-            if org and not org.is_trial and org.subscription_end_date and not is_dept_level:
+            if license_enforce and org and not org.is_trial and org.subscription_end_date and not is_dept_level:
                 if org.subscription_end_date < now:
                     print(f"[SUBSCRIPTION-LOGIN] Subscription expired for {org.name}")
                     first_sub_expiry = org.subscription_status != "expired"
@@ -828,6 +833,8 @@ def login_user(db: Session, email: str, password: str):
                 "usertype": user.usertype,
                 "organization_id": str(user.organization_id) if user.organization_id else None,
                 "organization_name": organization_name,
+                "upgrade_token": org.upgrade_token if org else None,
+                "license_server_org_id": org.license_server_org_id if org else None,
                 "department_id": str(primary_department_id) if primary_department_id else None,
                 "cts": UTCDateTimeMixin._make_aware(user.cts),
                 "mts": UTCDateTimeMixin._make_aware(user.mts),
@@ -838,6 +845,51 @@ def login_user(db: Session, email: str, password: str):
             },
             "privileges": filtered_privileges
         }
+
+        # Fetch live org plan from license server — always runs when org is enrolled.
+        # LICENSE_ENFORCE only gates middleware 403s; the banner fetch is always active.
+        if org and org.license_server_org_id and org.upgrade_token:
+            import httpx as _httpx
+            _ls_url = os.getenv("LICENSE_SERVER_URL", "")
+            _ls_ui_url = os.getenv("LICENSE_SERVER_UI_URL", _ls_url)
+            if _ls_url:
+                try:
+                    _ls_resp = _httpx.get(
+                        f"{_ls_url}/v1/org-plan",
+                        params={"org_id": org.license_server_org_id, "token": org.upgrade_token},
+                        timeout=3,
+                    )
+                    if _ls_resp.status_code == 200:
+                        _plan = _ls_resp.json()
+                        _days_left = _plan.get("days_left")
+                        _ls_contact_email = (_plan.get("contact_email") or "").lower().strip()
+                        _is_license_admin = bool(_ls_contact_email and user.email.lower().strip() == _ls_contact_email)
+                        print(f"[LICENSE-ADMIN] user={user.email!r} ls_contact={_ls_contact_email!r} match={_is_license_admin}")
+                        result["user"]["license_plan"] = {
+                            "licenses": _plan.get("licenses", []),
+                            "days_left": _days_left,
+                            "has_pending_request": _plan.get("has_pending_request", False),
+                            "is_license_admin": _is_license_admin,
+                        }
+                        # Enforce: block login when license is expired (skip if upgrade request is pending)
+                        license_enforce = os.getenv("LICENSE_ENFORCE", "false").lower() == "true"
+                        _has_pending = _plan.get("has_pending_request", False)
+                        if license_enforce and _days_left is not None and _days_left <= 0 and not _has_pending:
+                            _upgrade_url = f"{_ls_ui_url}/upgrade?org={org.license_server_org_id}&token={org.upgrade_token}"
+                            if _is_license_admin:
+                                raise HTTPException(
+                                    status_code=status.HTTP_403_FORBIDDEN,
+                                    detail={"code": "LICENSE_EXPIRED", "upgrade_url": _upgrade_url},
+                                )
+                            else:
+                                raise HTTPException(
+                                    status_code=status.HTTP_403_FORBIDDEN,
+                                    detail={"code": "LICENSE_EXPIRED_NOTIFY"},
+                                )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass  # license server unreachable — login still succeeds
 
         print(f"[DEBUG] dashboard_type in result: {result['user'].get('dashboard_type')}")
         print(f"[DEBUG] onboarding_complete in result: {result['user'].get('onboarding_complete')}")

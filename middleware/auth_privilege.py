@@ -26,6 +26,7 @@ PUBLIC_ENDPOINTS = [
     "/redoc",
     "/register/",
     "/auth/",
+    "/public/",
     "/files/",
     "/zoho_register/",
     "/zohocontacts/",
@@ -153,30 +154,47 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # Block all requests if the user's organisation is disabled or trial expired
         print(f"[TRIAL-DEBUG] user={user.id} org_id={user.organization_id}")
         if user.organization_id:
+            import os
             from models import Organization
             from datetime import datetime, timezone
             org = db.query(Organization).filter_by(id=user.organization_id).first()
-            print(f"[TRIAL-DEBUG] org={org and org.name} is_trial={org and org.is_trial} trial_end={org and org.trial_end_date} is_active={org and org.is_active}")
-            if org and not org.is_active:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Your organisation has been disabled. Please contact support.",
-                )
-            if org and org.is_trial and org.trial_end_date:
-                now = datetime.now(timezone.utc)
-                trial_end = org.trial_end_date if org.trial_end_date.tzinfo else org.trial_end_date.replace(tzinfo=timezone.utc)
-                print(f"[TRIAL] org={org.name} trial_end={trial_end} now={now} expired={trial_end < now}")
-                if trial_end < now:
-                    if org.trial_status != "expired":
-                        org.trial_status = "expired"
-                        try:
-                            db.commit()
-                        except Exception:
-                            db.rollback()
+            license_enforce = os.getenv("LICENSE_ENFORCE", "false").lower() == "true"
+            if license_enforce:
+                if org and not org.is_active:
                     raise HTTPException(
                         status_code=403,
-                        detail="Your 30-day free trial has ended. Please contact us to continue using the platform.",
+                        detail="Your organisation has been disabled. Please contact support.",
                     )
+                # Orgs managed by the license server: expiry is enforced via the
+                # license server banner + upgrade flow, not local trial_end_date.
+                if org and not org.license_server_org_id:
+                    now = datetime.now(timezone.utc)
+                    if org.is_trial and org.trial_end_date:
+                        trial_end = org.trial_end_date if org.trial_end_date.tzinfo else org.trial_end_date.replace(tzinfo=timezone.utc)
+                        if trial_end < now:
+                            if org.trial_status != "expired":
+                                org.trial_status = "expired"
+                                try:
+                                    db.commit()
+                                except Exception:
+                                    db.rollback()
+                            raise HTTPException(
+                                status_code=403,
+                                detail="TRIAL_EXPIRED",
+                            )
+                    if not org.is_trial and org.subscription_end_date:
+                        sub_end = org.subscription_end_date if org.subscription_end_date.tzinfo else org.subscription_end_date.replace(tzinfo=timezone.utc)
+                        if sub_end < now:
+                            if org.subscription_status != "expired":
+                                org.subscription_status = "expired"
+                                try:
+                                    db.commit()
+                                except Exception:
+                                    db.rollback()
+                            raise HTTPException(
+                                status_code=403,
+                                detail="SUBSCRIPTION_EXPIRED",
+                            )
 
         request.state.user = user
 

@@ -649,6 +649,11 @@ class UserResponse(BaseModel):
     alert_active: Optional[bool] = None
     onboarding_complete: Optional[bool] = None
 
+    # License server integration
+    license_server_org_id: Optional[str] = None
+    upgrade_token: Optional[str] = None
+    license_plan: Optional[dict] = None   # {licenses, days_left, has_pending_request, is_license_admin}
+
     # Banner action: "upgrade" | "pay_now" | null
     billing_action: Optional[str] = None
 
