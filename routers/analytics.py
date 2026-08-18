@@ -29,6 +29,8 @@ import uuid
 import re
 import logging
 from datetime import date, datetime, timedelta
+from statistics import mean
+from types import SimpleNamespace
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -52,7 +54,7 @@ from models import (
     TestingRequest,
 )
 from services.condition_recommendation_service import evaluate_for_equipment
-from services.analytics_engine import AnalyticsEngine
+from services.analytics_engine import AnalyticsEngine, _risk_from_score
 
 logger = logging.getLogger(__name__)
 
@@ -99,22 +101,99 @@ def _eq_capacity_map(eq_ids: list, db: Session) -> dict:
     equipment's most recent test that has a parseable value."""
     if not eq_ids:
         return {}
+    # Ordered so the first row seen per equipment is deterministically its
+    # most recent test (tiebroken by TestResult.id) - previously unordered,
+    # so on two tests dated the same day the "most recent" pick was whatever
+    # order Postgres happened to return, and could flip between calls.
     rows = db.query(
         TestingRequest.equipment_id, TestResult.test_data,
-        TestResult.tested_at, TestResult.cts,
     ).join(TestResult, TestResult.testing_request_id == TestingRequest.id).filter(
         TestingRequest.equipment_id.in_(eq_ids),
+    ).order_by(
+        TestingRequest.equipment_id,
+        func.coalesce(TestResult.tested_at, TestResult.cts).desc(),
+        TestResult.id.desc(),
     ).all()
     best: dict = {}
-    for eq_id, test_data, tr_tested_at, tr_cts in rows:
-        mva = _parse_capacity_mva((test_data or {}).get("capacity_mva"))
-        if mva is None:
+    for eq_id, test_data in rows:
+        if eq_id in best:
             continue
-        eff_date = tr_tested_at or tr_cts
-        cur = best.get(eq_id)
-        if cur is None or (eff_date and (cur[1] is None or eff_date > cur[1])):
-            best[eq_id] = (mva, eff_date)
-    return {eq_id: v[0] for eq_id, v in best.items()}
+        mva = _parse_capacity_mva((test_data or {}).get("capacity_mva"))
+        if mva is not None:
+            best[eq_id] = mva
+    return best
+
+
+# Cumulative operations-counter templates (enable_cumulative=True on the
+# backend) - these track a running counter (tap-change count, breaker
+# operations count) rather than a one-off lab measurement, and have their own
+# workflow elsewhere in the app. They always have test_category == NULL, same
+# as genuine lab tests, so they can't be excluded by test_category alone.
+# Mirrors the Flutter AI Analytics modal's _nonLabTemplateKeys.
+_NON_LAB_TEMPLATE_KEYS = {"oltc_operations", "circuit_breaker_operations"}
+
+
+def _lab_only_scores(eq_ids: list, db: Session) -> dict:
+    """
+    Recompute a lab-tests-only health_score/risk_level/critical_findings per
+    equipment, for the AI Analytics equipment list - matching the same
+    exclusion the AI Analytics modal's chip row applies (TA&QC/Failure
+    Registry direct submissions, identified by a non-null test_category, and
+    cumulative-counter templates in _NON_LAB_TEMPLATE_KEYS). Returns
+    {equipment_id: (score, risk_level, critical_findings)}; equipment whose
+    only tests are excluded types get (None, "Unknown", []) - same as
+    genuinely untested equipment, since AI Analytics has nothing lab-based to
+    show for them.
+    """
+    if not eq_ids:
+        return {}
+
+    rows = (
+        db.query(TestAnalytics)
+        .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
+        .filter(TestAnalytics.equipment_id.in_(eq_ids))
+        .order_by(
+            TestAnalytics.equipment_id,
+            TestAnalytics.template_key,
+            func.coalesce(TestResult.tested_at, TestResult.cts).desc(),
+            TestAnalytics.calculated_at.desc(),
+        )
+        .all()
+    )
+
+    result_ids = [r.test_result_id for r in rows]
+    tr_map = {
+        r.id: r
+        for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
+    } if result_ids else {}
+
+    # Dedupe to the latest row per (equipment_id, template_key)
+    seen: set = set()
+    latest: list[TestAnalytics] = []
+    for row in rows:
+        key = (row.equipment_id, row.template_key)
+        if key not in seen:
+            seen.add(key)
+            latest.append(row)
+
+    by_equipment: dict = {}
+    for row in latest:
+        by_equipment.setdefault(row.equipment_id, []).append(row)
+
+    out: dict = {}
+    for eq_id, eq_rows in by_equipment.items():
+        lab_rows = [
+            r for r in eq_rows
+            if r.template_key not in _NON_LAB_TEMPLATE_KEYS
+            and (tr_map.get(r.test_result_id) is None
+                 or tr_map[r.test_result_id].test_category is None)
+        ]
+        scores = [float(r.health_score) for r in lab_rows if r.health_score is not None]
+        score = round(mean(scores), 2) if scores else None
+        findings = [f for r in lab_rows for f in (r.critical_findings or [])]
+        risk = _risk_from_score(score, findings)
+        out[eq_id] = (score, risk, findings)
+    return out
 
 
 def _build_dept_rollup(equipment_list: list, scope_dept_id, db) -> dict:
@@ -226,6 +305,18 @@ def get_asset_breakdown(
     ).all() if eq_ids_all else []
     ea_map = {r.equipment_id: r for r in ea_rows}
 
+    # This endpoint is AI Analytics-specific (the only caller is the AI
+    # Analytics Dashboard) - the all-time health/risk fallback below must
+    # exclude the same TA&QC/Failure Registry/cumulative-counter test types
+    # the equipment list and the modal do, or this endpoint's group rollups
+    # (e.g. a "Power Transformer" row's Critical/Healthy counts) disagree
+    # with the individual equipment rows shown underneath it.
+    lab_map = _lab_only_scores(eq_ids_all, db)
+    lab_ea_map = {
+        eq_id: SimpleNamespace(health_score=score, risk_level=risk)
+        for eq_id, (score, risk, _findings) in lab_map.items()
+    }
+
     def _empty_health() -> dict:
         return {"critical": 0, "high": 0, "healthy": 0, "untested": 0, "sum": 0.0, "cnt": 0}
 
@@ -235,11 +326,10 @@ def get_asset_breakdown(
         `tested` = has a qualifying completed test (in-range when a date
         filter is active, ever otherwise); equipment with no analytics row
         yet (never assessed) always lands in "untested" regardless.
-        `source` supplies risk_level/health_score — EquipmentAnalytics for
-        the all-time view, or a date-scoped TestAnalytics snapshot when a
-        range is active; falls back to the all-time ea_map lookup when
-        omitted."""
-        src = source if source is not None else ea_map.get(eq_id)
+        `source` supplies risk_level/health_score — a date-scoped TestAnalytics
+        snapshot when a range is active; falls back to the all-time
+        lab_ea_map lookup (lab-tests-only score/risk) when omitted."""
+        src = source if source is not None else lab_ea_map.get(eq_id)
         if tested and src:
             rl = (src.risk_level or "").strip()
             if rl == "Critical":
@@ -317,7 +407,16 @@ def get_asset_breakdown(
         ta_q = (
             db.query(TestAnalytics, coalesced.label("eff_date"))
             .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
-            .filter(TestAnalytics.equipment_id.in_(eq_id_set))
+            .filter(
+                TestAnalytics.equipment_id.in_(eq_id_set),
+                # This endpoint is AI Analytics-specific - exclude the same
+                # TA&QC/Failure Registry/cumulative-counter test types the
+                # equipment list (/dashboard/equipment) and the modal do, so
+                # a date-scoped snapshot here can't pick an excluded test as
+                # "the" latest test and disagree with everywhere else.
+                TestAnalytics.template_key.notin_(_NON_LAB_TEMPLATE_KEYS),
+                TestResult.test_category.is_(None),
+            )
         )
         if date_from:
             ta_q = ta_q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
@@ -359,14 +458,14 @@ def get_asset_breakdown(
         tc  = eq_test_counts.get(str(eq.id), 0)
         # `src` supplies the risk_level/health_score used for bucketing (and,
         # once a date filter is active, also drives "tested"/"tested_n"):
-        # the all-time EquipmentAnalytics snapshot when no range is selected,
-        # or the date-scoped TestAnalytics snapshot (dated_ta_map) when one
-        # is — see dated_ta_map's comment above for why. When a filter is
-        # active, also require a non-null health_score: /ai-graph/grouped's
+        # the all-time lab-tests-only snapshot when no range is selected, or
+        # the date-scoped TestAnalytics snapshot (dated_ta_map) when one is —
+        # see dated_ta_map's comment above for why. When a filter is active,
+        # also require a non-null health_score: /ai-graph/grouped's
         # _eff_health treats a scoreless snapshot as "not assessed" (excluded
         # from its count), so this must too or the two dashboards' counts
         # drift apart again on that edge case.
-        src = dated_ta_map.get(eq.id) if _date_filter_active else ea_map.get(eq.id)
+        src = dated_ta_map.get(eq.id) if _date_filter_active else lab_ea_map.get(eq.id)
         if _date_filter_active and src is not None and src.health_score is None:
             src = None
         tested   = (not _date_filter_active) or src is not None
@@ -816,7 +915,13 @@ def get_analytics_dashboard(
     for child_id in all_child_dept_ids:
         subtree_ids = _collect_department_ids(child_id, db)
         tc_q = (
-            db.query(func.count(TestingRequest.id))
+            # DISTINCT - _apply_tested_at_filter joins TestResult below, and
+            # a TestingRequest with multiple linked TestResults (e.g.
+            # several test templates run under one request) would otherwise
+            # fan out to multiple rows and get counted more than once, so
+            # this could disagree with kpi_summary.total_tests (which does
+            # use DISTINCT) for the same underlying requests.
+            db.query(func.count(func.distinct(TestingRequest.id)))
             .join(Equipment, Equipment.id == TestingRequest.equipment_id)
             .filter(
                 Equipment.department_id.in_(subtree_ids),
@@ -1017,8 +1122,15 @@ def get_dashboard_equipment(
     """
     dept_ids = _collect_department_ids(department_id, db) if department_id else None
 
-    # All equipment in scope
-    eq_q = db.query(Equipment)
+    # All equipment in scope - ordered so the base list is deterministic:
+    # the final sort below (by risk/score) is a stable Python sort, so ties
+    # (e.g. two untested equipment, or two with identical risk/score) keep
+    # whatever relative order this query returns them in. Without an
+    # explicit ORDER BY here, that base order isn't guaranteed stable across
+    # requests, so a tied pair could swap sides of a page boundary between
+    # the page-1 and page-2 calls - showing one equipment twice and skipping
+    # another.
+    eq_q = db.query(Equipment).order_by(Equipment.id)
     if dept_ids:
         eq_q = eq_q.filter(Equipment.department_id.in_(dept_ids))
     if search:
@@ -1069,13 +1181,26 @@ def get_dashboard_equipment(
     ).all()
     ea_map = {r.equipment_id: r for r in ea_rows}
 
+    # This endpoint is AI Analytics-specific (the only caller is the AI
+    # Analytics Dashboard), so its health_score/risk_level/critical_findings
+    # must exclude TA&QC/Failure Registry/cumulative-counter test types the
+    # same way the AI Analytics equipment-detail modal's chip row does -
+    # otherwise this list disagrees with the modal for any equipment that
+    # also has one of those test types (e.g. OLTC dragging the equipment's
+    # overall EquipmentAnalytics score/risk down while the modal, which never
+    # shows OLTC, reports a healthier one). lab_map is keyed by equipment_id
+    # -> (score, risk_level, critical_findings); an equipment whose only
+    # tests are excluded types gets (None, "Unknown", []) here, same as a
+    # genuinely untested one.
+    lab_map = _lab_only_scores(eq_ids, db)
+
     # Exclude untested equipment when caller requests it (AI Analytics)
     if tested_only:
-        all_eq = [e for e in all_eq if e.id in ea_map]
+        all_eq = [e for e in all_eq if lab_map.get(e.id, (None,))[0] is not None]
 
     # Apply risk_level filter
     if risk_level:
-        all_eq = [e for e in all_eq if (ea_map.get(e.id) and ea_map[e.id].risk_level == risk_level)]
+        all_eq = [e for e in all_eq if lab_map.get(e.id, (None, "Unknown"))[1] == risk_level]
 
     eq_ids = [e.id for e in all_eq]
 
@@ -1136,10 +1261,10 @@ def get_dashboard_equipment(
     _risk_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 
     def _sort_key(eq: Equipment):
-        ea = ea_map.get(eq.id)
-        if ea is not None and ea.risk_level and ea.risk_level in _risk_order:
-            score = float(ea.health_score) if ea.health_score is not None else 999.0
-            return (0, _risk_order[ea.risk_level], score)
+        score, risk, _f = lab_map.get(eq.id, (None, "Unknown", []))
+        if risk in _risk_order:
+            s = score if score is not None else 999.0
+            return (0, _risk_order[risk], s)
         return (1, 99, 999.0)
 
     sorted_eq = sorted(all_eq, key=_sort_key, reverse=True)
@@ -1150,14 +1275,17 @@ def get_dashboard_equipment(
     items = []
     for eq in page_eq:
         ea = ea_map.get(eq.id)
-        # Build plain-English reason from critical_findings
+        lab_score, lab_risk, lab_findings = lab_map.get(eq.id, (None, "Unknown", []))
+        # Build plain-English reason from the same lab-only critical_findings
+        # shown in health_score/risk_level below, so the reason text can't
+        # cite an excluded test type (e.g. an OLTC counter breach) for a row
+        # that no longer counts OLTC toward its score/risk here.
         reason = None
-        if ea and ea.critical_findings:
-            findings = ea.critical_findings or []
+        if lab_findings:
             # Use rich per-finding reason if available, else fall back to label
             parts = []
             seen = set()
-            for f in findings:
+            for f in lab_findings:
                 label = f.get("label") or f.get("key", "")
                 if label in seen:
                     continue
@@ -1183,15 +1311,15 @@ def get_dashboard_equipment(
             "equipment_type":          type_map.get(eq.equipment_type_id),
             "department":              dept_name_map.get(eq.department_id),
             "department_id":           str(eq.department_id) if eq.department_id else None,
-            "health_score":            float(ea.health_score) if ea and ea.health_score is not None else None,
-            "risk_level":              ea.risk_level if ea else "Unknown",
+            "health_score":            lab_score,
+            "risk_level":              lab_risk,
             "condition_summary":       reason,
-            "critical_findings":       ea.critical_findings or [] if ea else [],
+            "critical_findings":       lab_findings,
             "parameters_at_risk":      ea.parameters_at_risk if ea else 0,
             "at_risk_parameter_names": at_risk_params_map.get(eq.id, []),
             "last_test_date":          ea.last_test_date.isoformat() if ea and ea.last_test_date else None,
             "test_count":              test_count_map.get(eq.id, 0),
-            "tested":                  ea is not None,
+            "tested":                  lab_score is not None,
             # Equipment register fields for client-side view-by grouping
             "manufacturer":            eq.manufacturer,
             "model_number":            eq.model_number,
@@ -1423,6 +1551,11 @@ def get_equipment_test_types(
             TestAnalytics.template_key,
             func.coalesce(TestResult.tested_at, TestResult.cts).desc(),
             TestAnalytics.calculated_at.desc(),
+            # Final deterministic tiebreak - without this, two rows sharing
+            # the same tested_at/calculated_at (e.g. bulk-imported together,
+            # or recomputed in the same transaction) let Postgres pick either
+            # one arbitrarily, so "the latest" could flip between requests.
+            TestAnalytics.id.desc(),
         )
         .all()
     )
@@ -1503,6 +1636,10 @@ def get_parameter_analytics(
         ParameterAnalytics.parameter_key,
         ParameterAnalytics.template_key,
         coalesced.desc(),
+        # Final deterministic tiebreak - see the same tiebreak in
+        # get_equipment_test_types() for why this matters.
+        ParameterAnalytics.calculated_at.desc(),
+        ParameterAnalytics.id.desc(),
     ).all()
     result_ids = [r.test_result_id for r in rows]
     tested_at_map = {
@@ -1582,6 +1719,12 @@ def get_parameter_history(
     # analytics row was computed, which can lag or precede the real test date
     # when results are imported/backfilled out of chronological order, producing
     # a chart that plots points in the wrong sequence despite correct date labels.
+    # Ordered DESC + limit so a parameter with more history than `limit`
+    # keeps its most RECENT readings (previously ordered ASC before the
+    # limit, which kept the oldest `limit` readings instead - silently
+    # dropping the newest data, including whatever test was just performed,
+    # for any parameter with more than `limit` historical readings).
+    # Reversed back to chronological (oldest-first) order below for display.
     q = (
         db.query(ParameterAnalytics)
         .join(TestResult, TestResult.id == ParameterAnalytics.test_result_id)
@@ -1590,11 +1733,12 @@ def get_parameter_history(
             ParameterAnalytics.parameter_key == parameter_key,
         )
         .order_by(func.coalesce(TestResult.tested_at, TestResult.cts,
-                                 ParameterAnalytics.calculated_at).asc())
+                                 ParameterAnalytics.calculated_at).desc(),
+                  ParameterAnalytics.id.desc())
     )
     if template_key:
         q = q.filter(ParameterAnalytics.template_key == template_key)
-    rows = q.limit(limit).all()
+    rows = list(reversed(q.limit(limit).all()))
 
     # Bulk-fetch tested_at + testing_request_id from TestResult
     result_ids = [r.test_result_id for r in rows]
