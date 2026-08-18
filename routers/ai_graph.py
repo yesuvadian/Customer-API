@@ -267,6 +267,17 @@ def _condition_from_score(score: float | None) -> str:
     return "Critical"
 
 
+def _condition_from_score_and_risk(score: float | None, risk_level: str | None) -> str:
+    """Same score bands as _condition_from_score, but honors a stored
+    risk_level of "Critical" the way _risk_from_score's critical-findings
+    override does - otherwise an equipment/test with a critical finding but
+    a score >=50 lands in "Poor" here while kpis.critical_count (which reads
+    risk_level directly) still counts it as critical, so the two disagree."""
+    if risk_level == "Critical":
+        return "Critical"
+    return _condition_from_score(score)
+
+
 def _normalize_0_100(values: list[float]) -> float:
     """Map a list of raw deltas/rates to a 0-100 risk score."""
     if not values:
@@ -417,7 +428,9 @@ def get_overview(
         ll = _life_left(eq.commissioned_date if eq else None,
                         type_map.get(eq.equipment_type_id) if eq else None)
         bucket = _life_bucket(ll) if ll is not None else "25+ yrs"
-        cond = _condition_from_score(_eff_health(ea.equipment_id, ea))
+        cond = _condition_from_score_and_risk(
+            _eff_health(ea.equipment_id, ea), _eff_risk(ea.equipment_id, ea)
+        )
         key = cond.lower()
         if key in CONDITIONS:
             dist[bucket][key] += 1
@@ -448,7 +461,7 @@ def get_overview(
         bucket_sort_key[q_key] = sort_key
         quarter_buckets.setdefault(q_key, []).append(float(ta.health_score))
         qc = quarter_conditions.setdefault(q_key, {"critical": 0, "fair": 0, "good": 0})
-        cond = _condition_from_score(float(ta.health_score))
+        cond = _condition_from_score_and_risk(float(ta.health_score), ta.risk_level)
         if cond in ("Critical", "Poor"):
             qc["critical"] += 1
         elif cond == "Fair":
