@@ -1249,6 +1249,24 @@ class TestingRequestService:
                 )
                 .scalar()
             ) or 0
+
+            from datetime import date as _date, timezone as _tz
+            _now_utc = datetime.now(_tz.utc)
+            overdue_count = (
+                self.db.query(func.count(TestingRequest.id))
+                .filter(
+                    TestingRequest.department_id.in_(subtree_ids),
+                    TestingRequest.is_schedule_template.is_(False),
+                    *_cat_filter,
+                    *_date_filter,
+                    TestingRequest.due_date.isnot(None),
+                    TestingRequest.due_date < _now_utc,
+                    TestingRequest.status.notin_(_LEGACY_CLOSED_STATUSES),
+                    TestingRequest.id.notin_(wf_done_ids),
+                )
+                .scalar()
+            ) or 0
+
             result.append({
                 "id": str(d.id),
                 "name": d.name,
@@ -1256,6 +1274,7 @@ class TestingRequestService:
                 "request_count": request_count,
                 "open_count": open_count,
                 "closed_count": closed_count,
+                "overdue_count": overdue_count,
                 "parent_department_id": (
                     str(d.parent_department_id)
                     if d.parent_department_id

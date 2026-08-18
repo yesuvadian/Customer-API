@@ -1368,11 +1368,24 @@ def get_equipment_test_types(
     with AI narrative fields (condition_summary, trend_summary, critical_findings,
     recommendations) so the dashboard can show per-test-type AI analysis.
     """
-    # Latest row per template_key — one subquery rank or just fetch all and dedupe in Python
+    # Latest row per template_key. Order by tested_at (the actual test date),
+    # not calculated_at (when it was last recomputed) - a bulk recompute
+    # processes test results in arbitrary DB order, not chronological, so
+    # calculated_at-ordering can pick an older test that simply happened to
+    # be recomputed last, showing its score instead of the true latest
+    # test's. This must match the tested_at-first ordering equipment_
+    # analytics' own "latest per template" aggregation already uses, or the
+    # per-template tab scores here can disagree with the equipment-level
+    # health score derived from that other, correctly-ordered query.
     rows = (
         db.query(TestAnalytics)
+        .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
         .filter(TestAnalytics.equipment_id == equipment_id)
-        .order_by(TestAnalytics.template_key, TestAnalytics.calculated_at.desc())
+        .order_by(
+            TestAnalytics.template_key,
+            func.coalesce(TestResult.tested_at, TestResult.cts).desc(),
+            TestAnalytics.calculated_at.desc(),
+        )
         .all()
     )
 
