@@ -269,6 +269,8 @@ def get_asset_breakdown(
     by_type_h:        dict[str, dict] = {}
     by_make:          dict[str, int]  = {}
     by_make_h:        dict[str, dict] = {}
+    by_make_model:    dict[str, int]  = {}
+    by_make_model_h:  dict[str, dict] = {}
     by_year:          dict[str, int]  = {}
     by_year_h:        dict[str, dict] = {}
     by_capacity:      dict[str, int]  = {}
@@ -336,6 +338,7 @@ def get_asset_breakdown(
     # equipment tested 3 times contributes 3), shown alongside as extra
     # context, e.g. "43 equipment (58 tests)".
     by_make_tests:         dict[str, int] = {}
+    by_make_model_tests:   dict[str, int] = {}
     by_type_tests:         dict[str, int] = {}
     by_voltage_tests:      dict[str, int] = {}
     by_year_tests:         dict[str, int] = {}
@@ -344,6 +347,7 @@ def get_asset_breakdown(
     by_replacement_year_tests: dict[str, int] = {}
 
     by_make_test_events:         dict[str, int] = {}
+    by_make_model_test_events:   dict[str, int] = {}
     by_type_test_events:         dict[str, int] = {}
     by_voltage_test_events:      dict[str, int] = {}
     by_year_test_events:         dict[str, int] = {}
@@ -388,6 +392,18 @@ def get_asset_breakdown(
         _add_health(by_make_h[mk], eq.id, tested, source=src)
         by_make_tests[mk] = by_make_tests.get(mk, 0) + tested_n
         by_make_test_events[mk] = by_make_test_events.get(mk, 0) + tc
+
+        # Make/model grouping key mirrors /analytics/ai-graph/grouped's
+        # group_by == "make_model" (manufacturer + model_number joined with a
+        # space, falling back to make-only when there's no model) so the two
+        # dashboards bucket equipment the same way.
+        mdl = (eq.model_number or "").strip()
+        mk_mdl = f"{mk} {mdl}".strip() if mdl else mk
+        by_make_model[mk_mdl] = by_make_model.get(mk_mdl, 0) + 1
+        by_make_model_h.setdefault(mk_mdl, _empty_health())
+        _add_health(by_make_model_h[mk_mdl], eq.id, tested, source=src)
+        by_make_model_tests[mk_mdl] = by_make_model_tests.get(mk_mdl, 0) + tested_n
+        by_make_model_test_events[mk_mdl] = by_make_model_test_events.get(mk_mdl, 0) + tc
 
         yr = str(eq.commissioned_date.year) if eq.commissioned_date else "Unknown"
         by_year[yr] = by_year.get(yr, 0) + 1
@@ -444,6 +460,10 @@ def get_asset_breakdown(
         "by_make_health":           {k: _finalise(v) for k, v in by_make_h.items()},
         "by_make_tests":            _sort(by_make_tests),
         "by_make_test_events":      by_make_test_events,
+        "by_make_model":            _sort(by_make_model),
+        "by_make_model_health":     {k: _finalise(v) for k, v in by_make_model_h.items()},
+        "by_make_model_tests":      _sort(by_make_model_tests),
+        "by_make_model_test_events": by_make_model_test_events,
         "by_commissioned_year":     dict(sorted(by_year.items())),
         "by_commissioned_year_health": {k: _finalise(v) for k, v in by_year_h.items()},
         "by_commissioned_year_tests":  dict(sorted(by_year_tests.items())),
@@ -982,6 +1002,8 @@ def get_dashboard_equipment(
     voltage_class:    Optional[str]       = Query(None, description="Filter by voltage class"),
     equipment_type:   Optional[str]       = Query(None, description="Filter by equipment type name"),
     manufacturer:     Optional[str]       = Query(None, description="Filter by manufacturer"),
+    model_number:     Optional[str]       = Query(None, description="Filter by model number"),
+    make_model:       Optional[str]       = Query(None, description="Filter by manufacturer + model combined, as returned by by_make_model"),
     commission_year:  Optional[int]       = Query(None, description="Filter by commissioned year"),
     failure_year:     Optional[int]       = Query(None, description="Filter by retired/failure year"),
     risk_level:       Optional[str]       = Query(None, description="Filter by risk level: Critical, High, Medium, Low"),
@@ -1011,6 +1033,11 @@ def get_dashboard_equipment(
             eq_q = eq_q.filter((Equipment.manufacturer == None) | (Equipment.manufacturer == ""))
         else:
             eq_q = eq_q.filter(Equipment.manufacturer == manufacturer)
+    if model_number:
+        if model_number.lower() == "unknown":
+            eq_q = eq_q.filter((Equipment.model_number == None) | (Equipment.model_number == ""))
+        else:
+            eq_q = eq_q.filter(Equipment.model_number == model_number)
     if commission_year:
         from sqlalchemy import extract
         eq_q = eq_q.filter(extract("year", Equipment.commissioned_date) == commission_year)
@@ -1019,6 +1046,17 @@ def get_dashboard_equipment(
         eq_q = eq_q.filter(Equipment.status == "retired")
         eq_q = eq_q.filter(_extract("year", Equipment.retired_date) == failure_year)
     all_eq: list[Equipment] = eq_q.all()
+
+    # make_model is a derived key (manufacturer + model_number), not a raw
+    # column, so it can't be pushed into the SQL filter above - re-derive it
+    # per equipment the same way /analytics/asset-breakdown's by_make_model
+    # does, and filter in Python.
+    if make_model:
+        def _make_model_key(e: Equipment) -> str:
+            mk = (e.manufacturer or "").strip() or "Unknown"
+            mdl = (e.model_number or "").strip()
+            return f"{mk} {mdl}".strip() if mdl else mk
+        all_eq = [e for e in all_eq if _make_model_key(e) == make_model]
 
     # Apply equipment_type filter after type_map is built (done below)
     _filter_equipment_type = equipment_type
