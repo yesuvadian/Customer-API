@@ -157,6 +157,9 @@ def _lab_only_scores(eq_ids: list, db: Session) -> dict:
             TestAnalytics.template_key,
             func.coalesce(TestResult.tested_at, TestResult.cts).desc(),
             TestAnalytics.calculated_at.desc(),
+            # Final deterministic tiebreak - same reasoning as
+            # get_equipment_test_types()'s identical tiebreak.
+            TestAnalytics.id.desc(),
         )
         .all()
     )
