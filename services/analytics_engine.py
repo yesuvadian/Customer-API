@@ -701,6 +701,27 @@ class AnalyticsEngine:
             for f in evaluation_result.get("fields", [])
         }
 
+        # For table fields: re-evaluate fresh from test_data so that row_label
+        # and breach_limit are available (stored evaluation_result may be
+        # stale) - mirrors the same fix in HealthScorer.score_test() above.
+        # Without this, ParameterAnalytics.breach_threshold below is built
+        # from whatever band-boundary logic was in effect at submission time,
+        # which can disagree with the freshly-recomputed critical_findings
+        # from score_test() for the exact same field.
+        if test_data:
+            from services.evaluation_service import EvaluationService as _EvalSvc
+            for section in template_data.get("sections", []):
+                for field in section.get("fields", []):
+                    if field.get("type") == "table":
+                        fkey = field.get("key", "")
+                        fresh = (
+                            _EvalSvc._eval_table_field(field, test_data)
+                            or _EvalSvc._eval_threshold_table(field, test_data)
+                        )
+                        if fresh:
+                            stored = ev_fields_map.get(fkey, {})
+                            ev_fields_map[fkey] = {**stored, **fresh}
+
         # Per-parameter analytics
         param_rows: list[ParameterAnalytics] = []
         for section in template_data.get("sections", []):
