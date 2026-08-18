@@ -160,13 +160,19 @@ class DirectSubmissionService:
         dept_id = data.get("department_id")    or getattr(submitter, "department_id",   None)
         _td     = data.get("test_data") or {}
 
-        # TAQC: parse target_compliance_date from test_data as due_date
+        # Parse due_date: TAQC uses target_compliance_date; FR uses outcome_end_date
         _due_date = None
-        _raw_compliance = _td.get("target_compliance_date") or data.get("target_compliance_date")
+        _raw_compliance = (
+            _td.get("target_compliance_date")
+            or data.get("target_compliance_date")
+            or _td.get("outcome_end_date")
+            or _td.get("outcome_due_date")
+        )
         if _raw_compliance:
             try:
                 from datetime import datetime as _dt
-                _due_date = _dt.fromisoformat(str(_raw_compliance).replace("Z", "+00:00"))
+                s = str(_raw_compliance).replace("Z", "+00:00")
+                _due_date = _dt.fromisoformat(s + "T00:00:00+00:00" if len(s) == 10 else s)
             except Exception:
                 pass
 
