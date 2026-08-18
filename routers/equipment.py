@@ -11,7 +11,7 @@ from fastapi import Response
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, cast, Text
 
 from database import get_db
 from auth_utils import get_current_user
@@ -1191,14 +1191,20 @@ def get_equipment_counts(
     
     # ── Search filter ──────────────────────────────────────────────────────
     if search:
+        search_dept_ids = EquipmentService._get_department_ids_matching_search(db, org_id, search)
         query = query.filter(
             (Equipment.ueic.ilike(f"%{search}%")) |
             (Equipment.bay_number.ilike(f"%{search}%")) |
             (Equipment.manufacturer.ilike(f"%{search}%")) |
             (Equipment.model_number.ilike(f"%{search}%")) |
-            (Equipment.factory_serial_number.ilike(f"%{search}%"))
+            (Equipment.factory_serial_number.ilike(f"%{search}%")) |
+            (Equipment.voltage_class.ilike(f"%{search}%")) |
+            (cast(Equipment.year_of_manufacture, Text).ilike(f"%{search}%")) |
+            (cast(extract('year', Equipment.commissioned_date), Text).ilike(f"%{search}%")) |
+            (cast(Equipment.nameplate_data, Text).ilike(f"%{search}%")) |
+            (Equipment.department_id.in_(search_dept_ids))
         )
-    
+
     # ── Substation IDs filter ─────────────────────────────────────────────
     if substation_ids:
         id_list = [s.strip() for s in substation_ids.split(",") if s.strip()]
@@ -1364,12 +1370,18 @@ def get_equipment_group_counts(
     if model_number:
         query = query.filter(Equipment.model_number.ilike(f"%{model_number}%"))
     if search:
+        search_dept_ids = EquipmentService._get_department_ids_matching_search(db, org_id, search)
         query = query.filter(
             (Equipment.ueic.ilike(f"%{search}%")) |
             (Equipment.bay_number.ilike(f"%{search}%")) |
             (Equipment.manufacturer.ilike(f"%{search}%")) |
             (Equipment.model_number.ilike(f"%{search}%")) |
-            (Equipment.factory_serial_number.ilike(f"%{search}%"))
+            (Equipment.factory_serial_number.ilike(f"%{search}%")) |
+            (Equipment.voltage_class.ilike(f"%{search}%")) |
+            (cast(Equipment.year_of_manufacture, Text).ilike(f"%{search}%")) |
+            (cast(extract('year', Equipment.commissioned_date), Text).ilike(f"%{search}%")) |
+            (cast(Equipment.nameplate_data, Text).ilike(f"%{search}%")) |
+            (Equipment.department_id.in_(search_dept_ids))
         )
     if substation_ids:
         id_list = [s.strip() for s in substation_ids.split(",") if s.strip()]
@@ -1686,12 +1698,18 @@ def get_department_hierarchy_with_counts(
         if model_number:
             query = query.filter(Equipment.model_number.ilike(f"%{model_number}%"))
         if search:
+            search_dept_ids = EquipmentService._get_department_ids_matching_search(db, org_id, search)
             query = query.filter(
                 (Equipment.ueic.ilike(f"%{search}%")) |
                 (Equipment.bay_number.ilike(f"%{search}%")) |
                 (Equipment.manufacturer.ilike(f"%{search}%")) |
                 (Equipment.model_number.ilike(f"%{search}%")) |
-                (Equipment.factory_serial_number.ilike(f"%{search}%"))
+                (Equipment.factory_serial_number.ilike(f"%{search}%")) |
+                (Equipment.voltage_class.ilike(f"%{search}%")) |
+                (cast(Equipment.year_of_manufacture, Text).ilike(f"%{search}%")) |
+                (cast(extract('year', Equipment.commissioned_date), Text).ilike(f"%{search}%")) |
+                (cast(Equipment.nameplate_data, Text).ilike(f"%{search}%")) |
+                (Equipment.department_id.in_(search_dept_ids))
             )
         if commission_year:
             query = query.filter(extract('year', Equipment.commissioned_date) == commission_year)
@@ -2255,12 +2273,18 @@ def get_department_hierarchy_with_counts(
         if model_number:
             q = q.filter(Equipment.model_number.ilike(f"%{model_number}%"))
         if search:
+            search_dept_ids = EquipmentService._get_department_ids_matching_search(db, org_id, search)
             q = q.filter(
                 (Equipment.ueic.ilike(f"%{search}%")) |
                 (Equipment.bay_number.ilike(f"%{search}%")) |
                 (Equipment.manufacturer.ilike(f"%{search}%")) |
                 (Equipment.model_number.ilike(f"%{search}%")) |
-                (Equipment.factory_serial_number.ilike(f"%{search}%"))
+                (Equipment.factory_serial_number.ilike(f"%{search}%")) |
+                (Equipment.voltage_class.ilike(f"%{search}%")) |
+                (cast(Equipment.year_of_manufacture, Text).ilike(f"%{search}%")) |
+                (cast(extract('year', Equipment.commissioned_date), Text).ilike(f"%{search}%")) |
+                (cast(Equipment.nameplate_data, Text).ilike(f"%{search}%")) |
+                (Equipment.department_id.in_(search_dept_ids))
             )
         if commission_year:
             q = q.filter(sa_extract('year', Equipment.commissioned_date) == commission_year)

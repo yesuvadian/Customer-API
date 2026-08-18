@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, func, text
+from sqlalchemy import desc, func, text, cast, Text
 
 from models import Equipment, EquipmentStatus, OrgDepartment, CategoryMaster
 
@@ -185,6 +185,43 @@ class EquipmentService:
         """)
         rows = db.execute(
             sql, {"org_id": str(org_id), "area_name": area_name}
+        ).fetchall()
+        return [UUID(str(r[0])) for r in rows]
+
+    @classmethod
+    def _get_department_ids_matching_search(
+        cls, db: Session, org_id, term: str
+    ) -> List[UUID]:
+        """
+        Free-text version of _get_descendants_of_named: any department in this
+        org (zone, circle, division, subdivision, substation, ...) whose name
+        contains `term`, plus all of its descendants. Lets the equipment search
+        box match by zone/subdivision/substation name, not just UEIC/bay text.
+        """
+        if not org_id:
+            return []
+        sql = text("""
+            WITH RECURSIVE matched AS (
+                SELECT id
+                FROM org_departments
+                WHERE organization_id = :org_id
+                  AND is_active        = true
+                  AND name ILIKE :term
+            ),
+            dept_tree AS (
+                SELECT id FROM matched
+
+                UNION ALL
+
+                SELECT d.id
+                FROM org_departments d
+                INNER JOIN dept_tree dt ON d.parent_department_id = dt.id
+                WHERE d.is_active = true
+            )
+            SELECT id FROM dept_tree
+        """)
+        rows = db.execute(
+            sql, {"org_id": str(org_id), "term": f"%{term}%"}
         ).fetchall()
         return [UUID(str(r[0])) for r in rows]
 
@@ -438,12 +475,20 @@ class EquipmentService:
         if model_number:
             query = query.filter(Equipment.model_number.ilike(f"%{model_number}%"))
         if search:
+            search_dept_ids = cls._get_department_ids_matching_search(
+                db, organization_id, search
+            )
             query = query.filter(
                 (Equipment.ueic.ilike(f"%{search}%")) |
                 (Equipment.bay_number.ilike(f"%{search}%")) |
                 (Equipment.manufacturer.ilike(f"%{search}%")) |
                 (Equipment.model_number.ilike(f"%{search}%")) |
-                (Equipment.factory_serial_number.ilike(f"%{search}%"))
+                (Equipment.factory_serial_number.ilike(f"%{search}%")) |
+                (Equipment.voltage_class.ilike(f"%{search}%")) |
+                (cast(Equipment.year_of_manufacture, Text).ilike(f"%{search}%")) |
+                (cast(extract('year', Equipment.commissioned_date), Text).ilike(f"%{search}%")) |
+                (cast(Equipment.nameplate_data, Text).ilike(f"%{search}%")) |
+                (Equipment.department_id.in_(search_dept_ids))
             )
 
         if substation_ids:
