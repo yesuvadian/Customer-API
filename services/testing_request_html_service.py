@@ -87,6 +87,86 @@ class TestingRequestHTMLService:
             return f"<table style='border-collapse:collapse;margin:2px 0'>{rows}</table>"
         return str(v)
 
+    def _render_test_data_by_template(self, sections, test_data) -> str:
+        """Schema-driven Test Data render - walks the template's own
+        sections/fields/columns top to bottom, mirroring
+        routers/testing.py's preview_test_result and
+        test_result_pdf_service.py's _render_test_data_by_template. JSONB
+        does not preserve object key insertion order, so the only reliable
+        way to render sections/fields/table-columns in the order the tester
+        actually saw them is to walk the template schema rather than
+        test_data.items() or a row dict's own keys."""
+        from services.visibility_rule import is_section_visible
+
+        html = ""
+        for section in sections:
+            fields = section.get("fields", [])
+            if not fields:
+                continue
+            if not is_section_visible(section, test_data):
+                continue
+
+            section_title = section.get("title", "")
+            blocks = []
+            pending_rows = ""
+
+            for field in fields:
+                field_key = field.get("key", "")
+                field_type = field.get("type", "text")
+                field_label = field.get("label") or field_key
+                field_value = test_data.get(field_key)
+
+                if field_type == "table":
+                    if pending_rows:
+                        blocks.append(f'<table class="data"><tbody>{pending_rows}</tbody></table>')
+                        pending_rows = ""
+                    if isinstance(field_value, list) and field_value:
+                        cols = field.get("columns", [])
+                        col_keys = [c.get("key", "") for c in cols]
+                        headers = [c.get("label") or c.get("key", "") for c in cols]
+                        header_html = "".join(f"<th>{h}</th>" for h in headers)
+                        trows = "".join(
+                            "<tr>" + "".join(
+                                f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:12px'>"
+                                f"{row.get(k, '—') if row.get(k) not in (None, '') else '—'}</td>"
+                                for k in col_keys
+                            ) + "</tr>"
+                            for row in field_value
+                        )
+                        if field_label != section_title:
+                            blocks.append(
+                                f'<div style="font-size:13px;font-weight:700;color:#1b3a6b;margin:10px 0 6px">{field_label}</div>'
+                            )
+                        blocks.append(
+                            f'<table class="data"><thead><tr>{header_html}</tr></thead><tbody>{trows}</tbody></table>'
+                        )
+                    continue
+
+                if field_type == "toggle":
+                    display = "✓ Yes" if field_value else "✗ No"
+                elif field_value in (None, ""):
+                    display = "—"
+                else:
+                    unit = field.get("unit")
+                    display = f"{field_value} {unit}" if unit else self._fmt(field_value)
+                pending_rows += (
+                    f"<tr>"
+                    f"<td style='padding:6px 10px;border:1px solid #e0e0e0;color:#555;"
+                    f"font-size:12px;width:35%'>{field_label}</td>"
+                    f"<td style='padding:6px 10px;border:1px solid #e0e0e0;font-size:13px'>"
+                    f"{display}</td></tr>"
+                )
+
+            if pending_rows:
+                blocks.append(f'<table class="data"><tbody>{pending_rows}</tbody></table>')
+
+            if not blocks:
+                continue
+
+            html += f'<div class="section-title">{section_title}</div>' + "".join(blocks)
+
+        return html
+
     @staticmethod
     def _split(td: dict):
         """Split test_data into (scalars, table_fields, overall_result)."""
@@ -251,7 +331,35 @@ class TestingRequestHTMLService:
 
         body_sections = ""
 
-        if result and result.test_data:
+        template_sections = None
+        if result and result.template_key:
+            try:
+                from services.org_test_template_service import OrgTestTemplateService
+                org_template = OrgTestTemplateService(self.db).get_by_template_key(
+                    result.template_key, respect_active=False
+                )
+                if org_template and org_template.template_data:
+                    template_sections = org_template.template_data.get("sections")
+            except Exception:
+                pass  # fall back to the unordered generic renderer below
+
+        if result and result.test_data and template_sections:
+            visibility_data = dict(result.test_data)
+            if req.equipment and "voltage_ratio" not in visibility_data and req.equipment.voltage_class:
+                visibility_data["voltage_ratio"] = req.equipment.voltage_class
+            body_sections += self._render_test_data_by_template(template_sections, visibility_data)
+            overall = result.test_data.get("overall_result")
+            if overall:
+                overall = str(overall).upper()
+                o_color = "#1a7340" if overall == "PASS" else "#b71c1c" if overall == "FAIL" else "#555"
+                o_bg = "#e8f5e9" if overall == "PASS" else "#ffebee" if overall == "FAIL" else "#f5f5f5"
+                body_sections += (
+                    '<div class="section-title">Overall Result</div>'
+                    '<table class="data"><tbody><tr>'
+                    f"<td style='padding:6px 10px;border:1px solid #e0e0e0;background:{o_bg};"
+                    f"color:{o_color};font-weight:700'>{overall}</td></tr></tbody></table>"
+                )
+        elif result and result.test_data:
             scalars, tables, overall = self._split(result.test_data)
 
             if scalars or overall:
