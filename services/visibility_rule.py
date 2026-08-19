@@ -64,6 +64,29 @@ def evaluate_visibility_rule(rule: Optional[Dict[str, Any]], data: Dict[str, Any
     return None
 
 
+def is_template_field_visible(
+    section: Dict[str, Any], field: Dict[str, Any], data: Dict[str, Any]
+) -> bool:
+    """Decide whether a field (including a table field) should appear when
+    generating something FROM the template schema itself - a blank import
+    template, a form preview - rather than from an already-saved result.
+    Checks both the field's own visibility_rule and its parent section's,
+    matching how the Flutter form gates a field (section AND field must both
+    pass, see TestResultForm._buildField / the section loop).
+
+    No "does it have data" fallback here (unlike is_section_visible): there's
+    no data yet when generating a blank template, so an unevaluable rule
+    (missing field, e.g. voltage_ratio not yet known) defaults to VISIBLE -
+    better to show an extra sheet than silently omit one the tester needs.
+    """
+    for rule in (section.get("visibility_rule"), field.get("visibility_rule")):
+        if rule is None:
+            continue
+        if evaluate_visibility_rule(rule, data) is False:
+            return False
+    return True
+
+
 def is_section_visible(section: Dict[str, Any], test_data: Dict[str, Any]) -> bool:
     """Decide whether a template section should appear in a generated
     report. Primary signal: evaluate the section's own visibility_rule
