@@ -227,6 +227,18 @@ def _parse_flat_schema(rows: list, test_type_name: str) -> list[dict]:
     if len(rows) < 4:
         return []
 
+    import datetime as _dt
+
+    def _cell_str(v):
+        if v is None:
+            return None
+        if isinstance(v, _dt.datetime):
+            return v.strftime("%Y-%m-%d")
+        if isinstance(v, _dt.date):
+            return v.isoformat()
+        s = str(v).strip()
+        return s if s else None
+
     keys = [str(v).strip() if v is not None else f"col_{i}"
             for i, v in enumerate(rows[1])]
 
@@ -238,7 +250,7 @@ def _parse_flat_schema(rows: list, test_type_name: str) -> list[dict]:
         for k, v in zip(keys, row):
             if k.startswith("__"):   # skip hidden marker cells
                 continue
-            rec[k] = str(v).strip() if v is not None and str(v).strip() else None
+            rec[k] = _cell_str(v)
         records.append(rec)
     return records
 

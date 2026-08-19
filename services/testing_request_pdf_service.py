@@ -18,6 +18,122 @@ class TestingRequestPDFService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _render_table_by_columns(self, columns, rows, story):
+        """Like the generic table renderer, but takes the column order/labels
+        from the template's own "columns" definition instead of deriving
+        them from a saved row dict's own key order - needed because each
+        row is itself a JSONB object, so Postgres does not preserve ITS key
+        order either (mirrors test_result_pdf_service.py)."""
+        if not rows or not columns:
+            return
+
+        col_keys = [c.get("key", "") for c in columns]
+        headers = [c.get("label") or c.get("key", "") for c in columns]
+
+        table_rows = [headers]
+        for row in rows:
+            table_rows.append([str(row.get(k, "-")) if row.get(k) not in (None, "") else "-" for k in col_keys])
+
+        num_cols = len(col_keys)
+        col_width = 6.5 / num_cols
+        col_widths = [col_width * inch] * num_cols
+
+        table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E3C72')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8F9FA')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.75, colors.HexColor('#DDDDDD')),
+        ]))
+        story.append(table)
+
+    def _render_labeled_pairs(self, pairs, story):
+        """Like a plain two-column layout, but takes (label, value) tuples
+        directly instead of re-deriving the label from a snake_case dict
+        key - needed when the label already comes from the template."""
+        if not pairs:
+            return
+        rows = [[label, str(value) if value not in (None, "") else "-"] for label, value in pairs]
+        table = Table(rows, colWidths=[2.2 * inch, 4.6 * inch])
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.white, colors.HexColor('#F8F9FA')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.75, colors.HexColor('#DDDDDD')),
+        ]))
+        story.append(table)
+
+    def _render_test_data_by_template(self, sections, test_data, visibility_data, story, subheading_style, normal_style):
+        """Schema-driven Test Data render - walks the template's own
+        sections/fields top to bottom (mirrors test_result_pdf_service.py's
+        _render_test_data_by_template and routers/testing.py's
+        preview_test_result HTML version). This is the ordering fix:
+        test_data is a JSONB column, and Postgres does not preserve object
+        key insertion order, so the only reliable way to render in the
+        order the tester actually saw is to walk the template schema
+        rather than test_data.items()."""
+        from services.visibility_rule import is_section_visible
+
+        for section in sections:
+            fields = section.get("fields", [])
+            if not fields:
+                continue
+            if not is_section_visible(section, visibility_data):
+                continue
+
+            story.append(Paragraph(section.get("title", ""), subheading_style))
+            pending_pairs = []
+
+            for field in fields:
+                field_key = field.get("key", "")
+                field_type = field.get("type", "text")
+                field_label = field.get("label") or field_key
+                field_value = test_data.get(field_key)
+
+                if field_type == "table":
+                    if pending_pairs:
+                        self._render_labeled_pairs(pending_pairs, story)
+                        story.append(Spacer(1, 0.1 * inch))
+                        pending_pairs = []
+                    if isinstance(field_value, list) and field_value:
+                        if field_label != section.get("title", ""):
+                            story.append(Paragraph(field_label, normal_style))
+                        self._render_table_by_columns(field.get("columns", []), field_value, story)
+                        story.append(Spacer(1, 0.15 * inch))
+                    continue
+
+                if field_type == "toggle":
+                    display = "Yes" if field_value else "No"
+                elif field_value in (None, ""):
+                    display = "-"
+                else:
+                    unit = field.get("unit")
+                    display = f"{field_value} {unit}" if unit else str(field_value)
+                pending_pairs.append((field_label, display))
+
+            if pending_pairs:
+                self._render_labeled_pairs(pending_pairs, story)
+            story.append(Spacer(1, 0.15 * inch))
+
     def generate_pdf(self, request_id: str) -> BytesIO:
         """Generate PDF for a testing request"""
         print(f"[DEBUG] Starting PDF generation for request_id: {request_id}")
@@ -67,6 +183,13 @@ class TestingRequestPDFService:
             spaceAfter=10,
         )
         normal_style = styles['Normal']
+        subheading_style = ParagraphStyle(
+            'CustomSubHeading',
+            parent=styles['Heading3'],
+            fontSize=11,
+            textColor=NAVY,
+            spaceAfter=6,
+        )
 
         # Title
         story.append(Paragraph("Testing Request Form", title_style))
@@ -292,8 +415,49 @@ class TestingRequestPDFService:
         ]))
         story.append(status_table)
 
-        # ── Test Result Data (generic — works for any template) ──────────────
-        if result and result.test_data:
+        # ── Test Result Data ───────────────────────────────────────────────
+        # Template-driven path first (matches routers/testing.py's
+        # preview_test_result and test_result_pdf_service.py): JSONB does
+        # not preserve object key insertion order, so the only reliable
+        # way to render sections/fields/table-columns in the order the
+        # tester actually saw them is to walk the template schema. Falls
+        # back to the generic (unordered) renderer below when there's no
+        # template_key or the template lookup fails.
+        template_sections = None
+        if result and result.template_key:
+            try:
+                from services.org_test_template_service import OrgTestTemplateService
+                org_template = OrgTestTemplateService(self.db).get_by_template_key(
+                    result.template_key, respect_active=False
+                )
+                if org_template and org_template.template_data:
+                    template_sections = org_template.template_data.get("sections")
+            except Exception:
+                pass
+
+        if result and result.test_data and template_sections:
+            story.append(Spacer(1, 0.2 * inch))
+            story.append(Paragraph("Test Data", heading_style))
+
+            visibility_data = dict(result.test_data)
+            if eq and "voltage_ratio" not in visibility_data and eq.voltage_class:
+                visibility_data["voltage_ratio"] = eq.voltage_class
+
+            self._render_test_data_by_template(
+                template_sections, result.test_data, visibility_data, story, subheading_style, normal_style
+            )
+
+            overall = result.test_data.get("overall_result")
+            if overall:
+                overall = str(overall).upper()
+                res_color = colors.HexColor("#1A7340") if overall == "PASS" \
+                    else colors.HexColor("#B71C1C") if overall == "FAIL" \
+                    else colors.black
+                self._render_labeled_pairs(
+                    [("Overall Result", overall)], story
+                )
+
+        elif result and result.test_data:
             story.append(Spacer(1, 0.2 * inch))
             story.append(Paragraph("Test Data", heading_style))
 

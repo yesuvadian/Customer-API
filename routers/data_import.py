@@ -17,7 +17,9 @@ Endpoints:
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import logging
 import traceback
 from typing import Any, List, Optional
@@ -202,10 +204,24 @@ def _create_tr_from_record(
                 break
             except ValueError:
                 continue
-    if not tested_at:
-        tested_at = datetime.now(timezone.utc)
+        if not tested_at:
+            return None, (
+                f"Unrecognized test date '{test_date_str}' for serial '{serial}'. "
+                "Expected format YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, or DD-Mon-YYYY."
+            )
+    else:
+        return None, (
+            f"No test date found for serial '{serial}'. The 'Date of Test' column "
+            "must be filled in — check the Records tab before submitting."
+        )
 
-    import_tag = f"IMP-{tested_at.strftime('%Y%m%d')}-{serial}-{template_key[:8].upper()}"
+    content_digest = hashlib.sha256(
+        json.dumps(form_data, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:10]
+    import_tag = (
+        f"IMP-{tested_at.strftime('%Y%m%d')}-{serial}-{template_key[:8].upper()}"
+        f"-{content_digest}"
+    )
     existing = (
         db.query(TestingRequest)
         .filter(TestingRequest.notes.contains(import_tag))
