@@ -5655,6 +5655,15 @@ def seed_report_definitions(session):
             "notification_event": None,
         },
         {
+            "name": "Equipment Performance Report",
+            "description": "Single-equipment performance history: current health/risk plus its own test and failure-event timeline. Used by the equipment context menu's Performance Report action.",
+            "query_key": "equipment_performance_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Failure Register",
+            "notification_event": None,
+        },
+        {
             "name": "Failure Resolution Report",
             "description": "End-to-end traceability: each Failure Registry record with outcome and linked work-order status.",
             "query_key": "failure_resolution_report",
@@ -6399,6 +6408,80 @@ LEFT JOIN failures
   AND fleet.voltage_class  IS NOT DISTINCT FROM failures.voltage_class
   AND fleet.age_band       IS NOT DISTINCT FROM failures.age_band
 ORDER  BY failure_rate_per_unit DESC NULLS LAST
+"""),
+
+        dict(
+            key="equipment_performance_report",
+            label="Equipment Performance Report",
+            group_name="Failure Register",
+            description="Current health/risk and full test + failure-event "
+                        "timeline for a single equipment.",
+            parameters_schema={"equipment_id": "string",
+                               "date_from": "date", "date_to": "date"},
+            sort_order=21,
+            org_alias="e",
+            sql_template="""
+WITH eq_info AS (
+    SELECT
+        e.id,
+        e.factory_serial_number,
+        e.manufacturer,
+        e.model_number,
+        e.voltage_class,
+        e.year_of_manufacture,
+        cm.name  AS equipment_type,
+        od.name  AS department_name,
+        ea.health_score       AS current_health_score,
+        ea.risk_level         AS current_risk_level,
+        ea.condition_summary  AS current_condition,
+        ea.last_test_date
+    FROM   public.equipment e
+    LEFT JOIN public."CategoryMaster"    cm ON cm.id = e.equipment_type_id
+    LEFT JOIN public.org_departments     od ON od.id = e.department_id
+    LEFT JOIN public.equipment_analytics ea ON ea.equipment_id = e.id
+    WHERE  e.id = :equipment_id ::uuid
+      {org_clause}
+),
+tests AS (
+    SELECT
+        tr.id                 AS testing_request_id,
+        tr.request_number,
+        tr.request_category,
+        COALESCE(tr.completed_at, tr.requested_date, tr.cts) AS event_date,
+        BOOL_OR(tres.evaluation_result->>'overall' = 'CRITICAL')
+                               AS had_critical_result,
+        STRING_AGG(DISTINCT tres.template_key, ', ')
+                               AS templates_tested
+    FROM   public.testing_requests tr
+    LEFT JOIN public.test_results  tres ON tres.testing_request_id = tr.id
+    WHERE  tr.equipment_id = :equipment_id ::uuid
+      AND  (:date_from ::date IS NULL
+            OR COALESCE(tr.completed_at, tr.requested_date, tr.cts) >= :date_from ::date)
+      AND  (:date_to   ::date IS NULL
+            OR COALESCE(tr.completed_at, tr.requested_date, tr.cts) <= :date_to ::date)
+    GROUP  BY tr.id, tr.request_number, tr.request_category,
+              COALESCE(tr.completed_at, tr.requested_date, tr.cts)
+)
+SELECT
+    ei.factory_serial_number,
+    ei.manufacturer,
+    ei.model_number,
+    ei.voltage_class,
+    ei.year_of_manufacture,
+    ei.equipment_type,
+    ei.department_name,
+    ei.current_health_score,
+    ei.current_risk_level,
+    ei.current_condition,
+    ei.last_test_date,
+    t.request_number,
+    t.request_category,
+    t.event_date                                                        AS test_date,
+    t.templates_tested,
+    (t.request_category = 'failure_registry' OR t.had_critical_result)  AS is_failure_event
+FROM   eq_info ei
+LEFT JOIN tests t ON true
+ORDER  BY t.event_date DESC NULLS LAST
 """),
 
         dict(
