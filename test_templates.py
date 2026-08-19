@@ -3218,13 +3218,6 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "winding_itc_factor", "label": "ITC Correction Factor (Winding)", "type": "number"},
-                # ── NEW: previous test date for this table (one date applies to whole winding table) ──
-                {
-                    "key": "winding_previous_test_date",
-                    "label": "Previous Test Date (Winding)",
-                    "type": "date",
-                    "placeholder": "Select date of previous winding test",
-                },
                 {
                     "key": "winding_test_results",
                     "label": "Winding Test Data",
@@ -3251,14 +3244,6 @@ TEST_TEMPLATES = {
                                 },
                             },
                         },
-                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
-                        {
-                            "key": "df_previous_corrected",
-                            "label": "% D.F @ 20°C (Previous Test)",
-                            "type": "number",
-                            "unit": "%",
-                            "placeholder": "Enter value from previous test report",
-                        },
                         {
                             "key": "condition",
                             "label": "Condition",
@@ -3279,15 +3264,72 @@ TEST_TEMPLATES = {
                             },
                         },
                     ],
+                    # Row set and order match the utility's own convention:
+                    # 400/220/33kV units test combined (HV+LV) electrodes plus
+                    # TV-GND; 220/66/11kV units test each winding pair
+                    # individually. TV-GND is the one configuration common to
+                    # both families.
                     "default_rows": [
-                        {"test_configuration": "HV-GND"},
-                        {"test_configuration": "HV-LV"},
-                        {"test_configuration": "LV-GND"},
-                        {"test_configuration": "LV-TV"},
-                        {"test_configuration": "TV-GND"},
-                        {"test_configuration": "HV-TV"},
-                        {"test_configuration": "(HV+LV)-GND"},
-                        {"test_configuration": "(HV+LV)-TV"},
+                        {
+                            "test_configuration": "(HV+LV)-GND",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+                            },
+                        },
+                        {
+                            "test_configuration": "(HV+LV)-TV",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+                            },
+                        },
+                        {
+                            "test_configuration": "TV-GND",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {
+                                    "field": "voltage_ratio",
+                                    "operator": "in",
+                                    "values": ["400", "220"],
+                                },
+                            },
+                        },
+                        {
+                            "test_configuration": "HV-LV",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
+                        {
+                            "test_configuration": "HV-GND",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
+                        {
+                            "test_configuration": "LV-TV",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
+                        {
+                            "test_configuration": "LV-GND",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
+                        {
+                            "test_configuration": "TV-HV",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
                     ],
                     "table_evaluation": {
                         "enabled": True,
@@ -3314,10 +3356,45 @@ TEST_TEMPLATES = {
         # 400/220/33 kV transformer → use 400kV + 220kV + 33kV sections
         # ═══════════════════════════════════════════════════════════════════
 
+        # ── 400 kV Bushing Details ─────────────────────────────────────────
+        # Applicable to 400/220/33 kV transformers only.
+        {
+            "title": "400 kV Bushing Details",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+            },
+            "fields": [
+                {
+                    "key": "bushing_400kv_details",
+                    "label": "400 kV Bushing Details",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": True,
+                    "columns": [
+                        {"key": "detail",  "label": "Details",          "type": "readonly"},
+                        {"key": "r_phase", "label": "400 kV 'R' Phase", "type": "text"},
+                        {"key": "y_phase", "label": "400 kV 'Y' Phase", "type": "text"},
+                        {"key": "b_phase", "label": "400 kV 'B' Phase", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"detail": "Make"},
+                        {"detail": "Sl. No."},
+                        {"detail": "Y.O. Mfg."},
+                    ],
+                },
+            ],
+        },
+
         # ── 400 kV Bushing Test Results ───────────────────────────────────
         # Applicable to 400/220/33 kV transformers only.
         {
             "title": "400 kV Bushing Test Results",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+            },
             "collapsible": True,
             "collapse_control": {
                 "key": "bushing_400kv_enabled",
@@ -3328,13 +3405,6 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_400kv_itc_factor", "label": "ITC Correction Factor (400 kV Bushing)", "type": "number"},
-                # ── NEW: previous test date for this table ──
-                {
-                    "key": "bushing_400kv_previous_test_date",
-                    "label": "Previous Test Date (400 kV Bushing)",
-                    "type": "date",
-                    "placeholder": "Select date of previous 400 kV bushing test",
-                },
                 {
                     "key": "bushing_400kv_test_results",
                     "label": "400 kV Bushing Test Data",
@@ -3360,14 +3430,6 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
-                        },
-                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
-                        {
-                            "key": "df_previous_corrected",
-                            "label": "% D.F @ 20°C (Previous Test)",
-                            "type": "number",
-                            "unit": "%",
-                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3417,7 +3479,49 @@ TEST_TEMPLATES = {
         #   220/66/11 kV  → primary HV bushing
         #   400/220/33 kV → secondary MV bushing
         {
+            "title": "220 kV Bushing Details",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {
+                    "field": "voltage_ratio",
+                    "operator": "in",
+                    "values": ["400", "220"],
+                },
+            },
+            "fields": [
+                {
+                    "key": "bushing_220kv_details",
+                    "label": "220 kV Bushing Details",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": True,
+                    "columns": [
+                        {"key": "detail",  "label": "Details",          "type": "readonly"},
+                        {"key": "r_phase", "label": "220 kV 'R' Phase", "type": "text"},
+                        {"key": "y_phase", "label": "220 kV 'Y' Phase", "type": "text"},
+                        {"key": "b_phase", "label": "220 kV 'B' Phase", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"detail": "Make"},
+                        {"detail": "Sl. No."},
+                        {"detail": "Y.O. Mfg."},
+                    ],
+                },
+            ],
+        },
+
+        # ── 220 kV Bushing Test Results ───────────────────────────────────
+        {
             "title": "220 kV Bushing Test Results",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {
+                    "field": "voltage_ratio",
+                    "operator": "in",
+                    "values": ["400", "220"],
+                },
+            },
             "collapsible": True,
             "collapse_control": {
                 "key": "bushing_220kv_enabled",
@@ -3428,13 +3532,6 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_220kv_itc_factor", "label": "ITC Correction Factor (220 kV Bushing)", "type": "number"},
-                # ── NEW: previous test date for this table ──
-                {
-                    "key": "bushing_220kv_previous_test_date",
-                    "label": "Previous Test Date (220 kV Bushing)",
-                    "type": "date",
-                    "placeholder": "Select date of previous 220 kV bushing test",
-                },
                 {
                     "key": "bushing_220kv_test_results",
                     "label": "220 kV Bushing Test Data",
@@ -3460,14 +3557,6 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
-                        },
-                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
-                        {
-                            "key": "df_previous_corrected",
-                            "label": "% D.F @ 20°C (Previous Test)",
-                            "type": "number",
-                            "unit": "%",
-                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3515,7 +3604,41 @@ TEST_TEMPLATES = {
         # ── 66 kV Bushing Test Results ────────────────────────────────────
         # Applicable to 220/66/11 kV transformers (LV bushing).
         {
+            "title": "66 kV Bushing Details",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+            },
+            "fields": [
+                {
+                    "key": "bushing_66kv_details",
+                    "label": "66 kV Bushing Details",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": True,
+                    "columns": [
+                        {"key": "detail",  "label": "Details",         "type": "readonly"},
+                        {"key": "r_phase", "label": "66 kV 'R' Phase", "type": "text"},
+                        {"key": "y_phase", "label": "66 kV 'Y' Phase", "type": "text"},
+                        {"key": "b_phase", "label": "66 kV 'B' Phase", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"detail": "Make"},
+                        {"detail": "Sl. No."},
+                        {"detail": "Y.O. Mfg."},
+                    ],
+                },
+            ],
+        },
+
+        # ── 66 kV Bushing Test Results ────────────────────────────────────
+        {
             "title": "66 kV Bushing Test Results",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+            },
             "collapsible": True,
             "collapse_control": {
                 "key": "bushing_66kv_enabled",
@@ -3526,13 +3649,6 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_66kv_itc_factor", "label": "ITC Correction Factor (66 kV Bushing)", "type": "number"},
-                # ── NEW: previous test date for this table ──
-                {
-                    "key": "bushing_66kv_previous_test_date",
-                    "label": "Previous Test Date (66 kV Bushing)",
-                    "type": "date",
-                    "placeholder": "Select date of previous 66 kV bushing test",
-                },
                 {
                     "key": "bushing_66kv_test_results",
                     "label": "66 kV Bushing Test Data",
@@ -3558,14 +3674,6 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
-                        },
-                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
-                        {
-                            "key": "df_previous_corrected",
-                            "label": "% D.F @ 20°C (Previous Test)",
-                            "type": "number",
-                            "unit": "%",
-                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3613,7 +3721,41 @@ TEST_TEMPLATES = {
         # ── 33 kV Bushing Test Results ────────────────────────────────────
         # Applicable to 400/220/33 kV transformers (TV bushing).
         {
+            "title": "33 kV Bushing Details",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+            },
+            "fields": [
+                {
+                    "key": "bushing_33kv_details",
+                    "label": "33 kV Bushing Details",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": True,
+                    "columns": [
+                        {"key": "detail",  "label": "Details",         "type": "readonly"},
+                        {"key": "r_phase", "label": "33 kV 'R' Phase", "type": "text"},
+                        {"key": "y_phase", "label": "33 kV 'Y' Phase", "type": "text"},
+                        {"key": "b_phase", "label": "33 kV 'B' Phase", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"detail": "Make"},
+                        {"detail": "Sl. No."},
+                        {"detail": "Y.O. Mfg."},
+                    ],
+                },
+            ],
+        },
+
+        # ── 33 kV Bushing Test Results ────────────────────────────────────
+        {
             "title": "33 kV Bushing Test Results",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+            },
             "collapsible": True,
             "collapse_control": {
                 "key": "bushing_33kv_enabled",
@@ -3624,13 +3766,6 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_33kv_itc_factor", "label": "ITC Correction Factor (33 kV Bushing)", "type": "number"},
-                # ── NEW: previous test date for this table ──
-                {
-                    "key": "bushing_33kv_previous_test_date",
-                    "label": "Previous Test Date (33 kV Bushing)",
-                    "type": "date",
-                    "placeholder": "Select date of previous 33 kV bushing test",
-                },
                 {
                     "key": "bushing_33kv_test_results",
                     "label": "33 kV Bushing Test Data",
@@ -3656,14 +3791,6 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
-                        },
-                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
-                        {
-                            "key": "df_previous_corrected",
-                            "label": "% D.F @ 20°C (Previous Test)",
-                            "type": "number",
-                            "unit": "%",
-                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3711,7 +3838,41 @@ TEST_TEMPLATES = {
         # ── 11 kV Bushing Test Results ────────────────────────────────────
         # Applicable to 220/66/11 kV transformers (TV bushing).
         {
+            "title": "11 kV Bushing Details",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+            },
+            "fields": [
+                {
+                    "key": "bushing_11kv_details",
+                    "label": "11 kV Bushing Details",
+                    "type": "table",
+                    "allow_add_rows": True,
+                    "allow_delete_rows": True,
+                    "lock_default_rows": True,
+                    "columns": [
+                        {"key": "detail",  "label": "Details",         "type": "readonly"},
+                        {"key": "r_phase", "label": "11 kV 'R' Phase", "type": "text"},
+                        {"key": "y_phase", "label": "11 kV 'Y' Phase", "type": "text"},
+                        {"key": "b_phase", "label": "11 kV 'B' Phase", "type": "text"},
+                    ],
+                    "default_rows": [
+                        {"detail": "Make"},
+                        {"detail": "Sl. No."},
+                        {"detail": "Y.O. Mfg."},
+                    ],
+                },
+            ],
+        },
+
+        # ── 11 kV Bushing Test Results ────────────────────────────────────
+        {
             "title": "11 kV Bushing Test Results",
+            "visibility_rule": {
+                "type": "COMPARE",
+                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+            },
             "collapsible": True,
             "collapse_control": {
                 "key": "bushing_11kv_enabled",
@@ -3722,13 +3883,6 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "bushing_11kv_itc_factor", "label": "ITC Correction Factor (11 kV Bushing)", "type": "number"},
-                # ── NEW: previous test date for this table ──
-                {
-                    "key": "bushing_11kv_previous_test_date",
-                    "label": "Previous Test Date (11 kV Bushing)",
-                    "type": "date",
-                    "placeholder": "Select date of previous 11 kV bushing test",
-                },
                 {
                     "key": "bushing_11kv_test_results",
                     "label": "11 kV Bushing Test Data",
@@ -3754,14 +3908,6 @@ TEST_TEMPLATES = {
                                     "precision": 4,
                                 },
                             },
-                        },
-                        # ── NEW: previous test's corrected %D.F, entered manually for now ──
-                        {
-                            "key": "df_previous_corrected",
-                            "label": "% D.F @ 20°C (Previous Test)",
-                            "type": "number",
-                            "unit": "%",
-                            "placeholder": "Enter value from previous test report",
                         },
                         {
                             "key": "condition",
@@ -3819,13 +3965,6 @@ TEST_TEMPLATES = {
             },
             "fields": [
                 {"key": "idax_testing_kit", "label": "Testing Kit Used", "type": "text", "placeholder": "e.g. Megger IDAX 300"},
-                # ── NEW: previous test date for this table ──
-                {
-                    "key": "idax_previous_test_date",
-                    "label": "Previous Test Date (IDAX)",
-                    "type": "date",
-                    "placeholder": "Select date of previous IDAX test",
-                },
                 {
                     "key": "idax_test_results",
                     "label": "IDAX Test Data",
@@ -3836,37 +3975,113 @@ TEST_TEMPLATES = {
                     "columns": [
                         {"key": "test_configuration",    "label": "Test Configuration",              "type": "text",   "placeholder": "e.g. HV-GND, CHG, HV-Ground"},
                         {"key": "moisture_percent",      "label": "% Moisture",                      "type": "number", "unit": "%"},
-                        # ── NEW: previous test's %Moisture, entered manually for now ──
-                        {
-                            "key": "moisture_percent_previous",
-                            "label": "% Moisture (Previous Test)",
-                            "type": "number",
-                            "unit": "%",
-                            "placeholder": "Enter value from previous test report",
-                        },
                         {
                             "key": "tr_analysis_moisture",
                             "label": "Tr. Analysis (% Moisture)",
-                            "type": "dropdown",
-                            "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"],
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "moisture_percent",
+                                    "thresholds": {
+                                        "% Moisture (IDAX)": {
+                                            "As New":          [None, 1.0],
+                                            "Dry":             [1.0,  2.0],
+                                            "Moderately Wet":  [2.0,  3.0],
+                                            "Wet":             [3.0,  None],
+                                        }
+                                    },
+                                },
+                            },
                         },
                         {"key": "oil_conductivity_psm",  "label": "Oil Conductivity (pS/m)",         "type": "number", "unit": "pS/m"},
                         {
                             "key": "tr_analysis_oil",
                             "label": "Tr. Analysis (Oil Conductivity)",
-                            "type": "dropdown",
-                            "options": ["As new", "Acceptable", "Poor", "Bad"],
+                            "type": "calculated",
+                            "read_only": True,
+                            "rule": {
+                                "type": "THRESHOLD",
+                                "config": {
+                                    "input_field": "oil_conductivity_psm",
+                                    "thresholds": {
+                                        "Oil Conductivity (IDAX)": {
+                                            "As New":       [None, 0.37],
+                                            "Good":         [0.37, 3.7],
+                                            "Service Aged": [3.7,  37],
+                                            "Deteriorated": [37,   None],
+                                        }
+                                    },
+                                },
+                            },
                         },
                     ],
+                    # Same family-scoped row set/order as winding_test_results
+                    # (this table tests the same electrode combinations, just
+                    # measuring % Moisture / Oil Conductivity instead of
+                    # Capacitance/Tan-Delta).
                     "default_rows": [
-                        {"test_configuration": "HV-GND"},
-                        {"test_configuration": "HV-LV"},
-                        {"test_configuration": "LV-GND"},
-                        {"test_configuration": "LV-TV"},
-                        {"test_configuration": "TV-GND"},
-                        {"test_configuration": "HV-TV"},
-                        {"test_configuration": "(HV+LV)-GND"},
-                        {"test_configuration": "(HV+LV)-TV"},
+                        {
+                            "test_configuration": "(HV+LV)-GND",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+                            },
+                        },
+                        {
+                            "test_configuration": "(HV+LV)-TV",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+                            },
+                        },
+                        {
+                            "test_configuration": "TV-GND",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {
+                                    "field": "voltage_ratio",
+                                    "operator": "in",
+                                    "values": ["400", "220"],
+                                },
+                            },
+                        },
+                        {
+                            "test_configuration": "HV-LV",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
+                        {
+                            "test_configuration": "HV-GND",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
+                        {
+                            "test_configuration": "LV-TV",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
+                        {
+                            "test_configuration": "LV-GND",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
+                        {
+                            "test_configuration": "TV-HV",
+                            "visibility_rule": {
+                                "type": "COMPARE",
+                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                            },
+                        },
                     ],
                     "table_evaluation": {
                         "enabled": True,
@@ -3880,9 +4095,13 @@ TEST_TEMPLATES = {
                                 "remedial_action_text": "High moisture content — arrange drying treatment.",
                             },
                             "oil_conductivity_psm": {
-                                "normal_min": None, "normal_max": 0.1,
+                                # Aligned with tr_analysis_oil's THRESHOLD bands:
+                                # As New/Good (<3.7) = Normal, Service Aged
+                                # (3.7-37) falls through to Alert, Deteriorated
+                                # (>37) = Critical.
+                                "normal_min": None, "normal_max": 3.7,
                                 "alert_min":  None, "alert_max":  None,
-                                "critical_below": None, "critical_above": 1.0,
+                                "critical_below": None, "critical_above": 37,
                                 "trend_watch": True,
                                 "weight": 1.0,
                                 "remedial_action_text": "High oil conductivity — arrange oil reconditioning or replacement.",
@@ -3894,28 +4113,6 @@ TEST_TEMPLATES = {
             ],
         },
 
-        # ── Overall Assessment ────────────────────────────────────────────
-        {
-            "title": "Overall Assessment",
-            "fields": [
-                {
-                    "key": "overall_result",
-                    "label": "Overall Result",
-                    "type": "dropdown",
-                    "options": ["PASS", "CONDITIONAL", "FAIL"],
-                    "required": True,
-                    "dropdown_evaluation": {
-                        "enabled": True,
-                        "value_severities": {
-                            "PASS":        "NORMAL",
-                            "CONDITIONAL": "ALERT",
-                            "FAIL":        "CRITICAL",
-                        },
-                    },
-                },
-                {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
-            ],
-        },
     ],
 },
     # CIRCUIT BREAKER TEMPLATES
