@@ -452,3 +452,243 @@ def resolve_equipment(serial_number: str | None, equipment_id: UUID | None, db: 
 def get_template_key(test_type_name: str) -> str | None:
     from test_templates import TEST_TYPE_TO_TEMPLATE
     return TEST_TYPE_TO_TEMPLATE.get(test_type_name)
+
+
+# ── Blank import-template (schema) workbook builder ───────────────────────────
+# Shared by:
+#   - GET /data-import/schema        (generic, no equipment context - always
+#     includes every section, visibility_data=None)
+#   - GET /testing/results/{id}/import-schema (scoped to one equipment - only
+#     includes sections/fields applicable to its voltage_ratio)
+#
+# Sheet 1 ("Import Data") holds scalar fields: row 1 = visible label, row 2 =
+# hidden machine key, row 3 = hint, row 4 = where the value goes. One sheet
+# per table field: row 1 = label, row 2 = hidden key (+ a "__table_key__=..."
+# marker cell), row 3 = hint, rows 4+ = data (pre-filled from default_rows).
+# parse_structured_import_workbook() reads this exact shape back.
+
+def build_import_schema_workbook(tpl: dict | None, visibility_data: dict | None = None):
+    """Build a blank Excel import template workbook from a template
+    definition dict (as returned by test_templates.get_template_for_test_type).
+
+    visibility_data: when given (e.g. {"voltage_ratio": "400"}), sections/
+    fields whose visibility_rule evaluates to False against it are omitted
+    entirely - used for a single-equipment-scoped download. Pass None for
+    the generic bulk-import download, which has no equipment context yet
+    and so must include every section unconditionally.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from services.visibility_rule import is_template_field_visible
+
+    def _visible(section: dict, field: dict) -> bool:
+        if visibility_data is None:
+            return True
+        return is_template_field_visible(section, field, visibility_data)
+
+    # Fixed identity columns always present (needed for equipment matching)
+    fixed_cols = [
+        ("sub_station",   "Sub Station",   "Name of substation / location"),
+        ("serial_number", "Serial Number", "Equipment serial number (used to match equipment)"),
+        ("test_date",     "Date of Test",  "YYYY-MM-DD format"),
+    ]
+
+    # Dynamic scalar columns + collect table field definitions
+    dyn_cols: list[tuple[str, str, str]] = []
+    table_fields: list[dict] = []
+    if tpl:
+        for sec in tpl.get("sections", []):
+            sec_title = sec.get("title", "")
+            for f in sec.get("fields", []):
+                if not _visible(sec, f):
+                    continue
+                ftype = f.get("type", "text")
+                if ftype == "table":
+                    table_fields.append(f)
+                    continue
+                if ftype in ("calculated", "readonly"):
+                    continue
+                if f.get("import_skip"):
+                    continue
+                key   = f.get("key", "")
+                label = f.get("label", key)
+                hint  = f.get("unit", "") or f.get("hint", "") or sec_title
+                if key:
+                    dyn_cols.append((key, label, hint))
+
+    all_cols = fixed_cols + dyn_cols
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Import Data"
+
+    header_fill = PatternFill("solid", fgColor="1E3A5F")
+    hint_fill   = PatternFill("solid", fgColor="EFF6FF")
+    table_fill  = PatternFill("solid", fgColor="1E3A5F")
+    row_fill    = PatternFill("solid", fgColor="F8FAFF")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    hint_font   = Font(italic=True, color="6B7280", size=9)
+    key_font    = Font(color="FFFFFF", size=1)
+
+    for ci, (key, label, hint) in enumerate(all_cols, start=1):
+        # Row 1: visible header label
+        h = ws.cell(row=1, column=ci, value=label)
+        h.font      = header_font
+        h.fill      = header_fill
+        h.alignment = Alignment(horizontal="center", wrap_text=True)
+
+        # Row 2: machine key (hidden — white on white)
+        k = ws.cell(row=2, column=ci, value=key)
+        k.font = key_font
+
+        # Row 3: hint
+        hnt = ws.cell(row=3, column=ci, value=hint)
+        hnt.font      = hint_font
+        hnt.fill      = hint_fill
+        hnt.alignment = Alignment(wrap_text=True)
+
+        # Column width
+        ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = max(18, len(label) + 4)
+
+    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[2].height = 0   # hide key row
+    ws.row_dimensions[3].height = 20
+    ws.freeze_panes = "A4"
+
+    # ── One sheet per table field ──────────────────────────────────────────────
+    for tf in table_fields:
+        tbl_key   = tf.get("key", "table")
+        tbl_label = tf.get("label", tbl_key)
+
+        # Only editable, non-calculated columns
+        editable_cols = [
+            c for c in tf.get("columns", [])
+            if c.get("type") not in ("calculated",) and not c.get("read_only")
+        ]
+        if not editable_cols:
+            continue
+
+        # Sheet name: strip Excel-invalid chars, truncate to 31 chars
+        import re as _re
+        sheet_name = _re.sub(r'[:\\/?*\[\]]', '', tbl_label)[:31]
+        tws = wb.create_sheet(title=sheet_name)
+
+        # Row 1: visible label  Row 2: machine key (hidden)  Row 3: unit hint
+        for ci, col in enumerate(editable_cols, start=1):
+            col_key   = col.get("key", f"col{ci}")
+            col_label = col.get("label", col_key)
+            col_hint  = col.get("unit", "") or col.get("placeholder", "")
+
+            h = tws.cell(row=1, column=ci, value=col_label)
+            h.font      = header_font
+            h.fill      = table_fill
+            h.alignment = Alignment(horizontal="center", wrap_text=True)
+
+            k = tws.cell(row=2, column=ci, value=col_key)
+            k.font = key_font
+
+            hnt = tws.cell(row=3, column=ci, value=col_hint)
+            hnt.font      = hint_font
+            hnt.fill      = hint_fill
+            hnt.alignment = Alignment(wrap_text=True)
+
+            tws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = max(18, len(col_label) + 4)
+
+        # Row 1 in col 0 (A): store table field key as a hidden marker
+        meta_cell = tws.cell(row=2, column=len(editable_cols) + 1, value=f"__table_key__={tbl_key}")
+        meta_cell.font = key_font
+
+        tws.row_dimensions[1].height = 28
+        tws.row_dimensions[2].height = 0
+        tws.row_dimensions[3].height = 18
+        tws.freeze_panes = "A4"
+
+        # Pre-fill default rows (starting at row 4)
+        default_rows = tf.get("default_rows", [])
+        for ri, drow in enumerate(default_rows, start=4):
+            for ci, col in enumerate(editable_cols, start=1):
+                val = drow.get(col.get("key", ""), "")
+                cell = tws.cell(row=ri, column=ci, value=val if val != "" else None)
+                if ri % 2 == 0:
+                    cell.fill = row_fill
+        # Add 5 blank rows after defaults for extra data
+        start_blank = max(4, 4 + len(default_rows))
+        for ri in range(start_blank, start_blank + 5):
+            for ci in range(1, len(editable_cols) + 1):
+                cell = tws.cell(row=ri, column=ci, value=None)
+                if ri % 2 == 0:
+                    cell.fill = row_fill
+
+    return wb
+
+
+def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None) -> dict:
+    """Parse an Excel file matching the exact structure
+    build_import_schema_workbook() produces - i.e. the user's filled-in
+    downloaded template - back into a form_data dict ready to merge into a
+    live TestResultForm's state.
+
+    Reads by the hidden machine key embedded in row 2 of every sheet, not
+    by fuzzy label matching - safe to do because we control both ends of
+    this round trip (unlike the messy-real-world-document OCR parsers in
+    seed_tandelta_from_pdf.py / seed_tandelta_from_excel.py, which this
+    function does NOT share code with).
+
+    tpl is currently unused but accepted for symmetry with
+    build_import_schema_workbook and in case future validation against the
+    live schema is wanted (e.g. rejecting a stale downloaded copy).
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    form_data: dict = {}
+
+    def _row_has_data(row) -> bool:
+        return any(v not in (None, "") for v in row)
+
+    # ── Sheet 1: scalar fields ("Import Data") ──────────────────────────────
+    if "Import Data" in wb.sheetnames:
+        ws = wb["Import Data"]
+        keys = [c.value for c in next(ws.iter_rows(min_row=2, max_row=2))]
+        for row in ws.iter_rows(min_row=4, values_only=True):
+            if not _row_has_data(row):
+                continue
+            for key, val in zip(keys, row):
+                if key and val not in (None, ""):
+                    form_data[str(key)] = val
+            break  # exactly one data row expected for a single test result
+
+    # ── Remaining sheets: one per table field ───────────────────────────────
+    for sheet_name in wb.sheetnames:
+        if sheet_name == "Import Data":
+            continue
+        ws = wb[sheet_name]
+        key_row = next(ws.iter_rows(min_row=2, max_row=2))
+
+        table_key = None
+        marker_idx = None
+        for idx, cell in enumerate(key_row):
+            if isinstance(cell.value, str) and cell.value.startswith("__table_key__="):
+                table_key = cell.value.split("=", 1)[1]
+                marker_idx = idx
+                break
+        if table_key is None:
+            continue  # not a sheet this format recognises - skip quietly
+
+        col_keys = [c.value for c in key_row[:marker_idx]]
+        n_cols = len(col_keys)
+
+        rows_out: list[dict] = []
+        for row in ws.iter_rows(min_row=4, max_col=n_cols, values_only=True):
+            if not _row_has_data(row):
+                continue
+            row_dict = {}
+            for key, val in zip(col_keys, row):
+                if key:
+                    row_dict[str(key)] = val if val is not None else ""
+            rows_out.append(row_dict)
+
+        if rows_out:
+            form_data[table_key] = rows_out
+
+    return form_data

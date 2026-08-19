@@ -1678,3 +1678,101 @@ def generate_test_result_pdf(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
+
+
+# ── Per-testing-request import schema (download blank / upload filled) ────────
+# Scoped to ONE testing request's equipment, unlike the generic bulk-import
+# GET /data-import/schema (which has no equipment context yet and always
+# includes every voltage tier). Lets a tester fill the form offline in Excel
+# instead of typing directly into the UI, then upload it back for review.
+
+def _template_for_request(req: "TestingRequest") -> dict:
+    from test_templates import get_template_for_test_type
+    test_type_name = req.test_type.name if req.test_type else None
+    tpl = get_template_for_test_type(test_type_name) if test_type_name else None
+    if not tpl:
+        raise HTTPException(status_code=404, detail="No template found for this test type")
+    return tpl
+
+
+@router.get("/requests/{testing_request_id}/import-schema")
+def download_request_import_schema(
+    testing_request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Download a blank Excel import template scoped to this testing
+    request's equipment - only includes sections/tables applicable to its
+    voltage_ratio (via visibility_rule), e.g. a 400kV-family transformer
+    only gets 400/220/33kV sheets, not 66/11kV ones."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from sqlalchemy.orm import joinedload as _joinedload
+    from services.import_extractor_service import build_import_schema_workbook
+
+    req = (
+        db.query(TestingRequest)
+        .options(_joinedload(TestingRequest.test_type), _joinedload(TestingRequest.equipment))
+        .filter(TestingRequest.id == testing_request_id)
+        .first()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+
+    tpl = _template_for_request(req)
+
+    visibility_data = {}
+    if req.equipment and req.equipment.voltage_class:
+        visibility_data["voltage_ratio"] = req.equipment.voltage_class
+
+    wb = build_import_schema_workbook(tpl, visibility_data=visibility_data or None)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    safe_name = (req.request_number or str(testing_request_id))[:40].replace(" ", "_").replace("/", "-")
+    filename = f"import_schema_{safe_name}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/requests/{testing_request_id}/import-upload")
+async def upload_request_import(
+    testing_request_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Parse an uploaded filled-in import template (from the scoped
+    /import-schema download above) and return the parsed form_data for the
+    client to review/merge into the live Test Result form. Does NOT save
+    anything to the database - the tester still reviews the populated form
+    and hits Save Draft / Submit themselves, same as typing it in by hand."""
+    from sqlalchemy.orm import joinedload as _joinedload
+    from services.import_extractor_service import parse_structured_import_workbook
+
+    req = (
+        db.query(TestingRequest)
+        .options(_joinedload(TestingRequest.test_type))
+        .filter(TestingRequest.id == testing_request_id)
+        .first()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+
+    tpl = _template_for_request(req)
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    try:
+        form_data = parse_structured_import_workbook(file_bytes, tpl)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not parse uploaded file: {e}")
+
+    return {"form_data": form_data}
