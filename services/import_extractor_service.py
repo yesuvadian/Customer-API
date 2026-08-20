@@ -664,18 +664,8 @@ def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None)
     """
     import openpyxl
 
-    _BAD_FORMAT_MSG = (
-        "This doesn't look like a filled-in import template for this test - "
-        "no recognisable sheets or headers were found. Please download the "
-        "template for this test and fill it in without renaming its sheets "
-        "or column headers, then upload that file."
-    )
-    _WRONG_TEMPLATE_MSG = (
-        "This file's data doesn't match this test's template - it looks "
-        "like it may be filled in for a different test type. Please "
-        "download the template for THIS test and fill it in, then upload "
-        "that file."
-    )
+    _BAD_FORMAT_MSG = "This file doesn't match this test's import template."
+    _WRONG_TEMPLATE_MSG = "This file looks like it's for a different test type."
 
     # Present on essentially every template regardless of test type -
     # sub_station/serial_number/test_date are the fixed identity columns
@@ -701,11 +691,7 @@ def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     except Exception:
-        raise ValueError(
-            "This doesn't look like a valid Excel (.xlsx) file. Please "
-            "download the template for this test and fill it in, then "
-            "upload that file."
-        )
+        raise ValueError("Not a valid Excel (.xlsx) file.")
 
     form_data: dict = {}
     recognised_any_sheet = False
