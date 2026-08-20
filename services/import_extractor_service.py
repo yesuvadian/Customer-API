@@ -646,14 +646,69 @@ def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None)
     seed_tandelta_from_pdf.py / seed_tandelta_from_excel.py, which this
     function does NOT share code with).
 
-    tpl is currently unused but accepted for symmetry with
-    build_import_schema_workbook and in case future validation against the
-    live schema is wanted (e.g. rejecting a stale downloaded copy).
+    tpl, when given, is the live template for the test this upload is
+    for - used to reject a structurally-valid import file (real
+    "__table_key__=" markers, real "Import Data" sheet) that was filled
+    in for a DIFFERENT test type. Every field/table key convention is
+    shared across templates (build_import_schema_workbook() is generic),
+    so e.g. a capacitance_tandelta_transformer export uploaded onto a
+    transformer_oil_test request parses "successfully" as far as sheet
+    shape goes, but every key it produces (winding_itc_factor,
+    winding_test_results, ...) is foreign to the oil-test template and
+    silently matches nothing in the live form. Comparing the parsed keys
+    against the template's own field keys catches that case tpl is None
+    for the generic /data-import/schema bulk-import flow, which has no
+    single test type to validate against - only the per-request
+    /testing/requests/{id}/import-upload path (which always has one)
+    passes it.
     """
     import openpyxl
 
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    _BAD_FORMAT_MSG = (
+        "This doesn't look like a filled-in import template for this test - "
+        "no recognisable sheets or headers were found. Please download the "
+        "template for this test and fill it in without renaming its sheets "
+        "or column headers, then upload that file."
+    )
+    _WRONG_TEMPLATE_MSG = (
+        "This file's data doesn't match this test's template - it looks "
+        "like it may be filled in for a different test type. Please "
+        "download the template for THIS test and fill it in, then upload "
+        "that file."
+    )
+
+    # Present on essentially every template regardless of test type -
+    # sub_station/serial_number/test_date are the fixed identity columns
+    # build_import_schema_workbook() adds unconditionally, and
+    # overall_result/recommendation come from the "Overall Assessment"
+    # section every template carries. Excluded from the wrong-template
+    # comparison below since they'd otherwise "match" no matter which two
+    # (different) test types are being compared.
+    _GENERIC_KEYS = {
+        "sub_station", "serial_number", "test_date",
+        "overall_result", "recommendation",
+    }
+
+    def _template_field_keys(t: dict | None) -> set:
+        keys = set()
+        for sec in (t or {}).get("sections", []):
+            for f in sec.get("fields", []):
+                k = f.get("key")
+                if k:
+                    keys.add(k)
+        return keys - _GENERIC_KEYS
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    except Exception:
+        raise ValueError(
+            "This doesn't look like a valid Excel (.xlsx) file. Please "
+            "download the template for this test and fill it in, then "
+            "upload that file."
+        )
+
     form_data: dict = {}
+    recognised_any_sheet = False
 
     def _row_has_data(row) -> bool:
         return any(v not in (None, "") for v in row)
@@ -661,21 +716,26 @@ def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None)
     # ── Sheet 1: scalar fields ("Import Data") ──────────────────────────────
     if "Import Data" in wb.sheetnames:
         ws = wb["Import Data"]
-        keys = [c.value for c in next(ws.iter_rows(min_row=2, max_row=2))]
-        for row in ws.iter_rows(min_row=4, values_only=True):
-            if not _row_has_data(row):
-                continue
-            for key, val in zip(keys, row):
-                if key and val not in (None, ""):
-                    form_data[str(key)] = val
-            break  # exactly one data row expected for a single test result
+        key_row = next(ws.iter_rows(min_row=2, max_row=2), None)
+        if key_row is not None:
+            recognised_any_sheet = True
+            keys = [c.value for c in key_row]
+            for row in ws.iter_rows(min_row=4, values_only=True):
+                if not _row_has_data(row):
+                    continue
+                for key, val in zip(keys, row):
+                    if key and val not in (None, ""):
+                        form_data[str(key)] = val
+                break  # exactly one data row expected for a single test result
 
     # ── Remaining sheets: one per table field ───────────────────────────────
     for sheet_name in wb.sheetnames:
         if sheet_name == "Import Data":
             continue
         ws = wb[sheet_name]
-        key_row = next(ws.iter_rows(min_row=2, max_row=2))
+        key_row = next(ws.iter_rows(min_row=2, max_row=2), None)
+        if key_row is None:
+            continue  # sheet too short to carry the hidden key row - skip quietly
 
         table_key = None
         marker_idx = None
@@ -686,6 +746,7 @@ def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None)
                 break
         if table_key is None:
             continue  # not a sheet this format recognises - skip quietly
+        recognised_any_sheet = True
 
         col_keys = [c.value for c in key_row[:marker_idx]]
         n_cols = len(col_keys)
@@ -702,5 +763,25 @@ def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None)
 
         if rows_out:
             form_data[table_key] = rows_out
+
+    # A file with none of the expected "Import Data" sheet or any
+    # __table_key__-marked sheet isn't this test's template at all (e.g. the
+    # wrong test's template, or an unrelated spreadsheet) - surface that
+    # clearly instead of silently returning an empty form_data, which the
+    # caller would otherwise report as a misleading "0 fields imported"
+    # success.
+    if not recognised_any_sheet:
+        raise ValueError(_BAD_FORMAT_MSG)
+
+    # The file parsed as a structurally valid template, but every key it
+    # produced may still belong to a DIFFERENT test's template (see the
+    # docstring). Only checkable when tpl was actually supplied and has a
+    # real field list; a wholly-empty tpl (e.g. an unconfigured request)
+    # can't distinguish "wrong template" from "legitimately no fields yet",
+    # so skip the check rather than reject every upload for that request.
+    template_keys = _template_field_keys(tpl)
+    parsed_keys = set(form_data.keys()) - _GENERIC_KEYS
+    if tpl is not None and template_keys and parsed_keys and not (parsed_keys & template_keys):
+        raise ValueError(_WRONG_TEMPLATE_MSG)
 
     return form_data
