@@ -184,10 +184,19 @@ class TestResultPDFService:
         headers = list(data_list[0].keys())
         formatted_headers = [' '.join(word.capitalize() for word in h.split('_')) for h in headers]
 
+        header_style = ParagraphStyle(
+            'ListTableHeaderCell', fontName='Helvetica-Bold', fontSize=8,
+            leading=10, textColor=colors.white, alignment=TA_CENTER,
+        )
+        cell_style = ParagraphStyle(
+            'ListTableBodyCell', fontName='Helvetica', fontSize=8.5,
+            leading=10, alignment=TA_CENTER,
+        )
+
         # Build table rows
-        table_rows = [formatted_headers]
+        table_rows = [[Paragraph(h, header_style) for h in formatted_headers]]
         for item in data_list:
-            row = [str(item.get(h, '-')) for h in headers]
+            row = [Paragraph(str(item.get(h, '-')), cell_style) for h in headers]
             table_rows.append(row)
 
         # Calculate column widths dynamically
@@ -229,16 +238,32 @@ class TestResultPDFService:
         from the template's own "columns" definition instead of deriving
         them from a saved row dict's own key order - needed because each
         row is itself a JSONB object, so Postgres does not preserve ITS key
-        order either (row['detail'] can come back after row['r_phase'])."""
+        order either (row['detail'] can come back after row['r_phase']).
+
+        Headers/cells are wrapped in Paragraph objects (not plain strings)
+        so ReportLab word-wraps long labels within their column instead of
+        overflowing into the neighboring cell."""
         if not rows or not columns:
             return
 
         col_keys = [c.get("key", "") for c in columns]
         headers = [c.get("label") or c.get("key", "") for c in columns]
 
-        table_rows = [headers]
+        header_style = ParagraphStyle(
+            'TableHeaderCell', fontName='Helvetica-Bold', fontSize=8,
+            leading=10, textColor=colors.white, alignment=TA_CENTER,
+        )
+        cell_style = ParagraphStyle(
+            'TableBodyCell', fontName='Helvetica', fontSize=8.5,
+            leading=10, alignment=TA_CENTER,
+        )
+
+        table_rows = [[Paragraph(h, header_style) for h in headers]]
         for row in rows:
-            table_rows.append([str(row.get(k, "-")) if row.get(k) not in (None, "") else "-" for k in col_keys])
+            table_rows.append([
+                Paragraph(str(row.get(k, "-")) if row.get(k) not in (None, "") else "-", cell_style)
+                for k in col_keys
+            ])
 
         num_cols = len(col_keys)
         col_width = 6.5 / num_cols
@@ -268,17 +293,27 @@ class TestResultPDFService:
         """Like _render_two_column_layout, but takes (label, value) tuples
         directly instead of re-deriving the label from a snake_case dict
         key - needed when the label already comes from the template
-        (e.g. "% D.F Measured", which .split('_') would mangle)."""
+        (e.g. "% D.F Measured", which .split('_') would mangle).
+
+        Labels/values are wrapped in Paragraph objects (not plain strings)
+        so ReportLab word-wraps long labels within their column instead of
+        overflowing into the value column."""
         if not pairs:
             return
-        rows = [[label, str(value) if value not in (None, "") else "-"] for label, value in pairs]
+        label_style = ParagraphStyle(
+            'PairLabelCell', fontName='Helvetica-Bold', fontSize=9,
+            leading=11, textColor=colors.HexColor('#333333'),
+        )
+        value_style = ParagraphStyle(
+            'PairValueCell', fontName='Helvetica', fontSize=9, leading=11,
+        )
+        rows = [
+            [Paragraph(str(label), label_style),
+             Paragraph(str(value) if value not in (None, "") else "-", value_style)]
+            for label, value in pairs
+        ]
         table = Table(rows, colWidths=[2.5*inch, 4*inch])
         table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.white, colors.HexColor('#F8F9FA')]),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
@@ -353,20 +388,22 @@ class TestResultPDFService:
 
     def _render_two_column_layout(self, data_dict, story):
         """Render simple key-value pairs in two columns"""
+        label_style = ParagraphStyle(
+            'TwoColLabelCell', fontName='Helvetica-Bold', fontSize=9,
+            leading=11, textColor=colors.HexColor('#333333'),
+        )
+        value_style = ParagraphStyle(
+            'TwoColValueCell', fontName='Helvetica', fontSize=9, leading=11,
+        )
+
         rows = []
         for key, value in data_dict.items():
             field_name = ' '.join(word.capitalize() for word in key.split('_'))
             formatted_value = str(value) if value is not None else '-'
-            rows.append([field_name, formatted_value])
+            rows.append([Paragraph(field_name, label_style), Paragraph(formatted_value, value_style)])
 
         table = Table(rows, colWidths=[2.5*inch, 4*inch])
         table.setStyle(TableStyle([
-            # Field names (left column)
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
 
             # Alternating row colors
