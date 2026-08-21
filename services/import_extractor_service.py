@@ -664,8 +664,8 @@ def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None)
     """
     import openpyxl
 
-    _BAD_FORMAT_MSG = "This file doesn't match this test's import template."
-    _WRONG_TEMPLATE_MSG = "This file looks like it's for a different test type."
+    _BAD_FORMAT_MSG = "This file doesn't match this test's import template. please download the correct template and fill it in."
+    _WRONG_TEMPLATE_MSG = "This file looks like it's for a different test type. Please download the correct template for this test."
 
     # Present on essentially every template regardless of test type -
     # sub_station/serial_number/test_date are the fixed identity columns
