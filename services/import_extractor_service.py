@@ -227,6 +227,18 @@ def _parse_flat_schema(rows: list, test_type_name: str) -> list[dict]:
     if len(rows) < 4:
         return []
 
+    import datetime as _dt
+
+    def _cell_str(v):
+        if v is None:
+            return None
+        if isinstance(v, _dt.datetime):
+            return v.strftime("%Y-%m-%d")
+        if isinstance(v, _dt.date):
+            return v.isoformat()
+        s = str(v).strip()
+        return s if s else None
+
     keys = [str(v).strip() if v is not None else f"col_{i}"
             for i, v in enumerate(rows[1])]
 
@@ -238,7 +250,7 @@ def _parse_flat_schema(rows: list, test_type_name: str) -> list[dict]:
         for k, v in zip(keys, row):
             if k.startswith("__"):   # skip hidden marker cells
                 continue
-            rec[k] = str(v).strip() if v is not None and str(v).strip() else None
+            rec[k] = _cell_str(v)
         records.append(rec)
     return records
 
@@ -452,3 +464,310 @@ def resolve_equipment(serial_number: str | None, equipment_id: UUID | None, db: 
 def get_template_key(test_type_name: str) -> str | None:
     from test_templates import TEST_TYPE_TO_TEMPLATE
     return TEST_TYPE_TO_TEMPLATE.get(test_type_name)
+
+
+# ── Blank import-template (schema) workbook builder ───────────────────────────
+# Shared by:
+#   - GET /data-import/schema        (generic, no equipment context - always
+#     includes every section, visibility_data=None)
+#   - GET /testing/results/{id}/import-schema (scoped to one equipment - only
+#     includes sections/fields applicable to its voltage_ratio)
+#
+# Sheet 1 ("Import Data") holds scalar fields: row 1 = visible label, row 2 =
+# hidden machine key, row 3 = hint, row 4 = where the value goes. One sheet
+# per table field: row 1 = label, row 2 = hidden key (+ a "__table_key__=..."
+# marker cell), row 3 = hint, rows 4+ = data (pre-filled from default_rows).
+# parse_structured_import_workbook() reads this exact shape back.
+
+def build_import_schema_workbook(tpl: dict | None, visibility_data: dict | None = None):
+    """Build a blank Excel import template workbook from a template
+    definition dict (as returned by test_templates.get_template_for_test_type).
+
+    visibility_data: when given (e.g. {"voltage_ratio": "400"}), sections/
+    fields whose visibility_rule evaluates to False against it are omitted
+    entirely - used for a single-equipment-scoped download. Pass None for
+    the generic bulk-import download, which has no equipment context yet
+    and so must include every section unconditionally.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from services.visibility_rule import is_template_field_visible
+
+    def _visible(section: dict, field: dict) -> bool:
+        if visibility_data is None:
+            return True
+        return is_template_field_visible(section, field, visibility_data)
+
+    # Fixed identity columns always present (needed for equipment matching)
+    fixed_cols = [
+        ("sub_station",   "Sub Station",   "Name of substation / location"),
+        ("serial_number", "Serial Number", "Equipment serial number (used to match equipment)"),
+        ("test_date",     "Date of Test",  "YYYY-MM-DD format"),
+    ]
+
+    # Dynamic scalar columns + collect table field definitions
+    dyn_cols: list[tuple[str, str, str]] = []
+    table_fields: list[dict] = []
+    if tpl:
+        for sec in tpl.get("sections", []):
+            sec_title = sec.get("title", "")
+            for f in sec.get("fields", []):
+                if not _visible(sec, f):
+                    continue
+                ftype = f.get("type", "text")
+                if ftype == "table":
+                    table_fields.append(f)
+                    continue
+                if ftype in ("calculated", "readonly"):
+                    continue
+                if f.get("import_skip"):
+                    continue
+                key   = f.get("key", "")
+                label = f.get("label", key)
+                hint  = f.get("unit", "") or f.get("hint", "") or sec_title
+                if key:
+                    dyn_cols.append((key, label, hint))
+
+    all_cols = fixed_cols + dyn_cols
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Import Data"
+
+    header_fill = PatternFill("solid", fgColor="1E3A5F")
+    hint_fill   = PatternFill("solid", fgColor="EFF6FF")
+    table_fill  = PatternFill("solid", fgColor="1E3A5F")
+    row_fill    = PatternFill("solid", fgColor="F8FAFF")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    hint_font   = Font(italic=True, color="6B7280", size=9)
+    key_font    = Font(color="FFFFFF", size=1)
+
+    for ci, (key, label, hint) in enumerate(all_cols, start=1):
+        # Row 1: visible header label
+        h = ws.cell(row=1, column=ci, value=label)
+        h.font      = header_font
+        h.fill      = header_fill
+        h.alignment = Alignment(horizontal="center", wrap_text=True)
+
+        # Row 2: machine key (hidden — white on white)
+        k = ws.cell(row=2, column=ci, value=key)
+        k.font = key_font
+
+        # Row 3: hint
+        hnt = ws.cell(row=3, column=ci, value=hint)
+        hnt.font      = hint_font
+        hnt.fill      = hint_fill
+        hnt.alignment = Alignment(wrap_text=True)
+
+        # Column width
+        ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = max(18, len(label) + 4)
+
+    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[2].height = 0   # hide key row
+    ws.row_dimensions[3].height = 20
+    ws.freeze_panes = "A4"
+
+    # ── One sheet per table field ──────────────────────────────────────────────
+    for tf in table_fields:
+        tbl_key   = tf.get("key", "table")
+        tbl_label = tf.get("label", tbl_key)
+
+        # Only editable, non-calculated columns
+        editable_cols = [
+            c for c in tf.get("columns", [])
+            if c.get("type") not in ("calculated",) and not c.get("read_only")
+        ]
+        if not editable_cols:
+            continue
+
+        # Sheet name: strip Excel-invalid chars, truncate to 31 chars
+        import re as _re
+        sheet_name = _re.sub(r'[:\\/?*\[\]]', '', tbl_label)[:31]
+        tws = wb.create_sheet(title=sheet_name)
+
+        # Row 1: visible label  Row 2: machine key (hidden)  Row 3: unit hint
+        for ci, col in enumerate(editable_cols, start=1):
+            col_key   = col.get("key", f"col{ci}")
+            col_label = col.get("label", col_key)
+            col_hint  = col.get("unit", "") or col.get("placeholder", "")
+
+            h = tws.cell(row=1, column=ci, value=col_label)
+            h.font      = header_font
+            h.fill      = table_fill
+            h.alignment = Alignment(horizontal="center", wrap_text=True)
+
+            k = tws.cell(row=2, column=ci, value=col_key)
+            k.font = key_font
+
+            hnt = tws.cell(row=3, column=ci, value=col_hint)
+            hnt.font      = hint_font
+            hnt.fill      = hint_fill
+            hnt.alignment = Alignment(wrap_text=True)
+
+            tws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = max(18, len(col_label) + 4)
+
+        # Row 1 in col 0 (A): store table field key as a hidden marker
+        meta_cell = tws.cell(row=2, column=len(editable_cols) + 1, value=f"__table_key__={tbl_key}")
+        meta_cell.font = key_font
+
+        tws.row_dimensions[1].height = 28
+        tws.row_dimensions[2].height = 0
+        tws.row_dimensions[3].height = 18
+        tws.freeze_panes = "A4"
+
+        # Pre-fill default rows (starting at row 4)
+        default_rows = tf.get("default_rows", [])
+        for ri, drow in enumerate(default_rows, start=4):
+            for ci, col in enumerate(editable_cols, start=1):
+                val = drow.get(col.get("key", ""), "")
+                cell = tws.cell(row=ri, column=ci, value=val if val != "" else None)
+                if ri % 2 == 0:
+                    cell.fill = row_fill
+        # Add 5 blank rows after defaults for extra data
+        start_blank = max(4, 4 + len(default_rows))
+        for ri in range(start_blank, start_blank + 5):
+            for ci in range(1, len(editable_cols) + 1):
+                cell = tws.cell(row=ri, column=ci, value=None)
+                if ri % 2 == 0:
+                    cell.fill = row_fill
+
+    return wb
+
+
+def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None) -> dict:
+    """Parse an Excel file matching the exact structure
+    build_import_schema_workbook() produces - i.e. the user's filled-in
+    downloaded template - back into a form_data dict ready to merge into a
+    live TestResultForm's state.
+
+    Reads by the hidden machine key embedded in row 2 of every sheet, not
+    by fuzzy label matching - safe to do because we control both ends of
+    this round trip (unlike the messy-real-world-document OCR parsers in
+    seed_tandelta_from_pdf.py / seed_tandelta_from_excel.py, which this
+    function does NOT share code with).
+
+    tpl, when given, is the live template for the test this upload is
+    for - used to reject a structurally-valid import file (real
+    "__table_key__=" markers, real "Import Data" sheet) that was filled
+    in for a DIFFERENT test type. Every field/table key convention is
+    shared across templates (build_import_schema_workbook() is generic),
+    so e.g. a capacitance_tandelta_transformer export uploaded onto a
+    transformer_oil_test request parses "successfully" as far as sheet
+    shape goes, but every key it produces (winding_itc_factor,
+    winding_test_results, ...) is foreign to the oil-test template and
+    silently matches nothing in the live form. Comparing the parsed keys
+    against the template's own field keys catches that case tpl is None
+    for the generic /data-import/schema bulk-import flow, which has no
+    single test type to validate against - only the per-request
+    /testing/requests/{id}/import-upload path (which always has one)
+    passes it.
+    """
+    import openpyxl
+
+    _BAD_FORMAT_MSG = "This file doesn't match this test's import template. please download the correct template and fill it in."
+    _WRONG_TEMPLATE_MSG = "This file looks like it's for a different test type. Please download the correct template for this test."
+
+    # Present on essentially every template regardless of test type -
+    # sub_station/serial_number/test_date are the fixed identity columns
+    # build_import_schema_workbook() adds unconditionally, and
+    # overall_result/recommendation come from the "Overall Assessment"
+    # section every template carries. Excluded from the wrong-template
+    # comparison below since they'd otherwise "match" no matter which two
+    # (different) test types are being compared.
+    _GENERIC_KEYS = {
+        "sub_station", "serial_number", "test_date",
+        "overall_result", "recommendation",
+    }
+
+    def _template_field_keys(t: dict | None) -> set:
+        keys = set()
+        for sec in (t or {}).get("sections", []):
+            for f in sec.get("fields", []):
+                k = f.get("key")
+                if k:
+                    keys.add(k)
+        return keys - _GENERIC_KEYS
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    except Exception:
+        raise ValueError("Not a valid Excel (.xlsx) file.")
+
+    form_data: dict = {}
+    recognised_any_sheet = False
+
+    def _row_has_data(row) -> bool:
+        return any(v not in (None, "") for v in row)
+
+    # ── Sheet 1: scalar fields ("Import Data") ──────────────────────────────
+    if "Import Data" in wb.sheetnames:
+        ws = wb["Import Data"]
+        key_row = next(ws.iter_rows(min_row=2, max_row=2), None)
+        if key_row is not None:
+            recognised_any_sheet = True
+            keys = [c.value for c in key_row]
+            for row in ws.iter_rows(min_row=4, values_only=True):
+                if not _row_has_data(row):
+                    continue
+                for key, val in zip(keys, row):
+                    if key and val not in (None, ""):
+                        form_data[str(key)] = val
+                break  # exactly one data row expected for a single test result
+
+    # ── Remaining sheets: one per table field ───────────────────────────────
+    for sheet_name in wb.sheetnames:
+        if sheet_name == "Import Data":
+            continue
+        ws = wb[sheet_name]
+        key_row = next(ws.iter_rows(min_row=2, max_row=2), None)
+        if key_row is None:
+            continue  # sheet too short to carry the hidden key row - skip quietly
+
+        table_key = None
+        marker_idx = None
+        for idx, cell in enumerate(key_row):
+            if isinstance(cell.value, str) and cell.value.startswith("__table_key__="):
+                table_key = cell.value.split("=", 1)[1]
+                marker_idx = idx
+                break
+        if table_key is None:
+            continue  # not a sheet this format recognises - skip quietly
+        recognised_any_sheet = True
+
+        col_keys = [c.value for c in key_row[:marker_idx]]
+        n_cols = len(col_keys)
+
+        rows_out: list[dict] = []
+        for row in ws.iter_rows(min_row=4, max_col=n_cols, values_only=True):
+            if not _row_has_data(row):
+                continue
+            row_dict = {}
+            for key, val in zip(col_keys, row):
+                if key:
+                    row_dict[str(key)] = val if val is not None else ""
+            rows_out.append(row_dict)
+
+        if rows_out:
+            form_data[table_key] = rows_out
+
+    # A file with none of the expected "Import Data" sheet or any
+    # __table_key__-marked sheet isn't this test's template at all (e.g. the
+    # wrong test's template, or an unrelated spreadsheet) - surface that
+    # clearly instead of silently returning an empty form_data, which the
+    # caller would otherwise report as a misleading "0 fields imported"
+    # success.
+    if not recognised_any_sheet:
+        raise ValueError(_BAD_FORMAT_MSG)
+
+    # The file parsed as a structurally valid template, but every key it
+    # produced may still belong to a DIFFERENT test's template (see the
+    # docstring). Only checkable when tpl was actually supplied and has a
+    # real field list; a wholly-empty tpl (e.g. an unconfigured request)
+    # can't distinguish "wrong template" from "legitimately no fields yet",
+    # so skip the check rather than reject every upload for that request.
+    template_keys = _template_field_keys(tpl)
+    parsed_keys = set(form_data.keys()) - _GENERIC_KEYS
+    if tpl is not None and template_keys and parsed_keys and not (parsed_keys & template_keys):
+        raise ValueError(_WRONG_TEMPLATE_MSG)
+
+    return form_data
