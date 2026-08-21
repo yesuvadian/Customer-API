@@ -184,10 +184,19 @@ class TestResultPDFService:
         headers = list(data_list[0].keys())
         formatted_headers = [' '.join(word.capitalize() for word in h.split('_')) for h in headers]
 
+        header_style = ParagraphStyle(
+            'ListTableHeaderCell', fontName='Helvetica-Bold', fontSize=8,
+            leading=10, textColor=colors.white, alignment=TA_CENTER,
+        )
+        cell_style = ParagraphStyle(
+            'ListTableBodyCell', fontName='Helvetica', fontSize=8.5,
+            leading=10, alignment=TA_CENTER,
+        )
+
         # Build table rows
-        table_rows = [formatted_headers]
+        table_rows = [[Paragraph(h, header_style) for h in formatted_headers]]
         for item in data_list:
-            row = [str(item.get(h, '-')) for h in headers]
+            row = [Paragraph(str(item.get(h, '-')), cell_style) for h in headers]
             table_rows.append(row)
 
         # Calculate column widths dynamically
@@ -224,22 +233,177 @@ class TestResultPDFService:
         ]))
         story.append(table)
 
+    def _render_table_by_columns(self, columns, rows, story):
+        """Like _render_table_from_list, but takes the column order/labels
+        from the template's own "columns" definition instead of deriving
+        them from a saved row dict's own key order - needed because each
+        row is itself a JSONB object, so Postgres does not preserve ITS key
+        order either (row['detail'] can come back after row['r_phase']).
+
+        Headers/cells are wrapped in Paragraph objects (not plain strings)
+        so ReportLab word-wraps long labels within their column instead of
+        overflowing into the neighboring cell."""
+        if not rows or not columns:
+            return
+
+        col_keys = [c.get("key", "") for c in columns]
+        headers = [c.get("label") or c.get("key", "") for c in columns]
+
+        header_style = ParagraphStyle(
+            'TableHeaderCell', fontName='Helvetica-Bold', fontSize=8,
+            leading=10, textColor=colors.white, alignment=TA_CENTER,
+        )
+        cell_style = ParagraphStyle(
+            'TableBodyCell', fontName='Helvetica', fontSize=8.5,
+            leading=10, alignment=TA_CENTER,
+        )
+
+        table_rows = [[Paragraph(h, header_style) for h in headers]]
+        for row in rows:
+            table_rows.append([
+                Paragraph(str(row.get(k, "-")) if row.get(k) not in (None, "") else "-", cell_style)
+                for k in col_keys
+            ])
+
+        num_cols = len(col_keys)
+        col_width = 6.5 / num_cols
+        col_widths = [col_width * inch] * num_cols
+
+        table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E3C72')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8F9FA')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.75, colors.HexColor('#DDDDDD')),
+        ]))
+        story.append(table)
+
+    def _render_labeled_pairs(self, pairs, story):
+        """Like _render_two_column_layout, but takes (label, value) tuples
+        directly instead of re-deriving the label from a snake_case dict
+        key - needed when the label already comes from the template
+        (e.g. "% D.F Measured", which .split('_') would mangle).
+
+        Labels/values are wrapped in Paragraph objects (not plain strings)
+        so ReportLab word-wraps long labels within their column instead of
+        overflowing into the value column."""
+        if not pairs:
+            return
+        label_style = ParagraphStyle(
+            'PairLabelCell', fontName='Helvetica-Bold', fontSize=9,
+            leading=11, textColor=colors.HexColor('#333333'),
+        )
+        value_style = ParagraphStyle(
+            'PairValueCell', fontName='Helvetica', fontSize=9, leading=11,
+        )
+        rows = [
+            [Paragraph(str(label), label_style),
+             Paragraph(str(value) if value not in (None, "") else "-", value_style)]
+            for label, value in pairs
+        ]
+        table = Table(rows, colWidths=[2.5*inch, 4*inch])
+        table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.white, colors.HexColor('#F8F9FA')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.75, colors.HexColor('#DDDDDD')),
+        ]))
+        story.append(table)
+
+    def _render_test_data_by_template(self, sections, test_data, visibility_data, story, heading_style, subheading_style, normal_style):
+        """Schema-driven Test Data render - walks the template's own
+        sections/fields top to bottom (mirrors routers/testing.py's
+        preview_test_result HTML version) and pulls each value from
+        test_data by key. This is the ordering fix: test_data is a JSONB
+        column, and Postgres does not preserve object key insertion order,
+        so the only reliable way to render in the order the tester actually
+        saw is to walk the template schema rather than test_data.items().
+
+        visibility_data is test_data plus a voltage_ratio fallback sourced
+        from the Equipment register - used only to evaluate each section's
+        visibility_rule, so a section the tester never saw (e.g. "66 kV
+        Bushing Details" on a 400kV-family transformer) doesn't print here
+        either."""
+        from services.visibility_rule import is_section_visible
+
+        for section in sections:
+            fields = section.get("fields", [])
+            if not fields:
+                continue
+            if not is_section_visible(section, visibility_data):
+                continue
+
+            story.append(Paragraph(section.get("title", ""), subheading_style))
+            pending_pairs = []
+
+            for field in fields:
+                field_key = field.get("key", "")
+                field_type = field.get("type", "text")
+                field_label = field.get("label") or field_key
+                field_value = test_data.get(field_key)
+
+                if field_type == "table":
+                    if pending_pairs:
+                        self._render_labeled_pairs(pending_pairs, story)
+                        story.append(Spacer(1, 0.1*inch))
+                        pending_pairs = []
+                    if isinstance(field_value, list) and field_value:
+                        # Skip the field-label heading when it's identical to
+                        # the section title right above it (e.g. a
+                        # "{tier} kV Bushing Details" section whose sole
+                        # field is also labelled "{tier} kV Bushing Details")
+                        # - printing it twice is just noise.
+                        if field_label != section.get("title", ""):
+                            story.append(Paragraph(field_label, normal_style))
+                        self._render_table_by_columns(field.get("columns", []), field_value, story)
+                        story.append(Spacer(1, 0.15*inch))
+                    continue
+
+                if field_type == "toggle":
+                    display = "Yes" if field_value else "No"
+                elif field_value in (None, ""):
+                    display = "-"
+                else:
+                    unit = field.get("unit")
+                    display = f"{field_value} {unit}" if unit else str(field_value)
+                pending_pairs.append((field_label, display))
+
+            if pending_pairs:
+                self._render_labeled_pairs(pending_pairs, story)
+            story.append(Spacer(1, 0.15*inch))
+
     def _render_two_column_layout(self, data_dict, story):
         """Render simple key-value pairs in two columns"""
+        label_style = ParagraphStyle(
+            'TwoColLabelCell', fontName='Helvetica-Bold', fontSize=9,
+            leading=11, textColor=colors.HexColor('#333333'),
+        )
+        value_style = ParagraphStyle(
+            'TwoColValueCell', fontName='Helvetica', fontSize=9, leading=11,
+        )
+
         rows = []
         for key, value in data_dict.items():
             field_name = ' '.join(word.capitalize() for word in key.split('_'))
             formatted_value = str(value) if value is not None else '-'
-            rows.append([field_name, formatted_value])
+            rows.append([Paragraph(field_name, label_style), Paragraph(formatted_value, value_style)])
 
         table = Table(rows, colWidths=[2.5*inch, 4*inch])
         table.setStyle(TableStyle([
-            # Field names (left column)
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
 
             # Alternating row colors
@@ -572,6 +736,24 @@ class TestResultPDFService:
         if result.tested_by:
             tester = self.db.query(User).filter(User.id == result.tested_by).first()
 
+        # Template definition — lets "Test Data" below render section-by-
+        # section in the template's own top-to-bottom order (same lookup the
+        # HTML preview uses, see routers/testing.py preview_test_result).
+        # JSONB does not preserve object key insertion order, so walking the
+        # template schema is the only reliable way to get correct ordering
+        # from a DB-round-tripped test_data dict.
+        template_sections = None
+        if result.template_key:
+            try:
+                from services.org_test_template_service import OrgTestTemplateService
+                org_template = OrgTestTemplateService(self.db).get_by_template_key(
+                    result.template_key, respect_active=False
+                )
+                if org_template and org_template.template_data:
+                    template_sections = org_template.template_data.get("sections")
+            except Exception:
+                pass  # fall back to the unordered generic renderer below
+
         # Create PDF buffer
         buffer = BytesIO()
         doc = SimpleDocTemplate(
@@ -848,7 +1030,24 @@ class TestResultPDFService:
             }
             test_data = {k: v for k, v in test_data.items() if k not in _dup_keys}
 
-        if test_data:
+        # Data used specifically to evaluate visibility_rule (e.g.
+        # voltage_ratio -> equipment.voltage_class). Falls back to the live
+        # Equipment register when voltage_ratio itself was never saved into
+        # test_data (e.g. a template with no visible field for it) - the
+        # register is always available and is what context_bindings pulled
+        # from in the first place.
+        visibility_data = dict(test_data)
+        if eq and "voltage_ratio" not in visibility_data and eq.voltage_class:
+            visibility_data["voltage_ratio"] = eq.voltage_class
+
+        if test_data and template_sections:
+            self._render_test_data_by_template(
+                template_sections, test_data, visibility_data, story, heading_style, subheading_style, normal_style
+            )
+        elif test_data:
+            # No template found (e.g. legacy/orphaned template_key) - fall
+            # back to the unordered generic renderer rather than showing
+            # nothing.
             self._render_test_data_structure(test_data, story, heading_style, subheading_style, normal_style)
         else:
             story.append(Paragraph("No test data available.", normal_style))

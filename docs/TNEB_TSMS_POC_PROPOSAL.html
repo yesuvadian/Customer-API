@@ -1,0 +1,468 @@
+<title>TNEB Substation Pilot</title>
+<style>
+  :root{
+    --bg:#F3F5F7;
+    --surface:#FFFFFF;
+    --surface-2:#F8FAFA;
+    --ink:#0D1C27;
+    --ink-soft:#4E6070;
+    --ink-faint:#7C8B94;
+    --line:#CDD5DA;
+    --line-strong:#AAB7BF;
+    --heading:#0B1D2E;
+    --teal:#0D6E6E;
+    --teal-soft:#E0EEEE;
+    --amber:#B0701F;
+    --amber-soft:#FAF0DC;
+    --rust:#8B3A2E;
+    --rust-soft:#F5E8E5;
+    --brand:#122840;
+    --brand-deep:#0B1D2E;
+    --brand-ink:#FFFFFF;
+    --shadow:0 1px 2px rgba(11,29,46,0.06), 0 10px 26px -18px rgba(11,29,46,0.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Segoe UI", Calibri, Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size:14px;
+    line-height:1.42;
+  }
+  .sheet{ max-width:1200px; margin:0 auto; padding:28px 24px 48px; }
+  h1,h2,h3{ font-family:"Archivo Narrow","Roboto Condensed","Arial Narrow",sans-serif; margin:0; text-wrap:balance; }
+  .mono{ font-family: ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace; font-variant-numeric:tabular-nums; }
+
+  /* ---------- HEADER ---------- */
+  .header{
+    display:grid; grid-template-columns: 1.15fr 1fr;
+    gap:18px; align-items:stretch;
+    border-bottom:2px solid var(--brand);
+    padding-bottom:16px; margin-bottom:26px;
+  }
+  .header-left{ display:flex; flex-direction:column; justify-content:center; }
+  .eyebrow{
+    font-family:ui-monospace,Consolas,monospace;
+    font-size:11px; letter-spacing:0.18em; color:var(--teal);
+    text-transform:uppercase; font-weight:700; margin-bottom:6px;
+  }
+  .title{
+    font-size:clamp(21px,2.6vw,28px); font-weight:700; color:var(--heading);
+    text-transform:uppercase; line-height:1.14; letter-spacing:0.01em;
+  }
+  .tagline{ font-size:14px; font-weight:700; color:var(--amber); letter-spacing:0.03em; margin-top:6px; }
+  .subtitle{ font-size:14.5px; color:var(--ink-soft); margin-top:8px; font-style:italic; max-width:52ch; }
+  .meta-line{ margin-top:12px; font-size:11.5px; color:var(--ink-soft); display:flex; flex-wrap:wrap; gap:6px 18px; }
+  .meta-line b{ color:var(--ink); font-weight:700; }
+
+  .dash{
+    background:var(--brand-deep); color:#E8F0F2;
+    border-radius:6px; padding:14px 16px;
+    display:flex; flex-direction:column; justify-content:space-between;
+    box-shadow:var(--shadow);
+  }
+  .dash-top{ display:flex; justify-content:space-between; align-items:baseline; }
+  .dash-title{ font-size:11.5px; letter-spacing:0.06em; color:#8FCFC7; font-family:ui-monospace,Consolas,monospace; text-transform:uppercase; }
+  .dash-live{ font-size:10px; color:#E3A257; font-family:ui-monospace,Consolas,monospace; letter-spacing:0.04em; }
+  .dash-live::before{ content:"● "; }
+  .dash-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(85px,1fr)); gap:8px; margin-top:12px; }
+  .dash-tile{ background:rgba(255,255,255,0.07); border-radius:4px; padding:8px 9px; }
+  .dash-tile .k{ font-size:9.5px; color:#8EB0BE; text-transform:uppercase; letter-spacing:0.03em; }
+  .dash-tile .v{ font-size:16px; font-weight:700; font-family:ui-monospace,Consolas,monospace; margin-top:3px; }
+  .dash-tile .v.amber{ color:#E3A257; }
+  .dash-tile .v.teal{ color:#7DD4CC; }
+  .dash-tile .v.red{ color:#F08080; }
+  .dash-stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(78px,1fr)); gap:8px; margin-top:12px; font-family:ui-monospace,Consolas,monospace; font-size:9.5px; color:#A8C0CA; text-align:center; }
+  .dash-stats span{ display:flex; flex-direction:column; align-items:center; }
+  .dash-stats b{ color:#E8F0F2; font-size:12.5px; margin-top:2px; }
+  .dash-foot{ display:flex; justify-content:space-between; gap:10px; font-size:10px; color:#7A9AAA; margin-top:12px; font-family:ui-monospace,Consolas,monospace; flex-wrap:wrap; }
+
+  /* ---------- PANEL ---------- */
+  .panel{
+    background:var(--surface); border:1px solid var(--line-strong); border-radius:8px;
+    padding:16px 18px; display:flex; flex-direction:column; box-shadow:var(--shadow);
+  }
+  .panel-num{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:26px; height:26px; border-radius:4px;
+    background:var(--brand); color:var(--brand-ink); font-weight:700; font-size:13px;
+    font-family:ui-monospace,Consolas,monospace; margin-right:11px; flex:none;
+  }
+  .panel-head{ display:flex; align-items:center; margin-bottom:12px; }
+  .panel-head h2{ font-size:16.5px; text-transform:uppercase; letter-spacing:0.02em; color:var(--heading); }
+  .panel-sub{ font-size:11.5px; color:var(--ink-faint); margin-top:2px; }
+
+  .row2, .row3{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; margin-top:16px; }
+  .row3 .panel:first-child{ grid-column:span 1; }
+
+  /* tier table */
+  .tier-table{ width:100%; border-collapse:collapse; margin-top:8px; font-size:12px; }
+  .tier-table th{ text-align:left; background:var(--brand); color:var(--brand-ink); padding:6px 8px; font-size:10.5px; text-transform:uppercase; letter-spacing:0.02em; font-weight:700; }
+  .tier-table td{ padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.32; color:var(--ink-soft); }
+  .tier-table tr:last-child td{ background:var(--rust-soft); color:var(--ink); }
+  .tier-table td.n{ font-family:ui-monospace,Consolas,monospace; font-weight:700; color:var(--brand); }
+  .tier-table td.stat{ font-weight:700; color:var(--ink); }
+
+  .why-list{ margin-top:10px; font-size:12px; color:var(--ink-soft); }
+  .why-list div{ margin-bottom:5px; padding-left:14px; position:relative; line-height:1.36; }
+  .why-list div::before{ content:"—"; position:absolute; left:0; color:var(--ink-faint); }
+
+  .callout{ margin-top:12px; background:var(--teal-soft); border-left:3px solid var(--teal); padding:9px 12px; font-size:12px; color:var(--heading); font-style:italic; border-radius:0 4px 4px 0; }
+
+  /* stack diagram */
+  .stack{ display:flex; flex-direction:column; gap:3px; margin-top:6px; }
+  .stack-layer{ width:100%; text-align:center; border-radius:4px; padding:7px 10px; font-size:11.5px; font-weight:700; line-height:1.28; }
+  .stack-layer.add{ background:var(--teal-soft); border:1px solid var(--teal); color:var(--heading); }
+  .stack-layer.add.adapter{ background:var(--teal); color:#fff; border-color:var(--teal); }
+  .stack-arrow{ text-align:center; color:var(--amber); font-size:13px; font-weight:700; line-height:1; margin:-1px 0; }
+  .stack-base{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:6px; }
+  .stack-base .stack-layer{ background:var(--surface-2); border:1px solid var(--line); color:var(--ink-faint); font-size:10.5px; font-weight:600; }
+  .layered-caption{ margin-top:6px; font-size:10.5px; color:var(--ink-faint); font-style:italic; text-align:center; }
+
+  .calc{ margin-top:12px; background:var(--amber-soft); border:1px solid var(--amber); border-radius:4px; padding:9px 12px; font-size:12px; }
+  .calc .lead{ font-weight:700; color:var(--heading); }
+  .calc-row{ display:flex; justify-content:space-between; margin-top:4px; font-family:ui-monospace,Consolas,monospace; color:var(--ink-soft); }
+  .calc-row b{ color:var(--rust); }
+  .calc-row:last-child span, .calc-row:last-child b{ color:var(--rust); font-weight:700; }
+
+  .benefit-list{ list-style:none; margin-top:6px; padding:0; }
+  .benefit-list li{ padding:8px 0 8px 20px; border-bottom:1px dotted var(--line); font-size:12.5px; position:relative; color:var(--ink-soft); }
+  .benefit-list li:last-child{ border-bottom:none; }
+  .benefit-list li::before{ content:"▸"; position:absolute; left:0; color:var(--amber); font-weight:700; }
+  .benefit-list b{ color:var(--heading); }
+
+  /* equipment chips */
+  .equip-row{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+  .equip-chip{ font-family:ui-monospace,Consolas,monospace; font-size:10.5px; font-weight:700; background:var(--amber-soft); color:var(--amber); border:1px solid color-mix(in srgb, var(--amber) 40%, transparent); border-radius:4px; padding:3px 8px; }
+
+  /* scope checklist */
+  .scope-full{ list-style:none; margin:8px 0 0; padding:0; columns:2; column-gap:20px; }
+  .scope-full li{ font-size:12px; padding:5px 0 5px 18px; position:relative; line-height:1.34; break-inside:avoid; color:var(--ink-soft); }
+  .scope-full li::before{ content:"✓"; position:absolute; left:0; color:var(--teal); font-weight:700; font-size:11.5px; }
+
+  /* site guideline list */
+  .site-list{ list-style:none; margin-top:6px; padding:0; }
+  .site-list li{ font-size:12px; padding:7px 0 7px 16px; position:relative; border-bottom:1px dotted var(--line); line-height:1.36; color:var(--ink-soft); }
+  .site-list li::before{ content:"◆"; position:absolute; left:0; top:9px; color:var(--amber); font-size:8px; }
+  .site-list li:last-child{ border-bottom:none; }
+
+  /* success criteria numbered */
+  .crit-list{ list-style:none; margin-top:6px; padding:0; counter-reset:crit; }
+  .crit-list li{ font-size:12px; padding:7px 0 7px 20px; position:relative; border-bottom:1px dotted var(--line); color:var(--ink-soft); line-height:1.34; }
+  .crit-list li::before{ content:counter(crit) "."; counter-increment:crit; position:absolute; left:0; color:var(--brand); font-weight:700; font-family:ui-monospace,Consolas,monospace; font-size:11.5px; }
+  .crit-list li:last-child{ border-bottom:none; }
+
+  /* info table */
+  .panel-wide{ margin-top:16px; }
+  .table-wrap{ overflow-x:auto; }
+  .info-table{ width:100%; border-collapse:collapse; margin-top:8px; font-size:11.5px; }
+  .info-table th{ background:var(--brand-deep); color:var(--brand-ink); text-align:left; padding:7px 10px; font-size:10px; text-transform:uppercase; letter-spacing:0.02em; white-space:nowrap; }
+  .info-table td{ padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.32; color:var(--ink-soft); }
+  .info-table tr:nth-child(even) td{ background:var(--surface-2); }
+  .info-table td.cat{ font-weight:700; color:var(--heading); white-space:nowrap; }
+  .disc-note{ margin-top:10px; font-size:11px; color:var(--ink-faint); font-style:italic; }
+  .disc-note b{ color:var(--rust); font-style:normal; }
+
+  .footer{ display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; border-top:1px solid var(--line-strong); padding-top:12px; margin-top:28px; font-size:11px; color:var(--ink-faint); }
+  .footer b{ color:var(--heading); }
+
+  /* ---------- UTILITY NAME INPUT ---------- */
+  .uname-box{
+    position:fixed; top:12px; right:12px; z-index:999;
+    background:var(--surface); border:1.5px solid var(--brand); border-radius:8px;
+    padding:8px 10px; box-shadow:var(--shadow);
+    display:flex; align-items:center; gap:8px;
+    font-family:"Segoe UI",Arial,sans-serif;
+  }
+  .uname-box label{ font-size:11.5px; font-weight:700; color:var(--heading); white-space:nowrap; }
+  .uname-box input{
+    font-size:12.5px; padding:5px 7px; border:1px solid var(--line-strong); border-radius:5px;
+    min-width:150px; font-family:"Segoe UI",Arial,sans-serif; color:var(--ink); background:var(--bg);
+  }
+  .uname-box input:focus{ outline:2px solid var(--teal); border-color:var(--teal); }
+  .uname-box button{
+    font-size:12px; font-weight:700; padding:7px 12px; border:none; border-radius:5px;
+    background:var(--teal); color:#fff; cursor:pointer; font-family:"Segoe UI",Arial,sans-serif;
+    white-space:nowrap;
+  }
+  .uname-box button:hover{ filter:brightness(0.92); }
+  @page{ size:420mm 297mm; margin:10mm; }
+
+  @media print{
+    * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .uname-box{ display:none !important; }
+
+    html, body{ width:400mm; font-size:8.6pt; line-height:1.32; }
+    .sheet{
+      max-width:none; width:400mm; margin:0; padding:0;
+      display:grid;
+      grid-template-rows: 40mm 96mm 76mm 52mm auto;
+      row-gap:2mm;
+    }
+
+    .header{ grid-template-columns:1fr 130mm; column-gap:6mm; padding-bottom:1.2mm; margin-bottom:0; min-height:0; overflow:hidden; }
+    .eyebrow{ font-size:7.6pt; margin-bottom:1.4mm; }
+    .title{ font-size:15.5pt; line-height:1.15; }
+    .tagline{ font-size:10.4pt; margin-top:0.8mm; }
+    .subtitle{ font-size:11pt; margin-top:1.3mm; max-width:none; }
+    .meta-line{ font-size:7.6pt; margin-top:2mm; gap:2mm 6mm; }
+
+    .dash{ padding:3mm 4mm; border-radius:2px; }
+    .dash-title{ font-size:8pt; }
+    .dash-live{ font-size:6.6pt; }
+    .dash-grid{ gap:1.8mm; margin-top:1.4mm; }
+    .dash-tile{ padding:1.3mm 1.6mm; border-radius:2px; }
+    .dash-tile .k{ font-size:6pt; }
+    .dash-tile .v{ font-size:9.6pt; margin-top:0.3mm; }
+    .dash-stats{ gap:1.4mm; margin-top:1.4mm; font-size:6pt; }
+    .dash-stats b{ font-size:7.4pt; margin-top:0.3mm; }
+    .dash-foot{ font-size:6.2pt; margin-top:1.2mm; gap:2mm; }
+
+    .row2, .row3{ grid-template-columns:repeat(3,1fr); gap:3.2mm; margin-top:0; height:100%; min-height:0; overflow:hidden; }
+    .panel{ padding:3.2mm 4mm; border-radius:2px; height:100%; min-height:0; overflow:hidden; box-shadow:none; }
+    .panel-num{ width:5.6mm; height:5.6mm; font-size:8.4pt; margin-right:2.2mm; border-radius:1px; }
+    .panel-head{ margin-bottom:1.6mm; }
+    .panel-head h2{ font-size:11.5pt; }
+    .panel-sub{ font-size:7.4pt; margin-top:0.4mm; }
+
+    .tier-table{ font-size:7.6pt; margin-top:1.6mm; }
+    .tier-table th{ font-size:6.9pt; padding:1.4mm 1.8mm; }
+    .tier-table td{ padding:1.3mm 1.8mm; line-height:1.2; }
+    .why-list{ font-size:7.3pt; margin-top:1.2mm; }
+    .why-list div{ margin-bottom:0.5mm; line-height:1.24; }
+    .callout{ font-size:7.4pt; padding:1.6mm 2.4mm; margin-top:1.8mm; border-radius:0 2px 2px 0; }
+
+    .stack{ gap:0.5mm; margin-top:0.4mm; }
+    .stack-layer{ font-size:7pt; padding:0.9mm 1.6mm; line-height:1.2; border-radius:2px; }
+    .stack-arrow{ font-size:9pt; margin:-0.3mm 0; }
+    .stack-base{ gap:1.4mm; }
+    .stack-base .stack-layer{ font-size:6.6pt; }
+    .layered-caption{ font-size:6.7pt; margin-top:0.6mm; }
+    .calc{ font-size:7.3pt; padding:1.1mm 2.4mm; margin-top:1.2mm; border-radius:2px; }
+    .calc-row{ margin-top:0.3mm; }
+
+    .benefit-list li{ font-size:7.6pt; padding:1.5mm 0; }
+
+    .scope-full{ column-gap:8mm; margin-top:0.9mm; }
+    .scope-full li{ font-size:7.6pt; padding:0.9mm 0 0.9mm 4.4mm; line-height:1.28; }
+
+    .site-list{ margin-top:0.5mm; }
+    .site-list li{ font-size:7.3pt; padding:1.15mm 0 1.15mm 4mm; line-height:1.28; }
+
+    .crit-list{ margin-top:0.5mm; }
+    .crit-list li{ font-size:7.3pt; padding:1.15mm 0 1.15mm 4mm; }
+
+    .panel-wide{ margin-top:0; padding:2mm 4mm 1.6mm 4mm; }
+    .table-wrap{ overflow:visible; }
+    .info-table{ font-size:7.1pt; margin-top:1.2mm; table-layout:fixed; }
+    .info-table th{ font-size:6.8pt; padding:1.3mm 2mm; }
+    .info-table td{ padding:0.9mm 2mm; line-height:1.2; }
+    .disc-note{ font-size:6.8pt; margin-top:1.2mm; }
+
+    .footer{ font-size:6.8pt; padding-top:1.6mm; margin-top:0; }
+  }
+
+  @media (max-width:760px){
+    .header{ grid-template-columns:1fr; }
+    .scope-full{ columns:1; }
+    .uname-box{ position:static; margin-bottom:14px; width:100%; flex-wrap:wrap; }
+  }
+</style>
+
+<div class="uname-box">
+  <label for="unameInput">Utility Name:</label>
+  <input type="text" id="unameInput" placeholder="e.g. TNEB, KPTCL" autocomplete="off">
+  <button id="savePdfBtn" type="button">⬇ Save as PDF</button>
+</div>
+
+<div class="sheet">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="eyebrow">CogniWatt · TSMS Programme — Proof of Concept Proposal</div>
+      <div class="title">Transmission Substation Maintenance Software (TSMS AI)</div>
+      <div class="tagline">Single-Substation Pilot for <span class="uname">TNEB</span></div>
+      <div class="subtitle">From equipment register to approved remedial action — one platform covering every substation, equipment class and testing role.</div>
+      <div class="meta-line">
+        <span>Prepared for: <b><span class="uname">TNEB</span></b></span>
+        <span>Site: <b>1 substation, CT/PT/Power Transformer/LA fleet already in service</b></span>
+        <span>Basis: <b>Digital test records, not paper registers</b></span>
+      </div>
+    </div>
+    <div class="dash">
+      <div class="dash-top">
+        <span class="dash-title">AE Dashboard — TSMS Pilot</span>
+        <span class="dash-live">TEMPLATES: LIVE</span>
+      </div>
+      <div class="dash-grid">
+        <div class="dash-tile"><div class="k">Equip. types</div><div class="v teal">4</div></div>
+        <div class="dash-tile"><div class="k">CT/PT/LA ready</div><div class="v teal">100%</div></div>
+        <div class="dash-tile"><div class="k">Power TX ready</div><div class="v amber">93%</div></div>
+        <div class="dash-tile"><div class="k">Tests due (mo.)</div><div class="v amber">18</div></div>
+        <div class="dash-tile"><div class="k">Overdue</div><div class="v red">2</div></div>
+      </div>
+      <div class="dash-stats">
+        <span>Pilot substations <b>1</b></span>
+        <span>Platform equipment <b>825</b></span>
+        <span>Platform results <b>650+</b></span>
+        <span>Avg turnaround <b>3.4d</b></span>
+        <span>Orgs live on TSMS <b>8</b></span>
+      </div>
+      <div class="dash-foot"><span>Equipment history + auto pass/fail + governed reports — one platform</span><span>Illustrative target screen</span></div>
+    </div>
+  </div>
+
+  <!-- ROW 2 : 01 / 02 / 03 -->
+  <div class="row2">
+
+    <div class="panel">
+      <div class="panel-head"><span class="panel-num">01</span><div><h2>The Problem</h2><div class="panel-sub">Four operational gaps that keep substation maintenance reactive, not proactive</div></div></div>
+      <table class="tier-table">
+        <tr><th>#</th><th>Challenge</th><th>Consequence for <span class="uname">TNEB</span></th></tr>
+        <tr><td class="n">1</td><td class="stat">Fragmented records</td><td>Equipment data scattered across registers, Excel sheets, and paper logs — no single source of truth for any substation</td></tr>
+        <tr><td class="n">2</td><td class="stat">Reactive maintenance</td><td>Failures discovered only when equipment breaks down, causing unplanned outages and expensive emergency repairs</td></tr>
+        <tr><td class="n">3</td><td class="stat">No test scheduling</td><td>Healthiness tests missed or delayed — no automated reminders, no escalation chain, no compliance audit trail</td></tr>
+        <tr><td class="n">4</td><td class="stat">No performance insight</td><td>Vendor quality, repairer performance, and failure patterns invisible — every procurement decision made without data</td></tr>
+      </table>
+      <div class="callout">Result: rising maintenance costs, unexpected transformer failures, and no data foundation for grid optimisation.</div>
+      <div class="why-list">
+        <div>Equipment test history lives in paper registers — not searchable, not trended, not linked to the equipment record</div>
+        <div>Compliance calculated manually — no real-time overdue visibility per section, circle or zone</div>
+        <div>ALERT/CRITICAL classification relies on tester judgement, not configurable thresholds applied consistently</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span class="panel-num">02</span><div><h2>How TSMS AI Addresses It</h2><div class="panel-sub">One equipment register, feeding every test, compliance view and dashboard</div></div></div>
+      <div class="stack">
+        <div class="stack-layer add">Role-Based Dashboards (AE → CEE), Approval Workflows &amp; Reporting</div>
+        <div class="stack-arrow">▲</div>
+        <div class="stack-layer add">Compliance &amp; Alert Engine — NORMAL / ALERT / CRITICAL classification, escalation, notifications</div>
+        <div class="stack-arrow">▲</div>
+        <div class="stack-layer add">Testing Lifecycle Engine — request, assign, multi-session execution, result evaluation &amp; recommendation</div>
+        <div class="stack-arrow">▲</div>
+        <div class="stack-layer add adapter">TSMS Data Layer — Equipment register (UEIC), test types, schedule templates, org structure, user roles</div>
+        <div class="stack-arrow">▲</div>
+        <div class="stack-base">
+          <div class="stack-layer">Paper Registers / Existing Asset Records</div>
+          <div class="stack-layer">Org Hierarchy (Zone / Circle / Section)</div>
+          <div class="stack-layer">Role Assignments (AE → CEE)</div>
+        </div>
+      </div>
+      <div class="layered-caption">All existing records and org structure feed one validated equipment register — no re-entry, no parallel spreadsheets</div>
+      <div class="calc">
+        <span class="lead">Core TSMS evaluation — auto-classified result, not manual judgement</span>
+        <div class="calc-row"><span>Measured IR value (transformer, 11 kV)</span><span>850 MΩ</span></div>
+        <div class="calc-row"><span>Baseline from previous test</span><span>1,200 MΩ</span></div>
+        <div class="calc-row"><span>% change from baseline</span><span>−29.2%</span></div>
+        <div class="calc-row"><span>ALERT threshold (configurable)</span><span>−25%</span></div>
+        <div class="calc-row"><span>Classification — threshold-driven, audit-traceable</span><b>ALERT</b></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span class="panel-num">03</span><div><h2>Benefits</h2><div class="panel-sub">Why this is the right platform for every testing role</div></div></div>
+      <ul class="benefit-list">
+        <li><b>One equipment register (UEIC)</b> — every test, result and remedial action traces to a single tagged asset record</li>
+        <li><b>Role-aware dashboards for all 10 roles</b> — AE/JE to CEE, each scoped to their span of responsibility</li>
+        <li><b>Automated test scheduling</b> — configurable frequency templates with T+0 / T+7 / T+30 overdue escalation</li>
+        <li><b>Threshold-driven ALERT / CRITICAL</b> — consistent classification across all testers, per equipment class</li>
+        <li><b>AI failure predictions (Module 11)</b> — failure probability, anomaly detection, and interval recommendations; officer approval required</li>
+        <li><b>Maintenance-triggered procurement</b> — 7 triggers routed automatically to procurement bridge (Module 10)</li>
+        <li><b>SaaS on India-only data centres</b> — 99.5% uptime SLA, ISO 27001, annual CERT-In VAPT; no on-premise hardware</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ROW 3 : 04 / 05 / 06 -->
+  <div class="row3">
+
+    <div class="panel">
+      <div class="panel-head"><span class="panel-num">04</span><div><h2>POC Scope</h2><div class="panel-sub">In scope for the single-substation pilot</div></div></div>
+      <ul class="scope-full">
+        <li>Agree with <span class="uname">TNEB</span> on the most critical test types to digitise first, for each equipment type</li>
+        <li>Digital execution of the agreed CT/PT/Power Transformer/LA CM/PM procedures</li>
+        <li>Historical data import — last 1 year of prior test records (PDF/Excel) loaded as backfilled equipment history</li>
+        <li>Live application execution — testers run day-to-day tests directly in TSMS, not on paper</li>
+        <li>Equipment-linked test history for every unit at the site</li>
+        <li>Auto-computed pass/fail &amp; trend flags against standard thresholds</li>
+        <li>One governed report per test, generated on completion</li>
+        <li>Schedule visibility — due / overdue / completed, by equipment</li>
+        <li>Role-based workflow: tester → reviewer → close-out</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span class="panel-num">05</span><div><h2>Guidelines to Select the Site</h2><div class="panel-sub">What makes a strong first candidate substation</div></div></div>
+      <ul class="site-list">
+        <li>Full CT/PT/Power Transformer/LA fleet already in service — not a fresh commissioning</li>
+        <li>An existing routine testing programme, with a testing agency or crew already engaged</li>
+        <li>At least one full CM/PM cycle of history to digitise as a baseline reference</li>
+        <li>Site team able to share prior test records and the current testing schedule</li>
+        <li>Representative of <span class="uname">TNEB</span>'s wider substation fleet, for replicability</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span class="panel-num">06</span><div><h2>Success Criteria</h2><div class="panel-sub">The pilot is successful when <span class="uname">TNEB</span> can show —</div></div></div>
+      <ul class="crit-list">
+        <li>Agreed CT/PT/Power Transformer/LA test types executed digitally at the site</li>
+        <li>Last 1 year of prior test records imported and validated as each unit's equipment-history baseline</li>
+        <li>Testers running live, day-to-day tests directly in TSMS — not reverting to paper — by pilot close</li>
+        <li>Equipment-linked history live for 100% of in-scope units</li>
+        <li>Auto pass/fail flags matching engineers' manual judgement on trial tests</li>
+        <li>One-click report generation replacing manual drafting</li>
+        <li>Sign-off from the site testing team on day-to-day usability</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ROW 4 : 07 info needed -->
+  <div class="panel panel-wide">
+    <div class="panel-head"><span class="panel-num">07</span><div><h2>Information Needed from <span class="uname">TNEB</span></h2><div class="panel-sub">To bind every test to the right equipment, threshold set and review chain at the pilot site</div></div></div>
+    <div class="table-wrap">
+      <table class="info-table">
+        <tr><th style="width:16%">Category</th><th style="width:29%">Typical parameters</th><th style="width:27%">Discovery items (site-specific)</th><th>Why TSMS needs it</th></tr>
+        <tr><td class="cat">Equipment master data</td><td>CT/PT/Power Transformer/LA nameplate — ratio, insulation class, voltage rating, make, year of commissioning</td><td>Site equipment list with nameplate details, bay/feeder mapping</td><td>Bind every test to the right equipment &amp; threshold set</td></tr>
+        <tr><td class="cat">Testing organisation &amp; hierarchy</td><td><span class="uname">TNEB</span> department hierarchy for the site (zone / circle / division / section); testing agency or in-house crew; standard test formats currently used</td><td>Org chart mapping the identified substation to its zone/circle/section; names &amp; contacts of engineers/agencies who test this site</td><td>Configure users, roles, department-scoped access &amp; review workflow</td></tr>
+        <tr><td class="cat">Historical test records</td><td>Last 1 year of CM/PM reports for CT/PT/Power Transformer/LA at the site</td><td>Prior test sheets or reports, paper or Excel, from the last 1 year</td><td>Backfill equipment history &amp; validate thresholds</td></tr>
+        <tr><td class="cat">Testing schedule</td><td>Routine CM/PM periodicity currently followed</td><td>Current testing calendar / due dates for the site</td><td>Power due/overdue schedule tracking</td></tr>
+        <tr><td class="cat">Reporting format</td><td>Existing report templates, review &amp; sign-off process</td><td>Sample reports, approval chain, review cadence</td><td>Align TSMS report output with <span class="uname">TNEB</span>'s process</td></tr>
+      </table>
+    </div>
+    <div class="disc-note"><b>Note:</b> exact nameplate data, threshold documentation and prior-record formats at the selected site are treated as discovery items at kickoff, confirmed with <span class="uname">TNEB</span> before configuration begins.</div>
+  </div>
+
+  <div class="footer">
+    <span><b>CogniWatt</b> — TSMS Proof of Concept · Prepared for <span class="uname">TNEB</span></span>
+    <span>Confidential — for internal utility evaluation only</span>
+  </div>
+
+</div>
+
+<script>
+  (function(){
+    var DEFAULT_TEXT = 'TNEB';
+    var input = document.getElementById('unameInput');
+    var targets = document.querySelectorAll('.uname');
+
+    function applyName(name){
+      var text = (name && name.trim()) ? name.trim() : DEFAULT_TEXT;
+      targets.forEach(function(el){ el.textContent = text; });
+    }
+
+    try{
+      var saved = window.localStorage.getItem('tsms_utility_name');
+      if(saved){ input.value = saved; applyName(saved); }
+    }catch(e){}
+
+    input.addEventListener('input', function(){
+      applyName(input.value);
+      try{ window.localStorage.setItem('tsms_utility_name', input.value); }catch(e){}
+    });
+
+    document.getElementById('savePdfBtn').addEventListener('click', function(){ window.print(); });
+  })();
+</script>

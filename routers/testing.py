@@ -897,6 +897,7 @@ def preview_test_result(
     from sqlalchemy.orm import joinedload as _joinedload
     from services.org_test_template_service import OrgTestTemplateService
     from services.nameplate_helper import resolve_capacity, resolve_voltage_ratio
+    from services.visibility_rule import is_section_visible
 
     service = TestingService(db)
     result = db.query(TestResult).filter(TestResult.id == result_id).first()
@@ -924,6 +925,17 @@ def preview_test_result(
     test_data = result.test_data or {}
     overall_result = result.overall_result or "N/A"
     tested_at = result.tested_at.strftime("%d/%m/%Y %H:%M:%S") if result.tested_at else "N/A"
+
+    # Data used specifically to evaluate visibility_rule (e.g. voltage_ratio
+    # -> equipment.voltage_class). Prefer whatever's actually saved in
+    # test_data (a template may bind other fields too), but fall back to the
+    # live Equipment register for the common case where voltage_ratio itself
+    # was never captured (e.g. a template with no visible field for it, or
+    # an older submission) - the register is always available and is the
+    # authoritative source context_bindings pulled from anyway.
+    visibility_data = dict(test_data)
+    if _eq and "voltage_ratio" not in visibility_data and _eq.voltage_class:
+        visibility_data["voltage_ratio"] = _eq.voltage_class
 
     # Determine result badge color
     badge_color = "#4CAF50" if overall_result.lower() in ["pass", "ok"] else \
@@ -1047,6 +1059,18 @@ def preview_test_result(
                 continue
 
             is_equipment_section = "equipment" in section_title.lower()
+
+            # Skip a section the tester never saw, evaluated directly
+            # against its visibility_rule (e.g. "66 kV Bushing Details" on a
+            # 400kV-family transformer). Falls back to "does this section
+            # have any data at all" only when the rule's field is missing
+            # from this particular saved result (e.g. an older submission
+            # that never captured voltage_ratio). Equipment Details is
+            # exempt - it always shows UEIC/Voltage Ratio from the register
+            # below, even when the template's own fields are blank.
+            if not is_equipment_section and not is_section_visible(section, visibility_data):
+                continue
+
             if is_equipment_section:
                 _equipment_section_merged = True
 
@@ -1085,9 +1109,14 @@ def preview_test_result(
                         display_value += f" {unit}"
 
                 field_class = "field field-table" if field_type == "table" else "field"
+                # Skip the field's own label when it's identical to the
+                # section title right above it (e.g. a "{tier} kV Bushing
+                # Details" section whose sole field is also labelled
+                # "{tier} kV Bushing Details") - printing it twice is noise.
+                label_html = "" if field_label == section_title else f"<label>{field_label}</label>"
                 fields_html += f'''
                 <div class="{field_class}">
-                    <label>{field_label}</label>
+                    {label_html}
                     <div class="value">{display_value}</div>
                 </div>
                 '''
@@ -1101,6 +1130,16 @@ def preview_test_result(
         fields_html += render_test_data_structure(test_data)
         fields_html += '</div>'
 
+    # Equipment Details / Testing Kit Used are built here (after the
+    # template-driven Test Data walk, for _equipment_section_merged to be
+    # known), but belong at the TOP of the report - matching the PDF, which
+    # always places them right after Testing Request Details. Built into
+    # separate strings and prepended below rather than appended, so the
+    # visual order matches regardless of where in the function they're
+    # computed.
+    _equipment_fallback_html = ""
+    _testing_kit_html = ""
+
     # No "Equipment Details" section existed to merge into (either there was
     # no template, or its sections don't include one) — add a dedicated one
     # from the register so the equipment is still identifiable in the report.
@@ -1109,7 +1148,7 @@ def preview_test_result(
         _station = _req_for_eq.department.name if _req_for_eq and _req_for_eq.department else "-"
         _capacity = resolve_capacity(_eq_nd, test_data)
         _voltage_ratio = resolve_voltage_ratio(_eq_nd, test_data, voltage_class=_eq.voltage_class)
-        fields_html += f'''
+        _equipment_fallback_html = f'''
         <div class="section">
             <h3>Equipment Details</h3>
             <div class="fields">
@@ -1131,7 +1170,7 @@ def preview_test_result(
         np = kit.nameplate_data or {}
         kit_type = np.get("kit_subtype") or kit.bay_number or (kit.equipment_type.name if kit.equipment_type else "Testing Kit")
         kit_loc = kit.department.name if kit.department else "-"
-        fields_html += f'''
+        _testing_kit_html = f'''
         <div class="section">
             <h3>Testing Kit Used</h3>
             <div class="fields">
@@ -1144,6 +1183,10 @@ def preview_test_result(
             </div>
         </div>
         '''
+
+    # Prepend both, in PDF order (Equipment Details, then Testing Kit Used),
+    # ahead of the template-driven Test Data walk.
+    fields_html = _equipment_fallback_html + _testing_kit_html + fields_html
 
     # Add remarks if present
     if result.remarks:
@@ -1635,3 +1678,106 @@ def generate_test_result_pdf(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
+
+
+# ── Per-testing-request import schema (download blank / upload filled) ────────
+# Scoped to ONE testing request's equipment, unlike the generic bulk-import
+# GET /data-import/schema (which has no equipment context yet and always
+# includes every voltage tier). Lets a tester fill the form offline in Excel
+# instead of typing directly into the UI, then upload it back for review.
+
+def _template_for_request(req: "TestingRequest") -> dict:
+    from test_templates import get_template_for_test_type
+    test_type_name = req.test_type.name if req.test_type else None
+    tpl = get_template_for_test_type(test_type_name) if test_type_name else None
+    if not tpl:
+        raise HTTPException(status_code=404, detail="No template found for this test type")
+    return tpl
+
+
+@router.get("/requests/{testing_request_id}/import-schema")
+def download_request_import_schema(
+    testing_request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Download a blank Excel import template scoped to this testing
+    request's equipment - only includes sections/tables applicable to its
+    voltage_ratio (via visibility_rule), e.g. a 400kV-family transformer
+    only gets 400/220/33kV sheets, not 66/11kV ones."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from sqlalchemy.orm import joinedload as _joinedload
+    from services.import_extractor_service import build_import_schema_workbook
+
+    req = (
+        db.query(TestingRequest)
+        .options(_joinedload(TestingRequest.test_type), _joinedload(TestingRequest.equipment))
+        .filter(TestingRequest.id == testing_request_id)
+        .first()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+
+    tpl = _template_for_request(req)
+
+    visibility_data = {}
+    if req.equipment and req.equipment.voltage_class:
+        visibility_data["voltage_ratio"] = req.equipment.voltage_class
+
+    wb = build_import_schema_workbook(tpl, visibility_data=visibility_data or None)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    safe_name = (req.request_number or str(testing_request_id))[:40].replace(" ", "_").replace("/", "-")
+    filename = f"import_schema_{safe_name}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/requests/{testing_request_id}/import-upload")
+async def upload_request_import(
+    testing_request_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Parse an uploaded filled-in import template (from the scoped
+    /import-schema download above) and return the parsed form_data for the
+    client to review/merge into the live Test Result form. Does NOT save
+    anything to the database - the tester still reviews the populated form
+    and hits Save Draft / Submit themselves, same as typing it in by hand."""
+    from sqlalchemy.orm import joinedload as _joinedload
+    from services.import_extractor_service import parse_structured_import_workbook
+
+    req = (
+        db.query(TestingRequest)
+        .options(_joinedload(TestingRequest.test_type))
+        .filter(TestingRequest.id == testing_request_id)
+        .first()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Testing request not found")
+
+    tpl = _template_for_request(req)
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    try:
+        form_data = parse_structured_import_workbook(file_bytes, tpl)
+    except ValueError as e:
+        # Raised deliberately for a recognisably wrong file (not this
+        # test's template, or not a valid .xlsx at all) - message is
+        # already tester-facing, pass it straight through.
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not parse uploaded file: {e}")
+
+    return {"form_data": form_data}
