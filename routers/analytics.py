@@ -1171,7 +1171,11 @@ def get_dashboard_equipment(
             return (0, _risk_order[ea.risk_level], score)
         return (1, 99, 999.0)
 
-    sorted_eq = sorted(all_eq, key=_sort_key, reverse=True)
+    # _sort_key already ranks worst-first in ascending order (0=tested before
+    # 1=untested; within tested, risk_order 0=Critical before 3=Low; lower
+    # score before higher) — reverse=True here would flip that to best-first,
+    # burying Critical equipment at the end of the list instead of the top.
+    sorted_eq = sorted(all_eq, key=_sort_key)
     total = len(sorted_eq)
     start = (page - 1) * page_size
     page_eq = sorted_eq[start: start + page_size]
