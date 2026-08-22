@@ -1666,6 +1666,14 @@ def seed_modules(session):
  "path": "ai-graph-dashboard",
  "group_name": "Condition Monitoring",
  "is_menu": True},
+# ✅ AI-ASSISTED COMPARISON VIEW MODULE
+{"name": "AI-Assisted Comparison View",
+ "description": "Multi-test-type comparison dashboard for any equipment type — "
+                "compare its test types side by side, sliced by department and "
+                "year range, with each test type's counts always kept separate.",
+ "path": "comparison-view",
+ "group_name": "Condition Monitoring",
+ "is_menu": True},
 # ✅ CONFIGURABLE TEST-REQUEST WORKFLOW ENGINE (tr_wf_*) MODULES
 {"name": "CM Test Request Approval",
  "rename_from": "TR Approval Queue",
@@ -3495,6 +3503,7 @@ def seed_role_templates(session):
     procurement_approvals_module = [mid for mid in [modules_by_name.get("Procurement Approvals")] if mid]
     taqc_inspections_module      = [mid for mid in [modules_by_name.get("Annual Inspection & Audit Request")] if mid]
     failure_registry_module      = [mid for mid in [modules_by_name.get("Failure Registry")] if mid]
+    comparison_view_module   = [mid for mid in [modules_by_name.get("AI-Assisted Comparison View")] if mid]
 
     dashboard_module = [mid for mid in [modules_by_name.get("Dashboard")] if mid]
 
@@ -3550,6 +3559,7 @@ def seed_role_templates(session):
             "auto_provision": True,
             "permissions_template": (
                 _full(org_modules) +
+                _full(comparison_view_module) +
                 _approve(approvals_module) +
                 _approve(testing_request_approvals_module)
             ),
@@ -12665,6 +12675,16 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] AI Graph Dashboard module seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── AI-Assisted Comparison View module + role privileges ──────────────
+        print("\n--- AI-Assisted Comparison View Module (seed_comparison_view_module) ---")
+        try:
+            from seed_comparison_view_module import seed_comparison_view_module
+            seed_comparison_view_module()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] AI-Assisted Comparison View module seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
         print("\n" + "=" * 80)

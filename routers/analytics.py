@@ -494,12 +494,36 @@ def get_analytics_dashboard(
     org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
     dept_ids = _collect_department_ids(department_id, db) if department_id else None
 
+    # Testing Kits are excluded from /asset-breakdown's equipment scope (they
+    # aren't real substation assets), but this endpoint's KPI scope had no
+    # matching exclusion — a Critical-risk Testing Kit inflated kpi_summary
+    # .critical while staying invisible in the by-Make/by-type breakdown,
+    # making the two endpoints' critical counts silently disagree (same
+    # class of bug the test-count fix below already addressed).
+    testkit_type_ids = {
+        c.id for c in db.query(CategoryMaster.id)
+        .filter(CategoryMaster.name.ilike("%testing kit%"))
+        .all()
+        if c.id
+    }
+    testkit_eq_ids: set = set()
+    if testkit_type_ids:
+        testkit_scope_q = db.query(Equipment.id).filter(
+            Equipment.equipment_type_id.in_(testkit_type_ids))
+        if org_id:
+            testkit_scope_q = testkit_scope_q.filter(Equipment.organization_id == org_id)
+        if dept_ids:
+            testkit_scope_q = testkit_scope_q.filter(Equipment.department_id.in_(dept_ids))
+        testkit_eq_ids = {row[0] for row in testkit_scope_q.all()}
+
     eq_query = db.query(EquipmentAnalytics)
     if org_id:
         eq_query = eq_query.filter(EquipmentAnalytics.organization_id == org_id)
     if dept_ids:
         eq_query = eq_query.filter(EquipmentAnalytics.department_id.in_(dept_ids))
-    all_ea: list[EquipmentAnalytics] = eq_query.all()
+    all_ea: list[EquipmentAnalytics] = [
+        ea for ea in eq_query.all() if ea.equipment_id not in testkit_eq_ids
+    ]
 
     # ── 2. KPI summary ───────────────────────────────────────────────────────
     ea_eq_ids = [ea.equipment_id for ea in all_ea if ea.equipment_id]
@@ -511,6 +535,8 @@ def get_analytics_dashboard(
         _scope_eq_q = _scope_eq_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
         _scope_eq_q = _scope_eq_q.filter(Equipment.department_id.in_(dept_ids))
+    if testkit_type_ids:
+        _scope_eq_q = _scope_eq_q.filter(~Equipment.equipment_type_id.in_(testkit_type_ids))
     all_scope_eq_ids: set = {row[0] for row in _scope_eq_q.all()}
     # Use scope IDs for all test queries so untested equipment is accounted for
     all_eq_ids = list(all_scope_eq_ids) if all_scope_eq_ids else ea_eq_ids
@@ -645,13 +671,54 @@ def get_analytics_dashboard(
     no_inspection_count  = len(all_scope_eq_ids - cat_tested.get("inspection", set()) - cat_tested.get("taqc_inspection", set()))
     no_repair_count      = len(all_scope_eq_ids - cat_tested.get("repair_lifecycle", set()))
 
-    risk_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Unknown": 0}
-    for ea in active_ea:
-        risk_counts[ea.risk_level or "Unknown"] = risk_counts.get(ea.risk_level or "Unknown", 0) + 1
+    # When a date filter is active, kpi_summary must classify each equipment
+    # by the test that actually falls in-range (a date-scoped TestAnalytics
+    # snapshot), not by its all-time EquipmentAnalytics.risk_level — an
+    # equipment last assessed Critical outside the selected range but tested
+    # Low/healthy inside it was otherwise still counted as Critical here,
+    # while /asset-breakdown (which already uses this date-scoped snapshot)
+    # correctly did not — the two endpoints' Critical counts silently
+    # disagreed. Mirrors /asset-breakdown's dated_ta_map construction exactly
+    # so both endpoints classify the same equipment the same way.
+    if date_from or date_to:
+        coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
+        dated_ta_q = (
+            db.query(TestAnalytics, coalesced.label("eff_date"))
+            .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
+            .filter(TestAnalytics.equipment_id.in_(active_eq_ids))
+        ) if active_eq_ids else None
+        if dated_ta_q is not None:
+            if date_from:
+                dated_ta_q = dated_ta_q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
+            if date_to:
+                dated_ta_q = dated_ta_q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+            _best: dict = {}
+            for ta, eff_date in dated_ta_q.all():
+                if eff_date is None:
+                    continue
+                cur = _best.get(ta.equipment_id)
+                if cur is None or eff_date > cur[1]:
+                    _best[ta.equipment_id] = (ta, eff_date)
+            dated_ta_map = {eq_id: pair[0] for eq_id, pair in _best.items()}
+        else:
+            dated_ta_map = {}
+        risk_sources = []
+        for eq_id in active_eq_ids:
+            src = dated_ta_map.get(eq_id)
+            if src is not None and src.health_score is None:
+                src = None
+            if src is not None:
+                risk_sources.append(src)
+    else:
+        risk_sources = active_ea
 
-    total = len(active_ea)
+    risk_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Unknown": 0}
+    for src in risk_sources:
+        risk_counts[src.risk_level or "Unknown"] = risk_counts.get(src.risk_level or "Unknown", 0) + 1
+
+    total = len(risk_sources)
     avg_score = round(
-        sum(float(ea.health_score) for ea in active_ea if ea.health_score is not None) / total, 1
+        sum(float(src.health_score) for src in risk_sources if src.health_score is not None) / total, 1
     ) if total else None
 
     # ── 3. Hierarchy node ───────────────────────────────────────────────────
