@@ -121,6 +121,7 @@ from routers import dashboard_role_kpi
 from routers import reporting as reporting_router
 # Analytics Engine
 from routers import analytics as analytics_router
+from routers import comparison_view as comparison_view_router  # AI-Assisted Comparison View
 from routers import ai_graph as ai_graph_router          # AI Graph Dashboard
 from routers import data_import as data_import_router  # Import Data module
 from routers import scada as scada_router               # SCADA Integration
@@ -1489,6 +1490,7 @@ app.include_router(dashboard_role_kpi.router)
 app.include_router(reporting_router.router)
 # Analytics Engine
 app.include_router(analytics_router.router)
+app.include_router(comparison_view_router.router)  # AI-Assisted Comparison View
 app.include_router(ai_graph_router.router)   # AI Graph Dashboard
 app.include_router(data_import_router.router)  # Import Data module
 app.include_router(scada_router.router)         # SCADA Integration
