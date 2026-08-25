@@ -559,7 +559,7 @@ def seed_tr_wf_workflow(session, org=None):
     # IDs from CategoryDetails where category_type='test':
     #   64  Capacitance & Tan Delta Test (Transformer)
     #   65  Capacitance & Tan Delta Comparison
-    #   70  Winding Tan-Delta & Capacitance Test
+    #   70  Winding Resistance Measurement
     #   71  220kV Bushing Tan-Delta Test
     #   72  66kV Bushing Tan-Delta Test
     #  136  Insulation Resistance (IR) Test

@@ -168,6 +168,41 @@
   .footer{ display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; border-top:1px solid var(--line-strong); padding-top:12px; margin-top:28px; font-size:11px; color:var(--ink-faint); }
   .footer b{ color:var(--heading); }
 
+  /* ---------- PAGE DIVIDER (screen only) ---------- */
+  .page-divider{ margin:44px 0 28px; padding-top:26px; border-top:2px dashed var(--line-strong); text-align:center; }
+  .page-divider span{ font-family:ui-monospace,Consolas,monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); background:var(--bg); padding:0 10px; }
+  @media print{ .page-divider{ display:none; } }
+
+  /* ---------- APPENDIX: MATRIX PAGE ---------- */
+  .matrix-header{ display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px; border-bottom:2px solid var(--brand); padding-bottom:16px; margin-bottom:20px; }
+  .matrix-header h1{ font-size:clamp(19px,2.2vw,24px); font-weight:700; color:var(--heading); text-transform:uppercase; letter-spacing:0.01em; margin-top:6px; }
+  .matrix-header .src{ font-size:11.5px; color:var(--ink-faint); font-style:italic; margin-top:6px; max-width:46ch; }
+  .matrix-summary{ display:flex; gap:8px; flex-wrap:wrap; }
+  .matrix-summary .stat{ background:var(--surface); border:1px solid var(--line-strong); border-radius:6px; padding:6px 12px; text-align:center; box-shadow:var(--shadow); }
+  .matrix-summary .stat .num{ font-family:ui-monospace,Consolas,monospace; font-size:16px; font-weight:700; color:var(--brand); }
+  .matrix-summary .stat .lbl{ font-size:9.5px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:0.03em; margin-top:1px; }
+
+  .matrix-body{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .matrix-col{ display:flex; flex-direction:column; gap:16px; }
+  .matrix-group{ background:var(--surface); border:1px solid var(--line-strong); border-radius:8px; padding:12px 14px; box-shadow:var(--shadow); }
+  .matrix-group-head{ display:flex; align-items:center; gap:8px; font-family:"Archivo Narrow","Roboto Condensed",sans-serif; font-size:13px; font-weight:700; color:var(--heading); text-transform:uppercase; letter-spacing:0.02em; margin-bottom:8px; }
+  .matrix-group-head .count{ font-family:ui-monospace,Consolas,monospace; font-size:11px; font-weight:700; color:var(--brand-ink); background:var(--brand); border-radius:4px; padding:2px 7px; }
+  .matrix-group-head .scope-flag{ margin-left:auto; font-family:ui-monospace,Consolas,monospace; font-size:9.5px; font-weight:700; text-transform:none; letter-spacing:0; color:var(--rust); background:var(--rust-soft); border-radius:4px; padding:2px 7px; }
+
+  .matrix-table{ width:100%; border-collapse:collapse; font-size:11.5px; }
+  .matrix-table th{ text-align:left; background:var(--surface-2); color:var(--ink-faint); padding:4px 6px; font-size:9.5px; text-transform:uppercase; letter-spacing:0.02em; border-bottom:1px solid var(--line-strong); }
+  .matrix-table td{ padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--ink-soft); }
+  .matrix-table tr:last-child td{ border-bottom:none; }
+  .matrix-table td.mx-n{ font-family:ui-monospace,Consolas,monospace; color:var(--ink-faint); width:18px; }
+  .mx-chip{ font-family:ui-monospace,Consolas,monospace; font-size:9.5px; font-weight:700; padding:1px 6px; border-radius:4px; white-space:nowrap; }
+  .mx-chip.cm{ background:var(--amber-soft); color:var(--amber); }
+  .mx-chip.pm{ background:var(--surface-2); color:var(--ink-faint); border:1px solid var(--line-strong); }
+  .mx-status{ font-family:"Archivo Narrow","Roboto Condensed",sans-serif; font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+  .mx-status.live{ background:var(--teal-soft); color:var(--teal); }
+  .mx-status.live::before{ content:"●"; font-size:7px; }
+  .mx-status.hold{ background:var(--rust-soft); color:var(--rust); }
+  .mx-status.hold::before{ content:"○"; font-size:7px; }
+
   /* ---------- UTILITY NAME INPUT ---------- */
   .uname-box{
     position:fixed; top:12px; right:12px; z-index:999;
@@ -195,11 +230,17 @@
     .uname-box{ display:none !important; }
 
     html, body{ width:400mm; font-size:8.6pt; line-height:1.32; }
-    .sheet{
-      max-width:none; width:400mm; margin:0; padding:0;
+    .sheet{ max-width:none; width:400mm; margin:0; padding:0; }
+    .sheet.page1{
       display:grid;
       grid-template-rows: 40mm 96mm 76mm 52mm auto;
       row-gap:2mm;
+      page-break-after:always;
+    }
+    .sheet.page2{
+      display:grid;
+      grid-template-rows: 28mm auto 8mm;
+      row-gap:3mm;
     }
 
     .header{ grid-template-columns:1fr 130mm; column-gap:6mm; padding-bottom:1.2mm; margin-bottom:0; min-height:0; overflow:hidden; }
@@ -262,6 +303,26 @@
     .disc-note{ font-size:6.8pt; margin-top:1.2mm; }
 
     .footer{ font-size:6.8pt; padding-top:1.6mm; margin-top:0; }
+
+    .matrix-header{ padding-bottom:1.4mm; margin-bottom:0; }
+    .matrix-header h1{ font-size:14pt; margin-top:1mm; }
+    .matrix-header .src{ font-size:7pt; margin-top:1mm; }
+    .matrix-summary{ gap:1.6mm; }
+    .matrix-summary .stat{ padding:1.4mm 2.6mm; border-radius:2px; }
+    .matrix-summary .stat .num{ font-size:10pt; }
+    .matrix-summary .stat .lbl{ font-size:6.4pt; }
+
+    .matrix-body{ gap:4mm; height:100%; min-height:0; overflow:hidden; }
+    .matrix-col{ gap:3mm; }
+    .matrix-group{ padding:2mm 2.6mm; box-shadow:none; border-radius:2px; }
+    .matrix-group-head{ font-size:8.5pt; margin-bottom:1.2mm; }
+    .matrix-group-head .count{ font-size:7.5pt; padding:0.6mm 1.6mm; border-radius:2px; }
+    .matrix-group-head .scope-flag{ font-size:6.6pt; padding:0.6mm 1.6mm; border-radius:2px; }
+    .matrix-table{ font-size:7.4pt; }
+    .matrix-table th{ font-size:6.6pt; padding:0.8mm 1.4mm; }
+    .matrix-table td{ padding:0.8mm 1.4mm; line-height:1.15; }
+    .mx-chip{ font-size:6.6pt; padding:0.3mm 1.4mm; border-radius:2px; }
+    .mx-status{ font-size:6.8pt; padding:0.4mm 1.6mm; }
   }
 
   @media (max-width:760px){
@@ -277,14 +338,14 @@
   <button id="savePdfBtn" type="button">⬇ Save as PDF</button>
 </div>
 
-<div class="sheet">
+<div class="sheet page1">
 
   <div class="header">
     <div class="header-left">
       <div class="eyebrow">CogniWatt · TSMS Programme — Proof of Concept Proposal</div>
       <div class="title">Transmission Substation Maintenance Software (TSMS AI)</div>
       <div class="tagline">Single-Substation Pilot for <span class="uname">TNEB</span></div>
-      <div class="subtitle">From equipment register to approved remedial action — one platform covering every substation, equipment class and testing role.</div>
+      <div class="subtitle">From equipment register to approved remedial action — one platform covering every substation, equipment class, and testing role.</div>
       <div class="meta-line">
         <span>Prepared for: <b><span class="uname">TNEB</span></b></span>
         <span>Site: <b>1 substation, CT/PT/Power Transformer/LA fleet already in service</b></span>
@@ -369,8 +430,10 @@
         <li><b>Role-aware dashboards for all 10 roles</b> — AE/JE to CEE, each scoped to their span of responsibility</li>
         <li><b>Automated test scheduling</b> — configurable frequency templates with T+0 / T+7 / T+30 overdue escalation</li>
         <li><b>Threshold-driven ALERT / CRITICAL</b> — consistent classification across all testers, per equipment class</li>
-        <li><b>AI failure predictions (Module 11)</b> — failure probability, anomaly detection, and interval recommendations; officer approval required</li>
-        <li><b>Maintenance-triggered procurement</b> — 7 triggers routed automatically to procurement bridge (Module 10)</li>
+        <li><b>AI-assisted trend review</b> — flags equipment drifting toward threshold before it crosses into ALERT, not after</li>
+        <li><b>AI failure predictions</b> — failure probability, anomaly detection, and interval recommendations; officer approval required</li>
+        <li><b>AI-assisted comparison view</b> — benchmark a unit's readings against sister equipment and across test types, surfacing outliers invisible in a single-record view</li>
+        <li><b>Maintenance-triggered procurement</b> — 7 triggers routed automatically to the procurement bridge</li>
         <li><b>SaaS on India-only data centres</b> — 99.5% uptime SLA, ISO 27001, annual CERT-In VAPT; no on-premise hardware</li>
       </ul>
     </div>
@@ -433,6 +496,109 @@
       </table>
     </div>
     <div class="disc-note"><b>Note:</b> exact nameplate data, threshold documentation and prior-record formats at the selected site are treated as discovery items at kickoff, confirmed with <span class="uname">TNEB</span> before configuration begins.</div>
+  </div>
+
+  <div class="footer">
+    <span><b>CogniWatt</b> — TSMS Proof of Concept · Prepared for <span class="uname">TNEB</span></span>
+    <span>Confidential — for internal utility evaluation only</span>
+  </div>
+
+</div>
+
+<div class="page-divider"><span>Page 2</span></div>
+
+<div class="sheet page2">
+
+  <div class="matrix-header">
+    <div>
+      <div class="eyebrow">CogniWatt · TSMS Programme — Appendix</div>
+      <h1>CM/PM Test &amp; Maintenance Matrix — By Equipment Type</h1>
+      <div class="src">Source: <span class="uname">TNEB</span> CT/PT/Power Transformer/LA Test &amp; Maintenance Matrix — every procedure mapped against current TSMS template readiness</div>
+    </div>
+    <div class="matrix-summary">
+      <div class="stat"><div class="num">4</div><div class="lbl">Equipment Groups</div></div>
+      <div class="stat"><div class="num">44</div><div class="lbl">Total Procedures</div></div>
+      <div class="stat"><div class="num">38</div><div class="lbl">CM Procedures</div></div>
+      <div class="stat"><div class="num">6</div><div class="lbl">PM Procedures</div></div>
+    </div>
+  </div>
+
+  <div class="matrix-body">
+    <div class="matrix-col">
+      <div class="matrix-group">
+        <div class="matrix-group-head"><span class="count">30</span> Power Transformer</div>
+        <table class="matrix-table">
+          <tr><th class="mx-n">#</th><th>CM / PM Procedure</th><th>Type</th><th>Status</th></tr>
+          <tr><td class="mx-n">1</td><td>220kV Bushing Tan-Delta Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">2</td><td>66kV Bushing Tan-Delta Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">3</td><td>Capacitance &amp; Tan Delta Comparison</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">4</td><td>Capacitance &amp; Tan Delta Test (Transformer)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">5</td><td>Dielectric Frequency Response (DFR / IDAX)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">6</td><td>Dielectric Frequency Response (DFR) – Routine</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">7</td><td>Insulation Diagnostics (IDAX)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">8</td><td>Magnetic Balance Test HV</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">9</td><td>Magnetic Balance Test IV</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">10</td><td>Magnetic Balance Test LV</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">11</td><td>Open Circuit Test HV-IV (1Ph)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">12</td><td>Open Circuit Test HV-IV (3Ph)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">13</td><td>Open Circuit Test HV-LV (1Ph)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">14</td><td>Open Circuit Test HV-LV (3Ph)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">15</td><td>Open Circuit Test IV-LV (1Ph)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">16</td><td>Open Circuit Test IV-LV (3Ph)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">17</td><td>Power Transformer Nameplate Details</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">18</td><td>Ratio Test HV-IV</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">19</td><td>Ratio Test HV-LV</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">20</td><td>Short Circuit Test HV-IV</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">21</td><td>Short Circuit Test HV-LV</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">22</td><td>Sweep Frequency Response Analysis (SFRA)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">23</td><td>Sweep Frequency Response Analysis (SFRA) – Routine</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">24</td><td>Tan-Delta, Capacitance &amp; Insulation Diagnostics</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">25</td><td>Transformer Oil Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">26</td><td>Transformer Physical Inspection</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">27</td><td>Winding Tan-Delta &amp; Capacitance Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">28</td><td>OLTC Operations Count</td><td><span class="mx-chip pm">PM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">29</td><td>Power Transformer Major Maintenance</td><td><span class="mx-chip pm">PM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">30</td><td>Routine Preventive Maintenance</td><td><span class="mx-chip pm">PM</span></td><td><span class="mx-status live">Live</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="matrix-col">
+      <div class="matrix-group">
+        <div class="matrix-group-head"><span class="count">7</span> Current Transformer</div>
+        <table class="matrix-table">
+          <tr><th class="mx-n">#</th><th>CM / PM Procedure</th><th>Type</th><th>Status</th></tr>
+          <tr><td class="mx-n">1</td><td>CT Insulation Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">2</td><td>CT Ratio Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">3</td><td>CT Ratio Test (Detailed)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">4</td><td>Capacitance &amp; Tan Delta Test (CT)</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">5</td><td>Core Insulation Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">6</td><td>Insulation Resistance (IR) Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">7</td><td>Tan Delta NCT Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+        </table>
+      </div>
+
+      <div class="matrix-group">
+        <div class="matrix-group-head"><span class="count">2</span> Potential Transformer</div>
+        <table class="matrix-table">
+          <tr><th class="mx-n">#</th><th>CM / PM Procedure</th><th>Type</th><th>Status</th></tr>
+          <tr><td class="mx-n">1</td><td>Insulation Resistance Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">2</td><td>Routine Preventive Maintenance</td><td><span class="mx-chip pm">PM</span></td><td><span class="mx-status live">Live</span></td></tr>
+        </table>
+      </div>
+
+      <div class="matrix-group">
+        <div class="matrix-group-head"><span class="count">5</span> Surge Arrestor</div>
+        <table class="matrix-table">
+          <tr><th class="mx-n">#</th><th>CM / PM Procedure</th><th>Type</th><th>Status</th></tr>
+          <tr><td class="mx-n">1</td><td>Insulation Resistance / Leakage Current Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">2</td><td>Power Frequency Voltage Withstand Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">3</td><td>V-I Characteristic Test</td><td><span class="mx-chip cm">CM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">4</td><td>LA Major Maintenance</td><td><span class="mx-chip pm">PM</span></td><td><span class="mx-status live">Live</span></td></tr>
+          <tr><td class="mx-n">5</td><td>Routine Visual Inspection</td><td><span class="mx-chip pm">PM</span></td><td><span class="mx-status live">Live</span></td></tr>
+        </table>
+      </div>
+    </div>
   </div>
 
   <div class="footer">

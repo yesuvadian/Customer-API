@@ -114,15 +114,6 @@ class OrgTestTemplateService:
             seen.add(r.template_key)
             unique.append(r)
 
-        print("template_type =", template_type)
-        print("Rows found =", len(rows))
-
-        for r in rows:
-            print(
-                r.template_key,
-                r.template_data.get("template_type"),
-                r.test_type_id,
-            )
         return unique
 
     def canonical_templates_for_org(self, org_id: Optional[UUID] = None) -> dict[int, "OrgTestTemplate"]:
