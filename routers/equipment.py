@@ -2817,6 +2817,92 @@ async def upload_nameplate_file(
     }
 
 
+_TEST_GRAPH_KEYS = {
+    "dfr": ["dfr_routine", "dfr_idax_transformer"],
+    "sfra": ["sfra_routine", "sfra_transformer"],
+}
+
+
+def _latest_test_graph_data(db: Session, equipment_id: UUID) -> dict:
+    """Latest DFR and SFRA measurement data for one equipment."""
+    from models import TestResult, TestingRequest
+
+    result = {"dfr": None, "sfra": None}
+    for chart_type, keys in _TEST_GRAPH_KEYS.items():
+        row = (
+            db.query(TestResult)
+            .join(TestingRequest, TestResult.testing_request_id == TestingRequest.id)
+            .filter(
+                TestingRequest.equipment_id == equipment_id,
+                TestResult.template_key.in_(keys),
+                TestResult.test_data.isnot(None),
+            )
+            .order_by(TestResult.id.desc())
+            .first()
+        )
+        if row and row.test_data:
+            td = row.test_data
+            result[chart_type] = {
+                "template_key": row.template_key,
+                "overall_result": row.overall_result,
+                "test_date": _dt(row.created_at) if hasattr(row, "created_at") else None,
+                "measurements": td.get("dfr_measurements") or td.get("sfra_measurements") or [],
+                "moisture_percent": td.get("moisture_percent"),
+                "observation": td.get("observation"),
+            }
+    return result
+
+
+@router.get("/test-graphs/compare")
+def compare_equipment_test_graphs(
+    ids: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Latest DFR and SFRA data for several equipments (comma-separated ids),
+    for overlaid comparison charts. Returns one entry per equipment."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
+    try:
+        eq_ids = [UUID(s.strip()) for s in ids.split(",") if s.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid equipment id in 'ids'")
+    if not eq_ids or len(eq_ids) > 6:
+        raise HTTPException(status_code=400, detail="Provide 1-6 equipment ids")
+
+    out = []
+    for eq_id in eq_ids:
+        equipment = EquipmentService.get_equipment(db, eq_id)
+        if not equipment or equipment.organization_id != org_id:
+            continue
+        data = _latest_test_graph_data(db, eq_id)
+        out.append({
+            "equipment_id": str(eq_id),
+            "ueic": equipment.ueic,
+            "serial_number": equipment.factory_serial_number,
+            "dfr": data["dfr"],
+            "sfra": data["sfra"],
+        })
+    return {"equipments": out}
+
+
+@router.get("/{equipment_id}/test-graphs")
+def get_equipment_test_graphs(
+    equipment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return latest DFR and SFRA routine test measurement data for charting."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+    equipment = EquipmentService.get_equipment(db, equipment_id)
+    if not equipment or equipment.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
+    return _latest_test_graph_data(db, equipment_id)
+
+
 @router.get("/{equipment_id}/nameplate-files/{field_key}")
 def download_nameplate_file(
     equipment_id: UUID,

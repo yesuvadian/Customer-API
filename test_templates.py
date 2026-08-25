@@ -5754,9 +5754,9 @@ TEST_TEMPLATES = {
     # ────────────────────────────────────────────────────────────
     "dfr_idax_transformer": {
         "key": "dfr_idax_transformer",
-        "name": "Dielectric Frequency Response (DFR / IDAX)",
+        "name": "Dielectric Frequency Response (DFR)",
         "equipment_type": "Power Transformer",
-        "description": "DFR / IDAX insulation diagnostics test for transformer moisture and insulation assessment",
+        "description": "DFR insulation diagnostics test for transformer moisture and insulation assessment",
         "supports_multi_session": True,
         "multi_session": True,
         "enable_cross_session": True,
@@ -5772,24 +5772,32 @@ TEST_TEMPLATES = {
         "context_bindings": {
             "manufacturer":   "equipment.manufacturer",
             "serial_number":  "equipment.factory_serial_number",
+            "hv_voltage_kv":  "equipment.voltage_class",
+            "voltage_ratio":  "equipment.voltage_class",
         },
         "sections": [
             {
                 "title": "Equipment Details",
                 "collapsed": True,
                 "fields": [
-                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "manufacturer",  "label": "Manufacturer",  "type": "readonly"},
                     {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_ratio", "label": "Voltage Ratio", "type": "readonly"},
                 ],
             },
             {
                 "title": "Transformer Configuration",
                 "fields": [
-                    {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
-                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number",   "unit": "MVA", "required": True},
-                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",   "type": "number",   "unit": "kV"},
+                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number", "unit": "MVA", "required": True},
+                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number", "unit": "kV",  "required": True},
+                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number", "unit": "kV",  "required": True},
+                    {
+                        "key": "tv_voltage_kv", "label": "Tertiary Voltage", "type": "number", "unit": "kV",
+                        "visibility_rule": {
+                            "type": "COMPARE",
+                            "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                        },
+                    },
                 ],
             },
             {
@@ -5806,11 +5814,16 @@ TEST_TEMPLATES = {
                 "fields": [
                     {
                         "key": "dfr_measurements",
+                        "analytics_skip": True,
                         "label": "DFR Measurements",
                         "type": "table",
                         "allow_add_rows": True,
                         "allow_delete_rows": True,
                         "columns": [
+                            {
+                                "key": "measurement_mode", "label": "Measurement Mode", "type": "dropdown",
+                                "options": ["GST", "UST", "GSTg"],
+                            },
                             {"key": "frequency_hz",      "label": "Frequency (Hz)",  "type": "number"},
                             {"key": "capacitance_pf",    "label": "Capacitance (pF)","type": "number"},
                             {"key": "tan_delta_percent", "label": "Tan Delta (%)",   "type": "number"},
@@ -5838,7 +5851,7 @@ TEST_TEMPLATES = {
                 ],
             },
             {
-                "title": "IDAX Analysis Results",
+                "title": "DFR Analysis Results",
                 "fields": [
                     {
                         "key": "analysis_results",
@@ -5863,9 +5876,27 @@ TEST_TEMPLATES = {
                             {"test_configuration": "HV-GND"},
                             {"test_configuration": "HV-LV"},
                             {"test_configuration": "LV-GND"},
-                            {"test_configuration": "LV-TV"},
-                            {"test_configuration": "TV-GND"},
-                            {"test_configuration": "TV-HV"},
+                            {
+                                "test_configuration": "LV-TV",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                                },
+                            },
+                            {
+                                "test_configuration": "TV-GND",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                                },
+                            },
+                            {
+                                "test_configuration": "TV-HV",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                                },
+                            },
                         ],
                         # Cross-session: row-by-row vs FACTORY, matched by test_configuration
                         "cross_session_evaluation": {
@@ -5961,25 +5992,32 @@ TEST_TEMPLATES = {
             "manufacturer":  "equipment.manufacturer",
             "serial_number": "equipment.factory_serial_number",
             "vector_group":  "equipment.vector_group",
+            "voltage_ratio": "equipment.voltage_class",
         },
         "sections": [
             {
                 "title": "Equipment Details",
                 "collapsed": True,
                 "fields": [
-                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "manufacturer",  "label": "Manufacturer",  "type": "readonly"},
                     {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
-                    {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                    {"key": "vector_group",  "label": "Vector Group",  "type": "readonly"},
+                    {"key": "voltage_ratio", "label": "Voltage Ratio", "type": "readonly"},
                 ],
             },
             {
                 "title": "Transformer Configuration",
                 "fields": [
-                    {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
-                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number",   "unit": "MVA", "required": True},
-                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",   "type": "number",   "unit": "kV"},
+                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number", "unit": "MVA", "required": True},
+                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number", "unit": "kV",  "required": True},
+                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number", "unit": "kV",  "required": True},
+                    {
+                        "key": "tv_voltage_kv", "label": "Tertiary Voltage", "type": "number", "unit": "kV",
+                        "visibility_rule": {
+                            "type": "COMPARE",
+                            "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                        },
+                    },
                 ],
             },
             {
@@ -5998,6 +6036,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {
                         "key": "sfra_measurements",
+                        "analytics_skip": True,
                         "label": "SFRA Measurements (Amplitude vs Frequency)",
                         "type": "table",
                         "allow_add_rows": True,
@@ -6721,11 +6760,25 @@ TEST_TEMPLATES = {
         "description": "Single-session Dielectric Frequency Response measurement for routine/maintenance testing (no factory-baseline comparison).",
         "supports_multi_session": False,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "hv_voltage_kv":  "equipment.voltage_class",
+            "voltage_ratio":  "equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Test Conditions",
                 "fields": [
-                    {"key": "test_kit",         "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "test_kit",       "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "voltage_ratio",  "label": "Voltage Ratio",       "type": "readonly"},
+                    {"key": "hv_voltage_kv",  "label": "HV Voltage",          "type": "number", "unit": "kV", "required": True},
+                    {"key": "lv_voltage_kv",  "label": "LV Voltage",          "type": "number", "unit": "kV", "required": True},
+                    {
+                        "key": "tv_voltage_kv", "label": "Tertiary Voltage",  "type": "number", "unit": "kV",
+                        "visibility_rule": {
+                            "type": "COMPARE",
+                            "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                        },
+                    },
                     {"key": "test_voltage_v",   "label": "Test Voltage",        "type": "number", "unit": "V",  "required": True},
                     {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
                     {"key": "oil_temp_c",       "label": "Oil Temperature",     "type": "number", "unit": "°C", "required": True},
@@ -6736,11 +6789,16 @@ TEST_TEMPLATES = {
                 "fields": [
                     {
                         "key": "dfr_measurements",
+                        "analytics_skip": True,
                         "label": "DFR Measurements",
                         "type": "table",
                         "allow_add_rows": True,
                         "allow_delete_rows": True,
                         "columns": [
+                            {
+                                "key": "measurement_mode", "label": "Measurement Mode", "type": "dropdown",
+                                "options": ["GST", "UST", "GSTg"],
+                            },
                             {"key": "frequency_hz",      "label": "Frequency (Hz)",   "type": "number"},
                             {"key": "capacitance_pf",    "label": "Capacitance (pF)", "type": "number"},
                             {"key": "tan_delta_percent", "label": "Tan Delta (%)",    "type": "number"},
@@ -6754,6 +6812,7 @@ TEST_TEMPLATES = {
                                     "critical_below": None, "critical_above": 1.0,
                                 },
                             },
+                            "remedial_action_text": "Tan delta above the acceptable limit (normal ≤ 0.5%, critical above 1.0%) — investigate insulation moisture/aging; consider oil reconditioning or drying.",
                         },
                     },
                 ],
@@ -6798,6 +6857,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {
                         "key": "sfra_measurements",
+                        "analytics_skip": True,
                         "label": "SFRA Measurements (Amplitude vs Frequency)",
                         "type": "table",
                         "allow_add_rows": True,
@@ -6919,7 +6979,8 @@ TEST_TYPE_TO_TEMPLATE = {
     # CVT
     "CVT Test Report": "cvt_test",
 
-    # ── DFR / IDAX (multi-session, cross-session comparison) ──
+    # ── DFR (multi-session, cross-session comparison) ──
+    "Dielectric Frequency Response (DFR)":        "dfr_idax_transformer",
     "Dielectric Frequency Response (DFR / IDAX)": "dfr_idax_transformer",
     "DFR / IDAX":                                 "dfr_idax_transformer",
 
