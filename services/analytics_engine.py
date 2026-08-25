@@ -791,6 +791,12 @@ class AnalyticsEngine:
 
                 elif field_type == "table":
                     # ── Numeric table columns ───────────────────────────────
+                    # Sweep/curve tables (DFR/SFRA measurements) opt out of
+                    # per-row parameter analytics via analytics_skip - their
+                    # data is a curve rendered by Test Graphs, not a set of
+                    # trendable named parameters.
+                    if field.get("analytics_skip"):
+                        continue
                     table_data = test_data.get(field_key)
                     if not isinstance(table_data, list) or not table_data:
                         continue
@@ -857,6 +863,18 @@ class AnalyticsEngine:
                                     continue
 
                         table_label = field.get("label") or field_key
+
+                        # Sweep-style tables (DFR/SFRA measurements) repeat the
+                        # identifier value (e.g. measurement_mode "GST" or
+                        # winding "HV-N") across many frequency rows. Such a
+                        # table is a curve, not a set of named parameters - no
+                        # single point is a meaningful trendable value, and the
+                        # repeated ids would violate the (test_result_id,
+                        # parameter_key) unique constraint. Skip it; curves are
+                        # rendered by the equipment Test Graphs feature instead.
+                        row_ids = [e[0] for e in rows_to_track]
+                        if len(set(row_ids)) < len(row_ids):
+                            continue
 
                         for row_id, current_val, row_idx, row_unit in rows_to_track:
                             # Build a stable parameter key scoped to this row
@@ -1181,10 +1199,14 @@ class AnalyticsEngine:
         history_count silently stay wrong for table fields.
         """
         id_col_map: dict[str, Optional[str]] = {}
+        skip_tables: set[str] = set()
         if template_data:
             for section in template_data.get("sections", []):
                 for field in section.get("fields", []):
                     if field.get("type") != "table":
+                        continue
+                    if field.get("analytics_skip"):
+                        skip_tables.add(field.get("key", ""))
                         continue
                     cols = field.get("columns", [])
                     id_col_map[field.get("key", "")] = next(
@@ -1228,6 +1250,8 @@ class AnalyticsEngine:
 
                 # Table column: raw is a list of row dicts — key per row identifier
                 if isinstance(raw, list):
+                    if key in skip_tables:
+                        continue
                     if key in id_col_map:
                         id_col_hist = id_col_map[key]
                     else:
