@@ -75,7 +75,7 @@ EXTRACTABLE_TEST_TYPES: dict[str, dict] = {
     "DGA Test":                                          {"pdf": "oil_test", "excel": "oil_test"},
     "Capacitance & Tan Delta Test (Transformer)":        {"pdf": "tan_delta", "excel": "tan_delta"},
     "Tan-Delta, Capacitance & Insulation Diagnostics":   {"pdf": "tan_delta", "excel": "tan_delta"},
-    "Winding Tan-Delta & Capacitance Test":              {"pdf": "tan_delta", "excel": "tan_delta"},
+    "Winding Resistance Measurement":              {"pdf": "tan_delta", "excel": "tan_delta"},
     "220kV Bushing Tan-Delta Test":                      {"pdf": "tan_delta", "excel": "tan_delta"},
     "66kV Bushing Tan-Delta Test":                       {"pdf": "tan_delta", "excel": "tan_delta"},
 }
@@ -313,7 +313,13 @@ def _extract_excel(file_bytes: bytes, extractor_type: str, test_type_name: str =
         _tf.close()
         try:
             _wb = _opxl.load_workbook(_tf_path, data_only=True)
-            _ws = _wb.active
+            # The scalar/main sheet is always named "Import Data" by
+            # build_import_schema_workbook (line ~535) — look it up by name
+            # rather than trusting wb.active, which reflects whichever tab
+            # was last selected in Excel (e.g. a "Bushing Details" tab left
+            # active after the user finished filling it in last) and would
+            # otherwise cause that table sheet to be misread as the main sheet.
+            _ws = _wb["Import Data"] if "Import Data" in _wb.sheetnames else _wb.active
             _rows = list(_ws.iter_rows(values_only=True))
         finally:
             _tf_path.unlink(missing_ok=True)
@@ -323,7 +329,7 @@ def _extract_excel(file_bytes: bytes, extractor_type: str, test_type_name: str =
             if not records:
                 warnings.append("No data rows found in the schema template. Fill in rows from row 4 onwards.")
             else:
-                table_data = _read_table_sheets(_wb, _wb.active.title)
+                table_data = _read_table_sheets(_wb, _ws.title)
                 if table_data:
                     for rec in records:
                         rec.update(table_data)
@@ -340,13 +346,20 @@ def _extract_excel(file_bytes: bytes, extractor_type: str, test_type_name: str =
 
             try:
                 records = parse_excel(tmp_path)
+                # Legacy parser only reads its own known blocks — merge in any
+                # generic __table_key__ sheets (e.g. Bushing Details) so they
+                # aren't silently dropped when this fallback path is taken.
+                _table_data = _read_table_sheets(_wb, _ws.title)
             finally:
                 tmp_path.unlink(missing_ok=True)
 
+            if _table_data:
+                for rec in records:
+                    rec.update(_table_data)
             if not records:
                 warnings.append("No records extracted from Excel. Check sheet layout.")
             return records, warnings
-        
+
         elif extractor_type == "tan_delta":
             from seed_tandelta_from_excel import parse_excel
 
@@ -356,9 +369,13 @@ def _extract_excel(file_bytes: bytes, extractor_type: str, test_type_name: str =
 
             try:
                 records = parse_excel(tmp_path)
+                _table_data = _read_table_sheets(_wb, _ws.title)
             finally:
                 tmp_path.unlink(missing_ok=True)
 
+            if _table_data:
+                for rec in records:
+                    rec.update(_table_data)
             if not records:
                 warnings.append("No records extracted from Excel. Check sheet/block layout.")
             return records, warnings
@@ -770,4 +787,207 @@ def parse_structured_import_workbook(file_bytes: bytes, tpl: dict | None = None)
     if tpl is not None and template_keys and parsed_keys and not (parsed_keys & template_keys):
         raise ValueError(_WRONG_TEMPLATE_MSG)
 
+    return form_data
+
+
+# ── Calculated-column evaluation (server-side authoritative pass) ───────────
+#
+# The Flutter import review screen (import_data_page.dart) recomputes
+# "calculated" table columns (FORMULA / THRESHOLD rules, e.g. "% D.F @ 20C"
+# and "Condition") live as the user edits a record, then saves the result
+# into that record's form_data. But a record the user never opened in the
+# review panel -- e.g. a bulk "Submit All" pass -- is submitted with
+# whatever form_data the extractor produced, which never had those derived
+# columns computed at all. This mirrors lib/common/rule_engine.dart's
+# FORMULA/THRESHOLD handling so every submitted record gets them regardless
+# of whether it was individually reviewed client-side.
+
+def _rt_num(v) -> Optional[float]:
+    try:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _rt_has_value(row: dict, key: Optional[str]) -> bool:
+    if not key:
+        return False
+    v = row.get(key)
+    return v is not None and str(v).strip() != ""
+
+
+def _rt_formula(config: dict, row: dict, form_data: dict) -> Optional[float]:
+    formula = config.get("formula")
+    inputs = config.get("inputs") or {}
+    precision = int(config.get("precision", 3) or 3)
+
+    def resolve(k: str) -> Optional[float]:
+        ref = inputs.get(k)
+        if not isinstance(ref, str):
+            return None
+        if ref.startswith("$form."):
+            return _rt_num(form_data.get(ref[len("$form."):]))
+        raw = row.get(ref)
+        if raw is None:
+            raw = form_data.get(ref)
+        return _rt_num(raw)
+
+    if formula == "PRODUCT":
+        a, b = resolve("a"), resolve("b")
+        if a is None or b is None:
+            return None
+        return round(a * b, precision)
+
+    # Only PRODUCT is used by the calculated table columns that exist today
+    # (df_corrected_20c = df_measured x itc_factor). Extend here if a future
+    # template adds a different table-column FORMULA.
+    return None
+
+
+def _rt_threshold(config: dict, row: dict, form_data: dict) -> Optional[str]:
+    input_field = config.get("input_field")
+    raw = row.get(input_field) if input_field else None
+    if raw is None and input_field:
+        raw = form_data.get(input_field)
+    value = _rt_num(raw)
+    if value is None:
+        return None
+
+    current = config.get("thresholds")
+    for lf in (config.get("lookup_fields") or []):
+        if not isinstance(current, dict):
+            return None
+        if isinstance(lf, dict):
+            field_ref = str(lf.get("field", ""))
+            mapping = lf.get("mapping") or {}
+            if field_ref.startswith("$form."):
+                raw_key = form_data.get(field_ref[len("$form."):])
+            else:
+                raw_key = row.get(field_ref, form_data.get(field_ref))
+            key = mapping.get(str(raw_key)) if raw_key is not None else None
+        else:
+            s = str(lf)
+            if s.startswith("$form."):
+                key = form_data.get(s[len("$form."):])
+            else:
+                key = row.get(s, form_data.get(s))
+        if key is None:
+            return None
+        current = current.get(key)
+
+    if not isinstance(current, dict):
+        return None
+
+    # Outer descriptive-wrapper auto-unwrap (mirrors rule_engine.dart's
+    # _threshold): a single outer key like "220 kV Bushing % D.F @ 20C
+    # (IEC OIP)" wraps the real { band: [lo, hi] } leaf with no matching
+    # lookup_fields entry to navigate into it.
+    if current and all(isinstance(v, dict) for v in current.values()):
+        leaf: dict = {}
+        for v in current.values():
+            leaf.update(v)
+    else:
+        leaf = current
+
+    bands = []
+    for name, rng in leaf.items():
+        if not isinstance(rng, list) or len(rng) < 2:
+            continue
+        bands.append((name, _rt_num(rng[0]), _rt_num(rng[1])))
+    if not bands:
+        return None
+    bands.sort(key=lambda b: (b[1] if b[1] is not None else float("-inf")))
+
+    eps = 1e-9
+    n = len(bands)
+    for i, (name, lo, hi) in enumerate(bands):
+        is_first = i == 0
+        is_last = i == n - 1
+        last_exclusive = is_last and n > 2
+        min_ok = lo is None or (
+            (value > lo and abs(value - lo) > eps) if last_exclusive
+            else (value > lo or abs(value - lo) <= eps)
+        )
+        max_ok = hi is None or (
+            (value < hi and abs(value - hi) > eps) if is_first
+            else (value < hi or abs(value - hi) <= eps)
+        )
+        if min_ok and max_ok:
+            return name
+
+    for name, lo, hi in bands:
+        if (lo is None or value >= lo) and (hi is None or value < hi):
+            return name
+    return None
+
+
+def _rt_row_inputs_present(rule: dict, row: dict) -> bool:
+    """True when every ROW-scoped input the rule needs (the row's own
+    measurement) is present. $form.-prefixed inputs are shared, section-wide
+    values (e.g. an ITC correction factor) whose absence doesn't mean
+    "nothing was measured" for this row."""
+    rtype = rule.get("type")
+    config = rule.get("config") or {}
+    if rtype == "THRESHOLD":
+        return _rt_has_value(row, config.get("input_field"))
+    if rtype == "FORMULA":
+        for ref in (config.get("inputs") or {}).values():
+            if isinstance(ref, str) and ref.startswith("$form."):
+                continue
+            if not _rt_has_value(row, ref if isinstance(ref, str) else None):
+                return False
+        return True
+    return True
+
+
+def apply_calculated_columns(template_key: str, form_data: dict) -> dict:
+    """Derives every "calculated" table column (FORMULA / THRESHOLD) from the
+    template and writes the result back into form_data, in place. Safe to
+    call on any form_data shape -- silently no-ops on unknown template keys
+    or fields it can't find."""
+    from test_templates import get_template_by_key
+
+    tpl = get_template_by_key(template_key)
+    if not tpl:
+        return form_data
+
+    for section in tpl.get("sections", []):
+        for field in section.get("fields", []):
+            if field.get("type") != "table":
+                continue
+            rows = form_data.get(field.get("key"))
+            if not isinstance(rows, list):
+                continue
+            calc_cols = [
+                c for c in field.get("columns", [])
+                if c.get("type") == "calculated" and c.get("rule")
+            ]
+            if not calc_cols:
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                for col in calc_cols:
+                    rule = col["rule"]
+                    rtype = rule.get("type")
+                    config = rule.get("config") or {}
+                    if rtype == "FORMULA":
+                        computed = _rt_formula(config, row, form_data)
+                    elif rtype == "THRESHOLD":
+                        computed = _rt_threshold(config, row, form_data)
+                    else:
+                        continue
+                    col_key = col.get("key")
+                    if not col_key:
+                        continue
+                    if computed is not None:
+                        row[col_key] = computed
+                    elif not _rt_row_inputs_present(rule, row):
+                        row[col_key] = None
+                    # else: a shared/form-level input (e.g. ITC factor) is
+                    # missing but this row's own reading exists -- preserve
+                    # whatever value the import already carried for this
+                    # column rather than blanking out real archived data.
     return form_data

@@ -48,7 +48,7 @@ CATEGORY_TYPE_MAP: dict[str, str] = {
     "Dielectric Frequency Response (DFR / IDAX)":           "test",
     "DFR / IDAX":                                           "test",
     "Tan-Delta, Capacitance & Insulation Diagnostics":      "test",
-    "Winding Tan-Delta & Capacitance Test":                 "test",
+    "Winding Resistance Measurement":                 "test",
     "220kV Bushing Tan-Delta Test":                         "test",
     "66kV Bushing Tan-Delta Test":                          "test",
     "Insulation Diagnostics (IDAX)":                        "test",

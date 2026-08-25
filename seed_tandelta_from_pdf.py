@@ -308,6 +308,42 @@ _BARE_PHASE_WORD = re.compile(r"""(?:^|\n)\s*[Pp]hase\b""", re.I)
 
 # ── Bushing section parser ─────────────────────────────────────────────────────
 
+def _parse_bushing_details_section(block: str) -> list[dict]:
+    """
+    Extract Make / Sl. No. / Y.O. Mfg. nameplate rows from the "Bushing
+    Details" nameplate sub-section that precedes the numeric test-results
+    table in a bushing block (see _parse_bushing_section, which locates
+    that same sub-section only to skip past it).
+
+    Returns rows in the template's detail/r_phase/y_phase/b_phase shape
+    (one row per detail type, one column per phase) -- matching
+    bushing_{kv}kv_details in test_templates.py.
+
+    Values are assigned to phase columns in left-to-right OCR reading
+    order (each Make/Sl.No/Y.O.Mfg line lists R, Y, B phase values in that
+    order), since -- unlike the numeric test-results table -- these rows
+    don't carry per-phase position markers we can anchor on.
+    """
+    labels = [
+        ("Make",      r"Make"),
+        ("Sl. No.",   r"Sl\.?\s*No\.?"),
+        ("Y.O. Mfg.", r"Y\.?\s*O\.?\s*Mfg\.?|Year\s*of\s*Mfg\.?"),
+    ]
+    rows: list[dict] = []
+    for detail_label, pat in labels:
+        row = {"detail": detail_label, "r_phase": "", "y_phase": "", "b_phase": ""}
+        m = re.search(rf"(?:{pat})\s*[:\.]?\s*(.+?)(?:\n|$)", block, re.I)
+        if m:
+            raw = m.group(1).strip()
+            tokens = [t.strip() for t in re.split(r"\s{2,}|\t|\|", raw) if t.strip()]
+            if len(tokens) <= 1:
+                tokens = raw.split()
+            for col, val in zip(("r_phase", "y_phase", "b_phase"), tokens):
+                row[col] = val
+        rows.append(row)
+    return rows
+
+
 def _parse_bushing_section(block: str, voltage_label: str) -> tuple[float | None, list[dict], str | None]:
     """
     Extract ITC factor, R/Y/B phase test rows, and the previous-test date
@@ -874,6 +910,14 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
         "bushing_33kv":  "bushing_33kv_previous_test_date",
         "bushing_11kv":  "bushing_11kv_previous_test_date",
     }
+    # maps section key -> the report field that holds its nameplate details table
+    _DETAILS_KEY = {
+        "bushing_400kv": "bushing_400kv_details",
+        "bushing_220kv": "bushing_220kv_details",
+        "bushing_66kv":  "bushing_66kv_details",
+        "bushing_33kv":  "bushing_33kv_details",
+        "bushing_11kv":  "bushing_11kv_details",
+    }
 
     kv_unit_pat = r"[kKlLeE*]\.?\s*[vV]"
     for rep_key, kv, end_kvs in _BUSHING_SECTIONS:
@@ -900,11 +944,13 @@ def parse_ocr_text(ocr_text: str) -> dict | None:
             report[_ITC_KEY[rep_key]]       = itc
             report[rep_key]                = rows
             report[_PREV_DATE_KEY[rep_key]] = prev_date
+            report[_DETAILS_KEY[rep_key]]   = _parse_bushing_details_section(bm.group(0))
         else:
             itc, rows, prev_date = _parse_combined_bushing_table(full, kv)
             report[_ITC_KEY[rep_key]]       = itc
             report[rep_key]                = rows
             report[_PREV_DATE_KEY[rep_key]] = prev_date
+            report[_DETAILS_KEY[rep_key]]   = []
             if rows:
                 print(f"  [BUSHING] {kv}kV - {len(rows)} phase row(s) extracted")
             else:
@@ -1265,6 +1311,32 @@ _ITC_FIELD_MAP: dict[str, str] = {
 }
 
 
+def _backfill_itc_factor(rows: list[dict] | None) -> float | None:
+    """When a report's ITC/correction factor wasn't stated in the source
+    (PDF OCR text or Excel), recover it from the section's own rows: factor =
+    avg(df_corrected_20c / df_measured) across rows where both are present.
+    Mirrors the back-calculation used for the historical Excel imports and
+    the Import Data review UI, so a seeded record doesn't persist a blank
+    correction factor whenever it's mathematically recoverable from readings
+    already on the row -- 2 decimals under 1.0, 3 decimals at/above (matches
+    the precision convention seen across these reports' own stated factors).
+    """
+    ratios = []
+    for row in rows or []:
+        measured  = row.get("df_measured")
+        corrected = row.get("df_corrected_20c")
+        if measured in (None, 0) or corrected is None:
+            continue
+        try:
+            ratios.append(float(corrected) / float(measured))
+        except (TypeError, ValueError, ZeroDivisionError):
+            continue
+    if not ratios:
+        return None
+    avg = sum(ratios) / len(ratios)
+    return round(avg, 3 if avg >= 1 else 2)
+
+
 def _tandelta_test_data(r: dict, eq=None) -> dict:
     """
     Build test_data matching capacitance_tandelta_transformer form output.
@@ -1346,6 +1418,8 @@ def _tandelta_test_data(r: dict, eq=None) -> dict:
             else:
                 report_key = _ITC_FIELD_MAP.get(key, key)
                 val = r.get(report_key)
+                if val is None and key.endswith("_itc_factor"):
+                    val = _backfill_itc_factor(r.get(key[: -len("_itc_factor")]))
                 if val is not None:
                     test_data[key] = _str(val)
                 elif field.get("default") is not None:
