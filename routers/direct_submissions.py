@@ -139,7 +139,7 @@ def get_by_equipment(
         raise HTTPException(status_code=400, detail="User has no organization")
     dept_ids = None
     if department_id:
-        dept_ids = get_dept_subtree_ids(db, department_id, org_id)
+        dept_ids = get_dept_subtree_ids(db, department_id)
     return TestingRequestService(db).get_by_equipment(
         org_id=org_id,
         department_ids=dept_ids,

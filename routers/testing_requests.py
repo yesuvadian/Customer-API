@@ -594,7 +594,7 @@ def get_by_equipment(
 
     dept_ids = None
     if department_id:
-        dept_ids = get_dept_subtree_ids(db, department_id, eff_org_id)
+        dept_ids = get_dept_subtree_ids(db, department_id)
 
     def _parse_date(s: Optional[str]):
         try:
