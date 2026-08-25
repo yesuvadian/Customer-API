@@ -6392,7 +6392,7 @@ TEST_TEMPLATES = {
     # ── Winding Tan-Delta & Capacitance (individual) ──────────────
     "tan_delta_winding": {
         "key": "tan_delta_winding",
-        "name": "Winding Tan-Delta & Capacitance Test",
+        "name": "Winding Resistance Measurement",
         "equipment_type": "Power Transformer",
         "description": "Winding insulation Tan-Delta and capacitance measurement (DELTA 4000) with historical comparison.",
         "supports_multi_session": False,
@@ -6925,7 +6925,7 @@ TEST_TYPE_TO_TEMPLATE = {
 
     # ── Tan-Delta / Capacitance / IDAX (single-session, individual + combined) ──
     "Tan-Delta, Capacitance & Insulation Diagnostics": "tan_delta_capacitance_idax",
-    "Winding Tan-Delta & Capacitance Test":            "tan_delta_winding",
+    "Winding Resistance Measurement":            "tan_delta_winding",
     "220kV Bushing Tan-Delta Test":                    "tan_delta_bushing_220kv",
     "66kV Bushing Tan-Delta Test":                     "tan_delta_bushing_66kv",
     "Insulation Diagnostics (IDAX)":                   "idax_insulation",

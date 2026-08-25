@@ -251,6 +251,24 @@ def _get_departments_at_depth(db: Session, org_id, depth: int) -> list:
     return [{"id": str(r[0]), "name": r[1], "aliases": []} for r in rows]
 
 
+# Testing kits have no nameplate template provisioned in OrgTestTemplate, so
+# their upload fields are defined here directly rather than in a DB template.
+TESTING_KIT_FILE_FIELDS = {
+    "kit_photo": {
+        "accept": ["image/jpeg", "image/png"],
+        "max_size_kb": 10240,
+    },
+    "calibration_certificate": {
+        "accept": ["application/pdf"],
+        "max_size_kb": 10240,
+    },
+    "purchase_invoice": {
+        "accept": ["application/pdf"],
+        "max_size_kb": 10240,
+    },
+}
+
+
 def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: str) -> dict:
     """Look up the template for this equipment type and return the field definition."""
     from models import CategoryDetails, OrgTestTemplate
@@ -264,6 +282,8 @@ def _resolve_nameplate_file_field(db: Session, equipment: Equipment, field_key: 
         .first()
     )
     if not detail:
+        if field_key in TESTING_KIT_FILE_FIELDS:
+            return TESTING_KIT_FILE_FIELDS[field_key]
         raise HTTPException(
             status_code=404,
             detail="No nameplate template found for this equipment type.",

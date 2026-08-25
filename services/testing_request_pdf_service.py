@@ -23,16 +23,32 @@ class TestingRequestPDFService:
         from the template's own "columns" definition instead of deriving
         them from a saved row dict's own key order - needed because each
         row is itself a JSONB object, so Postgres does not preserve ITS key
-        order either (mirrors test_result_pdf_service.py)."""
+        order either (mirrors test_result_pdf_service.py).
+
+        Headers/cells are wrapped in Paragraph objects (not plain strings)
+        so ReportLab word-wraps long labels within their column instead of
+        overflowing into the neighboring cell."""
         if not rows or not columns:
             return
 
         col_keys = [c.get("key", "") for c in columns]
         headers = [c.get("label") or c.get("key", "") for c in columns]
 
-        table_rows = [headers]
+        header_style = ParagraphStyle(
+            'TableHeaderCell', fontName='Helvetica-Bold', fontSize=8,
+            leading=10, textColor=colors.white, alignment=TA_CENTER,
+        )
+        cell_style = ParagraphStyle(
+            'TableBodyCell', fontName='Helvetica', fontSize=8.5,
+            leading=10, alignment=TA_CENTER,
+        )
+
+        table_rows = [[Paragraph(h, header_style) for h in headers]]
         for row in rows:
-            table_rows.append([str(row.get(k, "-")) if row.get(k) not in (None, "") else "-" for k in col_keys])
+            table_rows.append([
+                Paragraph(str(row.get(k, "-")) if row.get(k) not in (None, "") else "-", cell_style)
+                for k in col_keys
+            ])
 
         num_cols = len(col_keys)
         col_width = 6.5 / num_cols
@@ -61,17 +77,27 @@ class TestingRequestPDFService:
     def _render_labeled_pairs(self, pairs, story):
         """Like a plain two-column layout, but takes (label, value) tuples
         directly instead of re-deriving the label from a snake_case dict
-        key - needed when the label already comes from the template."""
+        key - needed when the label already comes from the template.
+
+        Labels/values are wrapped in Paragraph objects (not plain strings)
+        so ReportLab word-wraps long labels within their column instead of
+        overflowing into the value column."""
         if not pairs:
             return
-        rows = [[label, str(value) if value not in (None, "") else "-"] for label, value in pairs]
+        label_style = ParagraphStyle(
+            'PairLabelCell', fontName='Helvetica-Bold', fontSize=9,
+            leading=11, textColor=colors.HexColor('#333333'),
+        )
+        value_style = ParagraphStyle(
+            'PairValueCell', fontName='Helvetica', fontSize=9, leading=11,
+        )
+        rows = [
+            [Paragraph(str(label), label_style),
+             Paragraph(str(value) if value not in (None, "") else "-", value_style)]
+            for label, value in pairs
+        ]
         table = Table(rows, colWidths=[2.2 * inch, 4.6 * inch])
         table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.white, colors.HexColor('#F8F9FA')]),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
