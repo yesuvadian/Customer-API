@@ -45,6 +45,7 @@ from models import (
 )
 from services.import_extractor_service import (
     IMPORT_CATEGORIES,
+    apply_calculated_columns,
     build_form_data,
     extract_records,
     get_template_key,
@@ -187,6 +188,13 @@ def _create_tr_from_record(
     template_key = get_template_key(test_type_name)
     if not template_key:
         return None, f"No template mapped for test type '{test_type_name}'."
+
+    # Authoritative server-side pass for "calculated" table columns (e.g.
+    # % D.F @ 20C, Condition) — guarantees they're populated even for
+    # records the reviewer never individually opened in the Flutter import
+    # screen (a bulk "Submit All" skips that screen's own client-side
+    # recompute entirely).
+    form_data = apply_calculated_columns(template_key, form_data)
 
     org_id = organization_id or equipment.organization_id
     dept_id = department_id

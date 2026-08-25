@@ -386,7 +386,6 @@ class DirectSubmissionService:
             dept_ids = get_dept_subtree_ids(
                 self.db,
                 department_id,
-                user.organization_id,
             )
 
             query = query.filter(
@@ -400,7 +399,6 @@ class DirectSubmissionService:
                 dept_ids = get_dept_subtree_ids(
                     self.db,
                     dept_id,
-                    user.organization_id,
                 )
 
                 query = query.filter(
