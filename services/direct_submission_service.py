@@ -383,7 +383,10 @@ class DirectSubmissionService:
         if department_id is not None:
             from utils.common_service import get_dept_subtree_ids
 
-            dept_ids = get_dept_subtree_ids(self.db, department_id)
+            dept_ids = get_dept_subtree_ids(
+                self.db,
+                department_id,
+            )
 
             query = query.filter(
                 TestingRequest.department_id.in_(dept_ids)
@@ -393,7 +396,10 @@ class DirectSubmissionService:
             if not is_org_admin and dept_id:
                 from utils.common_service import get_dept_subtree_ids
 
-                dept_ids = get_dept_subtree_ids(self.db, dept_id)
+                dept_ids = get_dept_subtree_ids(
+                    self.db,
+                    dept_id,
+                )
 
                 query = query.filter(
                     TestingRequest.department_id.in_(dept_ids)

@@ -173,24 +173,39 @@ class ParameterAnalyzer:
         values = [v for _, v in history]
         dates  = [d for d, _ in history]
 
-        # Anomaly detection (needs ≥ 4 values for meaningful std)
+        # Fold the current reading into the series - previously the
+        # regression/anomaly-check/breach-forecast below used `history`
+        # alone (the current reading is explicitly excluded from it by
+        # _fetch_history_map), so every one of these figures was computed as
+        # of the PREVIOUS test - one full cycle stale by the time this
+        # test's own analytics are shown. A parameter that just crashed from
+        # a stable trend, for example, would report the old upward trend and
+        # no anomaly until the *next* test recomputes it.
+        if current_value is not None and current_date is not None:
+            values = values + [current_value]
+            dates  = dates + [current_date]
+
+        # Anomaly detection (needs ≥ 4 values for meaningful std) - now
+        # includes the current reading, so an actual anomalous reading is
+        # caught immediately rather than one test cycle later.
         if len(values) >= 4:
             ParameterAnalyzer._detect_anomaly(values, result)
 
         if len(history) < ParameterAnalyzer.MIN_TREND_POINTS:
             return result
 
-        # A single prior reading can't feed a real OLS regression - fitting a
-        # line through one point is degenerate and _linear_regression()
-        # returns slope=0.0 for it, which would misreport every 2-reading
-        # parameter as "Stable" regardless of the actual direction. Compare
-        # directly against the current reading instead, when available.
-        if len(history) == 1 and current_value is not None and current_date is not None:
+        # Exactly one prior reading (now two points total, with the current
+        # reading folded in above) can't feed a real OLS goodness-of-fit -
+        # any 2-point line fits perfectly by construction, which would
+        # misleadingly report r_squared as 1.0 rather than "not meaningful".
+        # Slope itself is still a real, non-degenerate calculation for two
+        # points, so compute that directly instead of leaving it as
+        # _linear_regression's degenerate single-point fallback.
+        if len(history) == 1:
             prior_date, prior_value = history[0]
-            elapsed_days = (current_date - prior_date).total_seconds() / 86400.0
-            slope = (current_value - prior_value) / elapsed_days if elapsed_days > 0 else 0.0
+            elapsed_days = (dates[-1] - prior_date).total_seconds() / 86400.0
+            slope = (values[-1] - prior_value) / elapsed_days if elapsed_days > 0 else 0.0
             result["trend_slope"] = round(slope, 8)
-            # Not a real goodness-of-fit measure for a 2-point line - leave unset.
             result["trend_r_squared"] = None
 
             annual_change = slope * 365
@@ -198,7 +213,7 @@ class ParameterAnalyzer:
             if prior_value:
                 result["pct_change_annual"] = round(annual_change / abs(prior_value) * 100, 2)
 
-            val_range = abs(prior_value) or abs(current_value) or 1
+            val_range = abs(prior_value) or abs(values[-1]) or 1
             stable_threshold = val_range * ParameterAnalyzer.STABLE_FRACTION
             if annual_change > stable_threshold:
                 result["trend"] = "Increasing"
@@ -209,7 +224,7 @@ class ParameterAnalyzer:
 
             if slope != 0:
                 ParameterAnalyzer._forecast_breach(
-                    current_value, current_date, slope, evaluation, result
+                    values[-1], dates[-1], slope, evaluation, result
                 )
             return result
 
@@ -657,11 +672,16 @@ class AnalyticsEngine:
                             critical_findings = [{"key": "calibration_date", "label": "Calibration",
                                                   "status": "Fail", "message": f"Calibration overdue by {abs(days_left)} days"}]
                         elif pct_used >= 0.8:
-                            health_score = round(days_left / total_days * 100, 1)
+                            # Clamped to 100 - a future-dated calibration_date
+                            # (data entered ahead of the actual calibration,
+                            # or a future-dated backfill) makes days_left
+                            # exceed total_days, which would otherwise push
+                            # the score above 100.
+                            health_score = min(100.0, round(days_left / total_days * 100, 1))
                             critical_findings = [{"key": "calibration_date", "label": "Calibration",
                                                   "status": "Warning", "message": f"Calibration due in {days_left} days"}]
                         else:
-                            health_score = round(days_left / total_days * 100, 1)
+                            health_score = min(100.0, round(days_left / total_days * 100, 1))
             except Exception as _cal_err:
                 logger.warning(f"Calibration fallback scoring failed: {_cal_err}")
 
@@ -700,6 +720,27 @@ class AnalyticsEngine:
             f.get("key"): f
             for f in evaluation_result.get("fields", [])
         }
+
+        # For table fields: re-evaluate fresh from test_data so that row_label
+        # and breach_limit are available (stored evaluation_result may be
+        # stale) - mirrors the same fix in HealthScorer.score_test() above.
+        # Without this, ParameterAnalytics.breach_threshold below is built
+        # from whatever band-boundary logic was in effect at submission time,
+        # which can disagree with the freshly-recomputed critical_findings
+        # from score_test() for the exact same field.
+        if test_data:
+            from services.evaluation_service import EvaluationService as _EvalSvc
+            for section in template_data.get("sections", []):
+                for field in section.get("fields", []):
+                    if field.get("type") == "table":
+                        fkey = field.get("key", "")
+                        fresh = (
+                            _EvalSvc._eval_table_field(field, test_data)
+                            or _EvalSvc._eval_threshold_table(field, test_data)
+                        )
+                        if fresh:
+                            stored = ev_fields_map.get(fkey, {})
+                            ev_fields_map[fkey] = {**stored, **fresh}
 
         # Per-parameter analytics
         param_rows: list[ParameterAnalytics] = []
@@ -991,15 +1032,23 @@ class AnalyticsEngine:
             for f in (r.critical_findings or []):
                 all_findings.append({**f, "template_key": r.template_key})
 
-        # Count parameters at risk from ParameterAnalytics
+        # Count parameters at risk from ParameterAnalytics - scoped to the
+        # same latest_per_template test results used for equipment_score
+        # above, not the equipment's entire history. Unscoped, a parameter
+        # that was Poor in one test months ago (since retested and now fine)
+        # kept counting forever, and a parameter Poor across several old
+        # tests of the same template counted multiple times instead of
+        # reflecting its one current state.
+        _latest_result_ids = [r.test_result_id for r in latest_per_template]
         at_risk = (
             self.db.query(ParameterAnalytics)
             .filter(
                 ParameterAnalytics.equipment_id == equipment_id,
+                ParameterAnalytics.test_result_id.in_(_latest_result_ids),
                 ParameterAnalytics.condition == "Poor",
             )
             .count()
-        )
+        ) if _latest_result_ids else 0
 
         last_test = max(
             (r.calculated_at for r in latest_per_template if r.calculated_at),

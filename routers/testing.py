@@ -1772,6 +1772,11 @@ async def upload_request_import(
 
     try:
         form_data = parse_structured_import_workbook(file_bytes, tpl)
+    except ValueError as e:
+        # Raised deliberately for a recognisably wrong file (not this
+        # test's template, or not a valid .xlsx at all) - message is
+        # already tester-facing, pass it straight through.
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Could not parse uploaded file: {e}")
 

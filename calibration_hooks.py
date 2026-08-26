@@ -173,6 +173,11 @@ def _on_calibration_completed(db, workflow, user_id, **_kwargs) -> None:
     # Step 2 — re-enable scheduling flag
     svc.resume_schedule(equipment_id=workflow.equipment_id, user_id=user_id)
 
+    # Step 2b — close the OPEN recommendation that gated re-triggering.
+    # Without this, _get_open_repair_recommendation() keeps finding it forever
+    # and every future Fail on this equipment silently creates no new workflow.
+    svc.close_open_recommendation(equipment_id=workflow.equipment_id, user_id=user_id)
+
     # Step 3 — upsert test_request_schedules from latest reading
     # Build a minimal TR-like object from the workflow so upsert_calibration_schedule
     # doesn't need an actual TestingRequest.

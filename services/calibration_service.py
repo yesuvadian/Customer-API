@@ -729,6 +729,23 @@ class CalibrationService:
         self.db.commit()
         return {"equipment_id": str(equipment_id), "is_scheduled": True}
 
+    def close_open_recommendation(
+        self, equipment_id: UUID, user_id: Optional[UUID] = None
+    ) -> None:
+        """
+        Called when the CALIBRATION repair workflow for this equipment completes.
+        Without this, the OPEN recommendation created by _handle_fail() blocks
+        _get_open_repair_recommendation() forever, so a later Fail can never
+        trigger a new workflow for the same equipment (mirrors how
+        RepairWorkflowService closes OverhaulRecommendation on OVERHAUL completion).
+        """
+        rec = self._get_open_repair_recommendation(equipment_id)
+        if not rec:
+            return
+        rec.status = "CLOSED"
+        rec.closed_at = self._utc_now()
+        self.db.commit()
+
     # ── History ───────────────────────────────────────────────────────────────
 
     def get_history(self, equipment_id: UUID) -> dict:

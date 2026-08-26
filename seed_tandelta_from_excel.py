@@ -106,6 +106,40 @@ _BUSHING_DETAILS_PAT = re.compile(r"^(\d+)kvbushingdetails$")
 _BUSHING_TEST_PAT    = re.compile(r"^(\d+)kvbushingtestresults$")
 _CT_SHEET_PAT         = re.compile(r"^(ctstationdetails|ctdetails|cttestresults|station.?baydetails)$")
 
+# Matches a *type-qualified* ITC/Correction Factor label -- "ITC Factor
+# (Winding)", "ITC Factor (220kV Bushing)", "ITC Factor (Bushings)" -- as
+# opposed to the plain "Correction Factor" / "ITC Correction Factor" labels
+# already in _LABEL_MAP. The qualifier lives in the label text itself, not
+# the value, so it has to be pulled out of the row-0 cell text directly
+# rather than via the flat _LABEL_MAP lookup.
+_ITC_ROW_PAT = re.compile(r"^(?:itc|correction)\s*factor\s*\(([^)]*)\)\s*$", re.I)
+
+
+def _classify_itc_qualifier(qualifier: str) -> str:
+    """'Winding' -> 'winding'; '220kV Bushing' -> '220'; 'Bushings' (no kV
+    given) -> 'generic', applied to every bushing kV tested in the block
+    that has no more specific value of its own."""
+    q = qualifier.lower()
+    if "wind" in q:
+        return "winding"
+    m = re.search(r"(\d+)\s*kv", q)
+    if m:
+        return m.group(1)
+    return "generic"
+
+
+# Matches the "Test Date: DD.MM.YYYY" fragment inside a block's own row-0
+# header cell ("SOURCE: <pdf> | Test Date: <date>") -- this is the only place
+# the date lives; it never appears in the nameplate label/value rows, so
+# without this the block-splitter has no way to tell blocks apart by date.
+# A test that spanned multiple days is sometimes written as a day range
+# ("19-20.02.2020") -- the optional leading "<day>-" is skipped so the
+# captured date is the range's end day, used as the effective test date.
+_BLOCK_HEADER_DATE_PAT = re.compile(
+    r"test\s*date\s*:\s*(?:[\d]{1,2}\s*[-–]\s*)?([\d]{1,2}[./\-][\d]{1,2}[./\-][\d]{2,4})",
+    re.I,
+)
+
 _SKIP_ROW_PAT = re.compile(r"^(not present|not tested|not conducted|not reported|note)", re.I)
 
 
@@ -265,8 +299,21 @@ def _find_block_starts(rows: list[tuple]) -> list[int]:
 
 def _parse_block(rows: list[tuple], b_start: int, b_end: int, sheet_name: str) -> dict | None:
     nameplate: dict[str, str] = {}
+
+    # The block's test date lives only in its row-0 "SOURCE: ... | Test Date:
+    # ..." header cell, never in the nameplate label/value rows below it —
+    # pull it out up front so _build_report()'s _LABEL_MAP-driven lookup
+    # (np.get("test_date")) has something to find.
+    if rows and b_start < len(rows[0]):
+        header_cell = rows[0][b_start]
+        if header_cell:
+            m = _BLOCK_HEADER_DATE_PAT.search(str(header_cell))
+            if m:
+                nameplate["test_date"] = m.group(1)
+
     winding_rows: list[dict] = []
     bushing_rows: dict[str, list[dict]] = {kv: [] for kv in _BUSHING_KVS}
+    bushing_details_rows: dict[str, list[dict]] = {kv: [] for kv in _BUSHING_KVS}
     idax_rows: list[dict] = []
     remarks_parts: list[str] = []
     section_notes: dict[str, list[str]] = {}
@@ -341,6 +388,13 @@ def _parse_block(rows: list[tuple], b_start: int, b_end: int, sheet_name: str) -
                 continue
 
         if state == "nameplate":
+            itc_m = _ITC_ROW_PAT.match(text)
+            if itc_m:
+                val = _num(cellB)
+                if val is not None:
+                    nameplate.setdefault("_itc_map", {})[_classify_itc_qualifier(itc_m.group(1))] = val
+                i += 1
+                continue
             key = _LABEL_MAP.get(norm)
             if key:
                 nameplate[key] = _clean(cellB)
@@ -401,9 +455,17 @@ def _parse_block(rows: list[tuple], b_start: int, b_end: int, sheet_name: str) -
                     "tr_analysis_oil": _clean(vals[4]) or None,
                     "_prev_oilcond": prev_oilcond,
                 })
-            # bushing_details rows (Phase/Make/Sl.No/Y.O.Mfg) are informational
-            # nameplate data, not needed by the template's test-results table
-            # -- intentionally not collected.
+            elif table_type == "bushing_details":
+                # Phase | Make | Sl. No. | Y.O. Mfg. -- nameplate row for one
+                # phase of this bushing. Collected raw here; pivoted into the
+                # template's detail/r_phase/y_phase/b_phase shape in
+                # _build_report() via _pivot_bushing_details_rows().
+                bushing_details_rows[current_kv].append({
+                    "phase":  _clean(vals[0]),
+                    "make":   _clean(vals[1]),
+                    "sl_no":  _clean(vals[2]),
+                    "yo_mfg": _clean(vals[3]),
+                })
             i += 1
             continue
 
@@ -422,6 +484,7 @@ def _parse_block(rows: list[tuple], b_start: int, b_end: int, sheet_name: str) -
         "nameplate": nameplate,
         "winding": winding_rows,
         "bushing": bushing_rows,
+        "bushing_details": bushing_details_rows,
         "idax": idax_rows,
         "remarks": " ".join(remarks_parts).strip(),
         "notes": section_notes,
@@ -442,13 +505,66 @@ def _infer_overall_result(remarks: str) -> str:
     return "PASS"
 
 
+_PHASE_COL_MAP = {"r": "r_phase", "y": "y_phase", "b": "b_phase"}
+
+
+def _phase_col(phase_text: str) -> str | None:
+    """Map a raw 'Phase' cell (e.g. \"'R' Phase\", \"R Phase\", \"R\") to the
+    template's r_phase/y_phase/b_phase column key."""
+    m = re.match(r"^[^A-Za-z]*([RYB])", phase_text or "", re.I)
+    return _PHASE_COL_MAP.get(m.group(1).lower()) if m else None
+
+
+def _pivot_bushing_details_rows(rows: list[dict]) -> list[dict]:
+    """Pivot raw Phase/Make/Sl.No/Y.O.Mfg rows (one row per phase) into the
+    template's bushing_{kv}kv_details shape: one row per detail type
+    (Make / Sl. No. / Y.O. Mfg.), with r_phase/y_phase/b_phase columns."""
+    pivoted = {
+        "Make":     {"detail": "Make"},
+        "Sl. No.":  {"detail": "Sl. No."},
+        "Y.O. Mfg.": {"detail": "Y.O. Mfg."},
+    }
+    classified = [(row, _phase_col(row.get("phase", ""))) for row in rows]
+
+    # Some equipment's bushing-details rows are never labelled 'R'/'Y'/'B'
+    # Phase at all -- e.g. a single combined "400kV" row, or "33kV-a"/"33kV-b"
+    # for a two-unit tertiary bushing -- instead of the usual per-phase
+    # triplet (seen throughout e.g. the Hoody R/s workbook). When NONE of a
+    # kV group's rows carry a recognisable phase, place them into the
+    # r_phase/y_phase/b_phase columns positionally, in source order, rather
+    # than silently dropping every row -- which otherwise left the "<kV>
+    # Bushing Details" table entirely blank for that voltage class.
+    if rows and not any(col for _, col in classified):
+        for row, col in zip(rows, ("r_phase", "y_phase", "b_phase")):
+            pivoted["Make"][col]      = row.get("make", "")
+            pivoted["Sl. No."][col]   = row.get("sl_no", "")
+            pivoted["Y.O. Mfg."][col] = row.get("yo_mfg", "")
+        return list(pivoted.values())
+
+    for row, col in classified:
+        if not col:
+            continue
+        pivoted["Make"][col]      = row.get("make", "")
+        pivoted["Sl. No."][col]   = row.get("sl_no", "")
+        pivoted["Y.O. Mfg."][col] = row.get("yo_mfg", "")
+    return list(pivoted.values())
+
+
 def _build_report(block: dict) -> dict:
     np = block["nameplate"]
     winding = block["winding"]
     bushing = block["bushing"]
+    bushing_details = block["bushing_details"]
     idax = block["idax"]
 
+    # Base: legacy single-string "1.2 / 1.1 (ITC, winding/220kV resp.)" form,
+    # still seen in some blocks. Overlaid with the per-row qualified-label
+    # form ("ITC Factor (Winding)" / "ITC Factor (220kV Bushing)" / "ITC
+    # Factor (Bushings)", one value per row) collected into _itc_map, which
+    # is the shape actually used across this workbook's blocks.
     corr = _parse_correction_factor(np.get("_correction_factor_raw"))
+    corr.update(np.get("_itc_map", {}))
+    generic_bushing_itc = corr.pop("generic", None)
     overall_test_kv = _parse_voltage_kv(np.get("test_voltage_kv_raw"))
 
     prev_date_default = _parse_date_str(np.get("previous_test_date"))
@@ -514,9 +630,13 @@ def _build_report(block: dict) -> dict:
     for kv in _BUSHING_KVS:
         rows = bushing.get(kv, [])
         report[f"bushing_{kv}kv"] = strip_row(rows)
-        report[f"bushing_{kv}kv_itc_factor"] = corr.get(kv)
+        itc_val = corr.get(kv)
+        if itc_val is None and rows:
+            itc_val = generic_bushing_itc
+        report[f"bushing_{kv}kv_itc_factor"] = itc_val
         report[f"bushing_{kv}kv_previous_test_date"] = table_prev_date(rows) if rows else None
         report[f"bushing_{kv}kv_observations"] = " ".join(block["notes"].get(f"bushing_{kv}", [])) or ""
+        report[f"bushing_{kv}kv_details"] = _pivot_bushing_details_rows(bushing_details.get(kv, []))
 
     return report
 
