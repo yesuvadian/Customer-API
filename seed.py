@@ -12687,6 +12687,16 @@ def run_seed():
             print(f"[WARN] AI-Assisted Comparison View module seed failed (non-fatal): {_e}")
             traceback.print_exc()
 
+        # ── Consolidated Department (Overview) Dashboard module + admin privileges ──
+        print("\n--- Department Dashboard Module (alter_overview_dashboard_module) ---")
+        try:
+            from alter_overview_dashboard_module import alter_overview_dashboard_module
+            alter_overview_dashboard_module()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Department Dashboard module alter failed (non-fatal): {_e}")
+            traceback.print_exc()
+
         print("\n" + "=" * 80)
         print("  [OK] ALL SEED DATA INSERTED SUCCESSFULLY")
         print("=" * 80)
