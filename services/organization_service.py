@@ -178,6 +178,7 @@ class OrganizationService(UTCDateTimeMixin):
                 role_type="default",
                 is_org_admin=template.is_org_admin,
                 is_dept_admin=template.is_dept_admin,
+                default_module_id=template.default_module_id,
                 is_active=True,
                 cts=self._utc_now(),
                 mts=self._utc_now()

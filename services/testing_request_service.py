@@ -1351,6 +1351,30 @@ class TestingRequestService:
             OrgTestTemplateService(self.db).canonical_templates_for_org(org_id=org_id)
         )
 
+        # Fallback lookup by test-type NAME. provision_global_defaults() binds
+        # one global template per name to whichever CategoryDetails row with
+        # that name happens to come back first — when the same name exists
+        # under more than one equipment master (e.g. "Protection Relay
+        # Calibration and History" also exists under the generic "Calibration
+        # Lifecycle" master), the template can end up linked to the wrong
+        # duplicate's id. Since provisioning already treats same-named types
+        # as interchangeable, mirror that here so the real equipment master
+        # still resolves the template even when the id link points elsewhere.
+        canonical_ids = [tid for tid in canonical.keys() if tid is not None]
+        canonical_detail_names: dict = (
+            dict(
+                self.db.query(CategoryDetails.id, CategoryDetails.name)
+                .filter(CategoryDetails.id.in_(canonical_ids))
+                .all()
+            )
+            if canonical_ids else {}
+        )
+        canonical_by_name: dict[str, OrgTestTemplate] = {}
+        for tid, tpl in canonical.items():
+            name = canonical_detail_names.get(tid)
+            if name:
+                canonical_by_name.setdefault(name, tpl)
+
         result = []
         _CAT_ALIAS = {"repair": "repair_lifecycle"}
         for m in masters:
@@ -1368,7 +1392,7 @@ class TestingRequestService:
             }
             for t in all_types:
                 # Only include if Template Designer has a canonical template for this type
-                tpl = canonical.get(t.id)
+                tpl = canonical.get(t.id) or canonical_by_name.get(t.name)
                 if tpl is None:
                     continue
                 tpl_data = tpl.template_data or {}
