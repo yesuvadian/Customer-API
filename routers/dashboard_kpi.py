@@ -1011,19 +1011,48 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     # can_approve_requests/can_review are already computed above, alongside
     # viewer_approval_stage_ids/viewer_review_stage_ids.
 
-    # Same idea for the leaf-scope "Start Test / Log Reading / Submit Result"
-    # actions — those are L4 Test Execution (can_edit=True), granted only to
-    # AE_RT/AE_RD/AE_JE in the Standard Test Workflow, not AEE. can_act_as_tester
-    # on an EARLIER stage (e.g. AEE's L3 Tester Assignment) means "eligible to
-    # self-assign as tester", not "can currently edit/execute" — a real AEE-R&D
-    # row confirmed can_edit=False on every one of its stages despite
-    # can_act_as_tester=True on L3, so that flag must not be OR'd in here.
+    # "Start Test" — can_edit is the right flag (confirmed live: for every
+    # tester role in every workflow/org in this data, can_act_as_tester is
+    # False everywhere; can_edit is the only permission ever True for them,
+    # and always on the stage carrying the "complete" transition), but it
+    # must be scoped to that SPECIFIC stage, not "does this role have
+    # can_edit=True somewhere" — the "complete" action isn't reserved for a
+    # fixed stage/level (e.g. "L4"); a workflow can put it anywhere. So:
+    # can_edit on the current stage AND that stage has an outgoing
+    # TrWfStageTransition with action_code='complete', found dynamically
+    # per workflow rather than assuming a stage name/sequence number.
+    from models import TrWfStageTransition
     can_test = False
+    assigned_test_count = 0
     if current_user is not None and user_role_ids:
-        can_test = db.query(TrWfStageRole).filter(
-            TrWfStageRole.role_id.in_(user_role_ids),
-            TrWfStageRole.can_edit.is_(True),
-        ).first() is not None
+        viewer_edit_stage_ids = {
+            row[0] for row in db.query(TrWfStageRole.stage_id).filter(
+                TrWfStageRole.role_id.in_(user_role_ids),
+                TrWfStageRole.can_edit.is_(True),
+            ).all()
+        }
+        complete_stage_ids = {
+            row[0] for row in db.query(TrWfStageTransition.from_stage_id).filter(
+                TrWfStageTransition.from_stage_id.in_(viewer_edit_stage_ids),
+                TrWfStageTransition.action_code == 'complete',
+            ).distinct().all()
+        } if viewer_edit_stage_ids else set()
+        can_test = bool(complete_stage_ids)
+        if complete_stage_ids:
+            # Same "a capability with nothing behind it isn't worth a tile"
+            # gate as pending_approval_count/pending_review_count — can_test
+            # says the role COULD complete a test somewhere; this counts
+            # requests actually assigned to THIS user, sitting right now at
+            # one of those completable stages.
+            assigned_test_count = db.query(func.count(TrWfInstance.id)).join(
+                TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id,
+            ).filter(
+                TestingRequest.organization_id == svc.org_id,
+                TestingRequest.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
+                TestingRequest.assigned_tester_id == current_user.id,
+                TrWfInstance.status == 'active',
+                TrWfInstance.current_stage_id.in_(complete_stage_ids),
+            ).scalar() or 0
 
     if not children:
         # Same TestResult evaluation query flagged_equipment() (dashboard_service.py)
@@ -1163,6 +1192,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "closed_this_week_tickets": _ticket_rows(closed_this_week_rows),
             "equipment_count": equipment_count,
             "can_test": can_test,
+            "assigned_test_count": assigned_test_count,
             "can_approve_requests": can_approve_requests,
             "can_review": can_review,
             "weekly_trend": _weekly_trend(svc.dept_ids),
