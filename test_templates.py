@@ -3291,7 +3291,7 @@ TEST_TEMPLATES = {
                                 "config": {
                                     "field": "voltage_ratio",
                                     "operator": "in",
-                                    "values": ["400", "220"],
+                                    "values": ["400", "220", "66"],
                                 },
                             },
                         },
@@ -3299,35 +3299,35 @@ TEST_TEMPLATES = {
                             "test_configuration": "HV-LV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "HV-GND",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "LV-TV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "LV-GND",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "TV-HV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                     ],
@@ -3485,7 +3485,7 @@ TEST_TEMPLATES = {
                 "config": {
                     "field": "voltage_ratio",
                     "operator": "in",
-                    "values": ["400", "220"],
+                    "values": ["400", "220", "66"],
                 },
             },
             "fields": [
@@ -3519,7 +3519,7 @@ TEST_TEMPLATES = {
                 "config": {
                     "field": "voltage_ratio",
                     "operator": "in",
-                    "values": ["400", "220"],
+                    "values": ["400", "220", "66"],
                 },
             },
             "collapsible": True,
@@ -3607,7 +3607,7 @@ TEST_TEMPLATES = {
             "title": "66 kV Bushing Details",
             "visibility_rule": {
                 "type": "COMPARE",
-                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
             },
             "fields": [
                 {
@@ -3637,7 +3637,7 @@ TEST_TEMPLATES = {
             "title": "66 kV Bushing Test Results",
             "visibility_rule": {
                 "type": "COMPARE",
-                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
             },
             "collapsible": True,
             "collapse_control": {
@@ -3841,7 +3841,7 @@ TEST_TEMPLATES = {
             "title": "11 kV Bushing Details",
             "visibility_rule": {
                 "type": "COMPARE",
-                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
             },
             "fields": [
                 {
@@ -3871,7 +3871,7 @@ TEST_TEMPLATES = {
             "title": "11 kV Bushing Test Results",
             "visibility_rule": {
                 "type": "COMPARE",
-                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
             },
             "collapsible": True,
             "collapse_control": {
@@ -4043,7 +4043,7 @@ TEST_TEMPLATES = {
                                 "config": {
                                     "field": "voltage_ratio",
                                     "operator": "in",
-                                    "values": ["400", "220"],
+                                    "values": ["400", "220", "66"],
                                 },
                             },
                         },
@@ -4051,35 +4051,35 @@ TEST_TEMPLATES = {
                             "test_configuration": "HV-LV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "HV-GND",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "LV-TV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "LV-GND",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "TV-HV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                     ],
