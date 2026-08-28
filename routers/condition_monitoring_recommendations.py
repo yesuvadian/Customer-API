@@ -20,6 +20,7 @@ from services.condition_recommendation_service import (
     activate,
     create_config,
     deactivate_config,
+    delete_config_permanently,
     list_configs,
     update_config,
 )
@@ -166,6 +167,15 @@ def delete_config(
     user:   User    = Depends(get_current_user),
 ):
     deactivate_config(db, rec_id)
+
+
+@router.delete("/{rec_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+def delete_config_permanently_route(
+    rec_id: UUID,
+    db:     Session = Depends(get_vendor_db),
+    user:   User    = Depends(get_current_user),
+):
+    delete_config_permanently(db, rec_id)
 
 
 @router.post("/{rec_id}/activate")
