@@ -43,6 +43,7 @@ from models import (
     CategoryMaster,
     Equipment,
     EquipmentAnalytics,
+    EquipmentCriticalityMapping,
     HierarchyAnalytics,
     OrgDepartment,
     OrgTestTemplate,
@@ -1511,6 +1512,114 @@ def get_department_equipment(
         _serialize_equipment_summary(e, analytics_map.get(e.id), type_map)
         for e in equipment_rows
     ]
+
+
+@router.get(
+    "/condition-risk-matrix",
+    summary="Criticality x health-band cross-tab (KPTCL spec §12.5)",
+)
+def get_condition_risk_matrix(
+    department_id: Optional[uuid.UUID] = Query(
+        None,
+        description="Scope to this department + all its descendants. Omit for the org root "
+                    "(Org Admin / no single department) — scoped by organization_id instead, "
+                    "same fallback GET /asset-breakdown already uses.",
+    ),
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    """
+    Cross-tabs equipment by criticality (consequence of failure — from
+    EquipmentCriticalityMapping, admin-configurable, NOT derived from test
+    data) against health band (EquipmentAnalytics.risk_level, the same
+    Low/Medium/High/Critical bands already used everywhere else in the
+    app — condition, not consequence). The two axes are independent by
+    design: a Low-criticality unit in Critical health still needs
+    attention, just less urgently than a Critical-criticality one in the
+    same health band — that's the whole point of the matrix over a single
+    health map.
+    """
+    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
+    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+
+    equipment_q = db.query(Equipment).filter(Equipment.status != "retired")
+    if org_id:
+        equipment_q = equipment_q.filter(Equipment.organization_id == org_id)
+    if dept_ids:
+        equipment_q = equipment_q.filter(Equipment.department_id.in_(dept_ids))
+    equipment_rows = (
+        equipment_q
+        .all()
+    )
+    eq_ids = [e.id for e in equipment_rows]
+
+    analytics_map: dict[uuid.UUID, EquipmentAnalytics] = {
+        ea.equipment_id: ea
+        for ea in db.query(EquipmentAnalytics).filter(EquipmentAnalytics.equipment_id.in_(eq_ids)).all()
+    }
+
+    # Criticality lookup: an exact (equipment_type_id, voltage_class) row
+    # first, falling back to the type-level default (voltage_class IS
+    # NULL), falling back to "Low" if the type has no mapping configured
+    # yet at all — see EquipmentCriticalityMapping's own docstring.
+    mapping_rows = (
+        db.query(EquipmentCriticalityMapping)
+        .filter(EquipmentCriticalityMapping.is_active.is_(True))
+        .all()
+    )
+    specific_criticality = {
+        (m.equipment_type_id, m.voltage_class): m.criticality for m in mapping_rows if m.voltage_class
+    }
+    default_criticality = {
+        m.equipment_type_id: m.criticality for m in mapping_rows if not m.voltage_class
+    }
+
+    def _criticality_for(eq: Equipment) -> str:
+        key = (eq.equipment_type_id, eq.voltage_class)
+        if key in specific_criticality:
+            return specific_criticality[key]
+        if eq.equipment_type_id in default_criticality:
+            return default_criticality[eq.equipment_type_id]
+        return "Low"
+
+    CRITICALITY_TIERS = ["Critical", "High", "Medium", "Low"]
+    HEALTH_BANDS = ["Critical", "High", "Medium", "Low", "Unknown"]
+
+    cells: dict[tuple, list] = {}
+    for e in equipment_rows:
+        crit = _criticality_for(e)
+        ea = analytics_map.get(e.id)
+        health = (ea.risk_level if ea and ea.risk_level else "Unknown")
+        cells.setdefault((crit, health), []).append({
+            "equipment_id": str(e.id),
+            "equipment_label": e.ueic,
+            "health_score": float(ea.health_score) if ea and ea.health_score is not None else None,
+        })
+
+    matrix = [
+        {
+            "criticality": crit,
+            "health_band": health,
+            "count": len(cells.get((crit, health), [])),
+            # Capped — this is a summary grid, not a full equipment list;
+            # the department/equipment endpoints above already serve that.
+            "equipment": cells.get((crit, health), [])[:25],
+        }
+        for crit in CRITICALITY_TIERS
+        for health in HEALTH_BANDS
+    ]
+
+    return {
+        "criticality_tiers": CRITICALITY_TIERS,
+        "health_bands": HEALTH_BANDS,
+        "matrix": matrix,
+        "total_equipment": len(equipment_rows),
+        "unmapped_type_count": sum(
+            1 for e in equipment_rows
+            if e.equipment_type_id not in default_criticality
+            and (e.equipment_type_id, e.voltage_class) not in specific_criticality
+        ),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
