@@ -1270,11 +1270,20 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                 ).distinct().all()
             }
             for e in dqi_all_eq:
+                # Each missing nameplate field gets its own issue code
+                # instead of one blanket "incomplete_nameplate" flag, so
+                # the remediation list says exactly what to go fill in.
                 issues = []
-                if not (e.manufacturer and e.factory_serial_number
-                        and e.year_of_manufacture and e.voltage_class
-                        and e.commissioned_date):
-                    issues.append('incomplete_nameplate')
+                if not e.manufacturer:
+                    issues.append('missing_manufacturer')
+                if not e.factory_serial_number:
+                    issues.append('missing_serial_number')
+                if not e.year_of_manufacture:
+                    issues.append('missing_year_of_manufacture')
+                if not e.voltage_class:
+                    issues.append('missing_voltage_class')
+                if not e.commissioned_date:
+                    issues.append('missing_commissioned_date')
                 if e.id not in _dqi_has_test:
                     issues.append('no_test_history')
                 if e.id in _dqi_overdue:
