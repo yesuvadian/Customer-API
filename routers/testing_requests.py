@@ -708,6 +708,15 @@ def list_testing_requests(
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
     is_closed: Optional[bool] = Query(None, description="True = legacy-closed or wf-completed; False = still active"),
     wf_active: Optional[bool] = Query(None, description="True = only TRs with an active workflow instance (Kanban use)"),
+    include_direct_submissions: bool = Query(
+        False,
+        description=(
+            "Include direct submissions (Failure Registry, TA&QC Inspection) that "
+            "the general list normally excludes — for callers that want a single "
+            "equipment's full request history (e.g. a Failure Registry detail "
+            "panel's related-requests list), not the org-wide TR worklist."
+        ),
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -765,6 +774,7 @@ def list_testing_requests(
         commissioned_year=commissioned_year,
         failure_year=failure_year,
         capacity_mva=capacity_mva,
+        include_direct_submissions=include_direct_submissions,
     )
 
     total = service.count_requests(**common)

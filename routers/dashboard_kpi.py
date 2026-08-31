@@ -713,36 +713,36 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         return out
 
     # "Awaiting approval" isn't one thing — a tr_wf stage flagged
-    # approval_required=True is either a request-routing stage ("Pending L2
-    # Approval", is_result_stage=False) or a result-review stage ("Under L3
-    # Review", is_result_stage=True), and different roles hold rights on each
-    # (EE_TLSS approves L2 routing; AEE_R&T/AEE_R&D review L3 results — a
-    # confirmed AEE-R&D row has can_approve=True on l3_review_result only,
-    # nothing on l2_pending_approval). Lumping them into one count/button
-    # would show a "review" action to a routing-only approver and vice
-    # versa, so split them here — both the status codes (for counting
-    # TestingRequests) and which stages each represents (for checking which
-    # of the two the CALLER's role actually holds). Not the legacy
-    # TestingRequest.status field's own 'submitted'/'pending_approval'
-    # values either — those don't track the real workflow (confirmed live:
-    # current_status_code is what actually advances through the stages;
-    # .status lags behind it). Computed once since _scope_counts runs
-    # per-row, not per query.
+    # A non-result stage ("Pending L2 Approval", "L3 Tester Assignment", …)
+    # or a result-review stage ("Under L3 Review"), and different roles hold
+    # rights on each (EE_TLSS approves L2 routing; AEE_R&T/AEE_R&D review L3
+    # results — a confirmed AEE-R&D row has can_approve=True on
+    # l3_review_result only, nothing on l2_pending_approval). Lumping them
+    # into one count/button would show a "review" action to a routing-only
+    # approver and vice versa, so split them here by which stages each
+    # represents (for checking which of the two the CALLER's role actually
+    # holds). Deliberately NOT filtered by TrWfStatus.approval_required —
+    # that flag means "this status needs an approval-type action", which is
+    # False for l3_pending_assignment (it needs an ASSIGNMENT, not an
+    # approval) and would silently drop that stage from approval_stage_ids
+    # entirely; confirmed live: AEE-R&D holds can_assign (not can_approve)
+    # on L3 Tester Assignment, and the real CM Test Request Approval queue
+    # (testing_request_approvals.py) shows those 6 pending assignments to
+    # them regardless of approval_required — it matches by TrWfStageRole
+    # presence on the stage, not that status flag. Computed once since
+    # _scope_counts runs per-row, not per query.
     from models import TrWfStatus, TrWfDefinition, TrWfStage, TrWfInstance
     stage_rows = (
-        db.query(TrWfStage.id, TrWfStage.is_result_stage, TrWfStatus.status_code)
+        db.query(TrWfStage.id, TrWfStage.is_result_stage)
         .join(TrWfStatus, TrWfStatus.id == TrWfStage.status_id)
         .join(TrWfDefinition, TrWfDefinition.id == TrWfStatus.wf_definition_id)
         .filter(
             TrWfDefinition.org_id == svc.org_id,
-            TrWfStatus.approval_required.is_(True),
             TrWfStatus.is_active.is_(True),
             TrWfStage.is_active.is_(True),
         )
         .all()
     )
-    review_status_codes = list({r.status_code for r in stage_rows if r.is_result_stage})
-    approval_status_codes = list({r.status_code for r in stage_rows if not r.is_result_stage})
     review_stage_ids = {r.id for r in stage_rows if r.is_result_stage}
     approval_stage_ids = {r.id for r in stage_rows if not r.is_result_stage}
 
@@ -768,25 +768,21 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     })
 
     # Which SPECIFIC stages (within the two categories above) the CALLING
-    # viewer's own role(s) actually hold can_approve on. approval_status_codes/
-    # review_status_codes span every TrWfDefinition in the org, not just
-    # Standard Test Workflow — a request sitting in a totally different
-    # workflow (e.g. a Failure Registry ticket on "PM Workflow") can carry a
-    # status code that happens to land in that same set even though the
-    # viewer has zero TrWfStageRole permission on it. Confirmed live:
-    # FR-KP-2026-0001's current_status_code ('fr_pending_l2') matched
-    # approval_status_codes, but that status belongs to PM Workflow's "L2
-    # Initial Review" stage, where can_approve is granted only to EE_TLSS —
-    # AEE_MAINTENANCE has no TrWfStageRole row on that stage at all, yet the
-    # old current_status_code-only count still included it (dashboard showed
-    # 5 pending approvals while the real approval queue — which scopes by
-    # TrWfInstance.current_stage_id against the caller's own stage roles,
-    # see testing_request_approvals.py's /tr-wf/pending — correctly showed 4).
-    # Intersecting the viewer's own can_approve stage_ids against
+    # viewer's own role(s) actually hold can_approve/can_assign on.
+    # approval_stage_ids/review_stage_ids span every TrWfDefinition in the
+    # org, not just Standard Test Workflow — a request sitting in a totally
+    # different workflow (e.g. a Failure Registry ticket on "PM Workflow")
+    # can carry a status that lands in that same set even though the viewer
+    # has zero TrWfStageRole permission on it. Confirmed live once already:
+    # matching on current_status_code alone (an earlier version of this
+    # code) let a PM Workflow status leak into an unrelated org admin's
+    # approval count. Intersecting the viewer's own stage_ids against
     # approval_stage_ids/review_stage_ids ties both the COUNTS and the
     # approvals LIST below to the exact stage instance each request is
     # actually sitting at, matching what the real approval queue shows.
     user_role_ids = []
+    viewer_approve_only_stage_ids = set()
+    viewer_assign_only_stage_ids = set()
     viewer_approval_stage_ids = set()
     viewer_review_stage_ids = set()
     if current_user is not None:
@@ -802,11 +798,43 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                     TrWfStageRole.can_approve.is_(True),
                 ).all()
             }
-            viewer_approval_stage_ids = user_approve_stage_ids & approval_stage_ids
+            # Non-result stages are actionable via can_assign too, not just
+            # can_approve — the real CM Test Request Approval queue
+            # (testing_request_approvals.py's tr_wf_get_pending_queue) shows
+            # a request to any role with ANY TrWfStageRole row on its current
+            # stage, not can_approve specifically. Confirmed live:
+            # AEE-R&D has can_assign=True (not can_approve) on L3 Tester
+            # Assignment, and the real queue correctly shows their pending
+            # assignments there — the dashboard's can_approve-only version
+            # showed 0 for the same user while the real page showed 6.
+            # Result Review stays can_approve-only: "assign" has no meaning
+            # there (nobody gets assigned at a review/finalization stage).
+            user_assign_stage_ids = {
+                row[0] for row in db.query(TrWfStageRole.stage_id).filter(
+                    TrWfStageRole.role_id.in_(user_role_ids),
+                    TrWfStageRole.can_assign.is_(True),
+                ).all()
+            }
+            viewer_approve_only_stage_ids = user_approve_stage_ids & approval_stage_ids
+            viewer_assign_only_stage_ids = user_assign_stage_ids & approval_stage_ids
+            # Union of both — feeds the combined "Needs Your Approval" panel
+            # (_approval_queue below), which lists everything actionable on
+            # this viewer's own non-result stages regardless of which of the
+            # two actions applies to a given row.
+            viewer_approval_stage_ids = (
+                viewer_approve_only_stage_ids | viewer_assign_only_stage_ids
+            )
             viewer_review_stage_ids = user_approve_stage_ids & review_stage_ids
     # System Administrator isn't a participant in this workflow at all, so it
     # must not see either just because it can see every department's rollup.
-    can_approve_requests = bool(viewer_approval_stage_ids)
+    # can_approve_requests/can_assign_requests are separate capabilities —
+    # confirmed live: AEE-R&D holds can_assign (not can_approve) on L3
+    # Tester Assignment, so a single combined "Approve Requests" button
+    # would mislabel what they can actually do there; the Quick Action
+    # button routes to the same tr-wf/approval-queue page either way, but
+    # shows "Assign Requests" instead when that's the real permission.
+    can_approve_requests = bool(viewer_approve_only_stage_ids)
+    can_assign_requests = bool(viewer_assign_only_stage_ids)
     can_review = bool(viewer_review_stage_ids)
 
     # Which roles can actually act as the tester for a department — driven by
@@ -904,18 +932,31 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             _closed_expr,
             TestingRequest.mts >= _now() - timedelta(days=7),
         ).scalar() or 0
-        # Scoped to the CALLING viewer's own can_approve stage_ids (see
-        # viewer_approval_stage_ids/viewer_review_stage_ids above), via the
-        # actual TrWfInstance each request is sitting at — not a
+        # Scoped to the CALLING viewer's own can_approve/can_assign
+        # stage_ids (see viewer_approve_only_stage_ids/
+        # viewer_assign_only_stage_ids/viewer_review_stage_ids above), via
+        # the actual TrWfInstance each request is sitting at — not a
         # current_status_code string match, which can't tell one workflow
-        # definition's stage apart from another's coincidentally-similar one.
+        # definition's stage apart from another's coincidentally-similar
+        # one. Kept as two separate counts (not one combined "awaiting
+        # approval" number) so a role that only holds can_assign somewhere
+        # — AEE-R&D on L3 Tester Assignment, confirmed live — gets an
+        # accurate "Pending Assignment" count instead of being silently
+        # folded into "Pending Approval", which they hold zero of there.
         pending_approval_count = db.query(func.count(TrWfInstance.id)).join(
             TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id,
         ).filter(
             *tr_filters,
             TrWfInstance.status == 'active',
-            TrWfInstance.current_stage_id.in_(viewer_approval_stage_ids),
-        ).scalar() or 0 if viewer_approval_stage_ids else 0
+            TrWfInstance.current_stage_id.in_(viewer_approve_only_stage_ids),
+        ).scalar() or 0 if viewer_approve_only_stage_ids else 0
+        pending_assign_count = db.query(func.count(TrWfInstance.id)).join(
+            TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id,
+        ).filter(
+            *tr_filters,
+            TrWfInstance.status == 'active',
+            TrWfInstance.current_stage_id.in_(viewer_assign_only_stage_ids),
+        ).scalar() or 0 if viewer_assign_only_stage_ids else 0
         pending_review_count = db.query(func.count(TrWfInstance.id)).join(
             TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id,
         ).filter(
@@ -949,15 +990,65 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # due_date (or a dedicated deadline column) is actually preserved
         # through closure.
         compliance_pct = int((completed_requests / total_requests * 100)) if total_requests > 0 else 0
+
+        # Data Quality Index (DQI) — % of active equipment in this scope
+        # meeting all three data-readiness checks: nameplate completeness
+        # (key fields filled), has at least one test result ever, and not
+        # currently overdue for its next scheduled test. Pure computation
+        # over existing tables (Equipment/TestAnalytics/TestingRequest) —
+        # no new column or table. TestAnalytics (not EquipmentAnalytics) is
+        # used for "has test history" because it's one row per test result,
+        # so equipment with old-but-real test history still counts as
+        # having history even if EquipmentAnalytics' own live snapshot were
+        # ever cleared.
+        from models import Equipment as _DqiEquipment, TestAnalytics as _DqiTestAnalytics
+        dqi_eq_filters = [_DqiEquipment.organization_id == svc.org_id, _DqiEquipment.status == 'active']
+        if dept_ids_for_scope:
+            dqi_eq_filters.append(_DqiEquipment.department_id.in_(dept_ids_for_scope))
+        dqi_equipment_rows = db.query(_DqiEquipment).filter(*dqi_eq_filters).all()
+        dqi_total = len(dqi_equipment_rows)
+        dqi_ready = 0
+        if dqi_total > 0:
+            dqi_eq_ids = [e.id for e in dqi_equipment_rows]
+            dqi_has_test_ids = {
+                row[0] for row in db.query(_DqiTestAnalytics.equipment_id)
+                .filter(_DqiTestAnalytics.equipment_id.in_(dqi_eq_ids))
+                .distinct().all()
+            }
+            dqi_overdue_ids = {
+                row[0] for row in db.query(TestingRequest.equipment_id).filter(
+                    TestingRequest.equipment_id.in_(dqi_eq_ids),
+                    TestingRequest.request_category == 'test',
+                    ~_closed_expr,
+                    TestingRequest.due_date < _now(),
+                ).distinct().all()
+            }
+            for e in dqi_equipment_rows:
+                nameplate_ok = bool(
+                    e.manufacturer and e.factory_serial_number
+                    and e.year_of_manufacture and e.voltage_class
+                    and e.commissioned_date
+                )
+                if nameplate_ok and e.id in dqi_has_test_ids and e.id not in dqi_overdue_ids:
+                    dqi_ready += 1
+        # No active equipment yet isn't a data-quality failure — default to
+        # fully ready rather than 0, matching compliance_pct's own "no
+        # evidence of a problem" convention elsewhere in this function.
+        dqi_pct = int((dqi_ready / dqi_total) * 100) if dqi_total > 0 else 100
+
         return {
             "total_tests": total_requests,
             "overdue_count": overdue_count,
             "critical_count": critical_count,
             "pending_approval_count": pending_approval_count,
+            "pending_assign_count": pending_assign_count,
             "pending_review_count": pending_review_count,
             "open_count": open_count,
             "closed_this_week_count": closed_this_week_count,
             "compliance_pct": compliance_pct,
+            "dqi_pct": dqi_pct,
+            "dqi_ready_count": dqi_ready,
+            "dqi_total_count": dqi_total,
         }
 
     # Pending-approval TestingRequests in the given scope, most-recently-
@@ -1011,19 +1102,48 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     # can_approve_requests/can_review are already computed above, alongside
     # viewer_approval_stage_ids/viewer_review_stage_ids.
 
-    # Same idea for the leaf-scope "Start Test / Log Reading / Submit Result"
-    # actions — those are L4 Test Execution (can_edit=True), granted only to
-    # AE_RT/AE_RD/AE_JE in the Standard Test Workflow, not AEE. can_act_as_tester
-    # on an EARLIER stage (e.g. AEE's L3 Tester Assignment) means "eligible to
-    # self-assign as tester", not "can currently edit/execute" — a real AEE-R&D
-    # row confirmed can_edit=False on every one of its stages despite
-    # can_act_as_tester=True on L3, so that flag must not be OR'd in here.
+    # "Start Test" — can_edit is the right flag (confirmed live: for every
+    # tester role in every workflow/org in this data, can_act_as_tester is
+    # False everywhere; can_edit is the only permission ever True for them,
+    # and always on the stage carrying the "complete" transition), but it
+    # must be scoped to that SPECIFIC stage, not "does this role have
+    # can_edit=True somewhere" — the "complete" action isn't reserved for a
+    # fixed stage/level (e.g. "L4"); a workflow can put it anywhere. So:
+    # can_edit on the current stage AND that stage has an outgoing
+    # TrWfStageTransition with action_code='complete', found dynamically
+    # per workflow rather than assuming a stage name/sequence number.
+    from models import TrWfStageTransition
     can_test = False
+    assigned_test_count = 0
     if current_user is not None and user_role_ids:
-        can_test = db.query(TrWfStageRole).filter(
-            TrWfStageRole.role_id.in_(user_role_ids),
-            TrWfStageRole.can_edit.is_(True),
-        ).first() is not None
+        viewer_edit_stage_ids = {
+            row[0] for row in db.query(TrWfStageRole.stage_id).filter(
+                TrWfStageRole.role_id.in_(user_role_ids),
+                TrWfStageRole.can_edit.is_(True),
+            ).all()
+        }
+        complete_stage_ids = {
+            row[0] for row in db.query(TrWfStageTransition.from_stage_id).filter(
+                TrWfStageTransition.from_stage_id.in_(viewer_edit_stage_ids),
+                TrWfStageTransition.action_code == 'complete',
+            ).distinct().all()
+        } if viewer_edit_stage_ids else set()
+        can_test = bool(complete_stage_ids)
+        if complete_stage_ids:
+            # Same "a capability with nothing behind it isn't worth a tile"
+            # gate as pending_approval_count/pending_review_count — can_test
+            # says the role COULD complete a test somewhere; this counts
+            # requests actually assigned to THIS user, sitting right now at
+            # one of those completable stages.
+            assigned_test_count = db.query(func.count(TrWfInstance.id)).join(
+                TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id,
+            ).filter(
+                TestingRequest.organization_id == svc.org_id,
+                TestingRequest.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
+                TestingRequest.assigned_tester_id == current_user.id,
+                TrWfInstance.status == 'active',
+                TrWfInstance.current_stage_id.in_(complete_stage_ids),
+            ).scalar() or 0
 
     if not children:
         # Same TestResult evaluation query flagged_equipment() (dashboard_service.py)
@@ -1117,11 +1237,63 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # tile is "Equipment", not "Awaiting Approval" (an individual tester
         # doesn't approve anything; that's a supervisor-level concept, see
         # _scope_counts' pending_approval_count for the branch-scope version).
-        from models import Equipment
+        from models import Equipment, TestAnalytics
         equipment_count = db.query(func.count(Equipment.id)).filter(
             Equipment.organization_id == svc.org_id,
             Equipment.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
         ).scalar() or 0
+
+        # Equipment failing at least one DQI check (routers/dashboard_kpi.py's
+        # _scope_counts computes the same three checks for the dqi_pct
+        # number — this is the per-equipment remediation list behind it,
+        # leaf-scope only since a task list is only actionable at a single
+        # substation, matching open_tickets/closed_this_week_tickets below).
+        dqi_all_eq = db.query(Equipment).filter(
+            Equipment.organization_id == svc.org_id,
+            Equipment.status == 'active',
+            Equipment.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
+        ).all()
+        dqi_issues = []
+        if dqi_all_eq:
+            _dqi_eq_ids = [e.id for e in dqi_all_eq]
+            _dqi_has_test = {
+                row[0] for row in db.query(TestAnalytics.equipment_id)
+                .filter(TestAnalytics.equipment_id.in_(_dqi_eq_ids))
+                .distinct().all()
+            }
+            _dqi_overdue = {
+                row[0] for row in db.query(TestingRequest.equipment_id).filter(
+                    TestingRequest.equipment_id.in_(_dqi_eq_ids),
+                    TestingRequest.request_category == 'test',
+                    ~leaf_closed_expr,
+                    TestingRequest.due_date < _now(),
+                ).distinct().all()
+            }
+            for e in dqi_all_eq:
+                # Each missing nameplate field gets its own issue code
+                # instead of one blanket "incomplete_nameplate" flag, so
+                # the remediation list says exactly what to go fill in.
+                issues = []
+                if not e.manufacturer:
+                    issues.append('missing_manufacturer')
+                if not e.factory_serial_number:
+                    issues.append('missing_serial_number')
+                if not e.year_of_manufacture:
+                    issues.append('missing_year_of_manufacture')
+                if not e.voltage_class:
+                    issues.append('missing_voltage_class')
+                if not e.commissioned_date:
+                    issues.append('missing_commissioned_date')
+                if e.id not in _dqi_has_test:
+                    issues.append('no_test_history')
+                if e.id in _dqi_overdue:
+                    issues.append('overdue_test')
+                if issues:
+                    dqi_issues.append({
+                        "equipment_id": str(e.id),
+                        "equipment_label": e.ueic,
+                        "issues": issues,
+                    })
 
         def _ticket_rows(query_rows):
             out = []
@@ -1162,8 +1334,11 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "open_tickets": _ticket_rows(open_rows),
             "closed_this_week_tickets": _ticket_rows(closed_this_week_rows),
             "equipment_count": equipment_count,
+            "dqi_issues": dqi_issues,
             "can_test": can_test,
+            "assigned_test_count": assigned_test_count,
             "can_approve_requests": can_approve_requests,
+            "can_assign_requests": can_assign_requests,
             "can_review": can_review,
             "weekly_trend": _weekly_trend(svc.dept_ids),
             **_scope_counts(svc.dept_ids),

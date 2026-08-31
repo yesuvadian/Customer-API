@@ -533,6 +533,24 @@ class WorkflowDispatchService:
         except Exception:
             _adv = 15
 
+        # Same rule as equipment onboarding (test_request_schedule_service.py
+        # instantiate_equipment_schedules): only pre-advance next_run_date for
+        # the long frequencies. For daily/weekly/biweekly, leave it at
+        # schedule_base ("now") so create_one_ticket's own single advance
+        # below is the only one that runs — pre-advancing here too was
+        # stacking two advances back-to-back, e.g. a weekly schedule landing
+        # 14 days out instead of 7.
+        if freq in (
+            ScheduleFrequency.monthly,
+            ScheduleFrequency.quarterly,
+            ScheduleFrequency.semi_annual,
+            ScheduleFrequency.yearly,
+            ScheduleFrequency.triennial,
+        ):
+            next_run_date = _advance_date(schedule_base, freq)
+        else:
+            next_run_date = schedule_base
+
         schedule = TestRequestSchedule(
             equipment_id=tr.equipment_id,
             equipment_type_id=equipment_type_id,
@@ -542,7 +560,7 @@ class WorkflowDispatchService:
             request_category=category,
             frequency=freq,
             start_date=effective_start,
-            next_run_date=_advance_date(schedule_base, freq),
+            next_run_date=next_run_date,
             advance_days=_adv,
             is_active=True,
             created_by=approver_id,

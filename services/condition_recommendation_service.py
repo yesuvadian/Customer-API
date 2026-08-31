@@ -47,6 +47,26 @@ def _parse_frequency(value: str) -> ScheduleFrequency:
         )
 
 
+# Long frequencies are pre-advanced here so `activate()` doesn't fire an
+# immediate ticket for e.g. a yearly schedule; the immediate create_one_ticket
+# call right after this schedule is built does its own single advance from
+# whatever next_run_date we hand it. Short frequencies (daily/weekly/biweekly)
+# must NOT be pre-advanced too, or the two advances stack — a weekly schedule
+# would land 14 days out instead of 7. Mirrors the same rule already used by
+# equipment onboarding (test_request_schedule_service.instantiate_equipment_schedules).
+_LONG_FREQUENCIES = {
+    ScheduleFrequency.monthly,
+    ScheduleFrequency.quarterly,
+    ScheduleFrequency.semi_annual,
+    ScheduleFrequency.yearly,
+    ScheduleFrequency.triennial,
+}
+
+
+def _next_run_date_for(start: datetime, frequency: ScheduleFrequency) -> datetime:
+    return _advance_date(start, frequency) if frequency in _LONG_FREQUENCIES else start
+
+
 # ── Config CRUD ──────────────────────────────────────────────────────────────
 
 def list_configs(
@@ -131,6 +151,18 @@ def deactivate_config(db: Session, rec_id: UUID) -> None:
     if not rec:
         raise HTTPException(status_code=404, detail="Recommendation config not found")
     rec.is_active = False
+    db.commit()
+
+
+def delete_config_permanently(db: Session, rec_id: UUID) -> None:
+    """Hard-deletes the config row. Any activation rows referencing it cascade
+    (condition_recommendation_activations.recommendation_id is ON DELETE CASCADE)."""
+    rec = db.query(ConditionMonitoringRecommendation).filter(
+        ConditionMonitoringRecommendation.id == rec_id
+    ).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation config not found")
+    db.delete(rec)
     db.commit()
 
 
@@ -290,7 +322,7 @@ def activate(
         # Reactivate dormant schedule
         existing.is_active     = True
         existing.start_date    = start
-        existing.next_run_date = _advance_date(start, rec.frequency)
+        existing.next_run_date = _next_run_date_for(start, rec.frequency)
         existing.frequency     = rec.frequency
         schedule = existing
     else:
@@ -304,7 +336,7 @@ def activate(
         ).first()
 
         test_type     = rec.test_type
-        next_run_date = _advance_date(start, rec.frequency)
+        next_run_date = _next_run_date_for(start, rec.frequency)
 
         if master_template:
             schedule = TestRequestSchedule(
