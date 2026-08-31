@@ -5580,6 +5580,101 @@ class EquipmentConditionBandThreshold(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ParameterThresholdBand(Base):
+    """Flattened, queryable per-parameter threshold bounds — a projection
+    of the table-row THRESHOLD rule configs already in test_templates.py
+    (transformer_oil_test's Acidity/Resistivity/etc bands, transformer_dga's
+    per-gas IS/IEC bands, and any other table field with rule.type ==
+    "THRESHOLD"), extracted by alter_parameter_threshold_band.py.
+
+    Exists because breach-proximity forecasting needs "how far is this
+    parameter's current value from its own real alert/critical bound" as a
+    fast, single query — the source config is nested JSON keyed by row
+    identifier and (for most templates) a second context key (voltage
+    band, calibration standard), which is fine for the form-rendering /
+    evaluation-at-submission-time use it was built for
+    (services/evaluation_service.py's _eval_threshold_table already parses
+    it correctly for that), but awkward and slow to re-parse per
+    equipment on every dashboard request.
+
+    The nested template config stays authoritative (edited via the
+    Template Designer) — this table is a read-optimized copy of it,
+    refreshed by re-running the alter script, not an independent second
+    place admins edit thresholds. band_label/lower_bound/upper_bound
+    mirror the config's own [lo, hi] pairs exactly; NULL upper_bound means
+    "no upper limit" (the config's own `None` for the open-ended worst
+    band), matching the source format's own convention.
+    """
+    __tablename__ = "parameter_threshold_bands"
+    __table_args__ = (
+        UniqueConstraint("template_key", "parameter_key", "context_key", "band_label",
+                          name="uq_threshold_band"),
+        {"schema": "public"},
+    )
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    template_key  = Column(String(100), nullable=False, index=True)   # e.g. "transformer_oil_test"
+    parameter_key = Column(String(200), nullable=False, index=True)   # row identifier, e.g. "Acidity", "Methane"
+    # NULL = the threshold applies regardless of context (a flat, single-
+    # level thresholds config). Non-NULL is whatever context the source
+    # config keys on for that parameter — a voltage band (">170kV"), a
+    # calibration standard ("IS 10593:2017"), etc. — free text, not a
+    # fixed enum, since different templates use different context axes.
+    context_key   = Column(String(50), nullable=True)
+    band_label    = Column(String(30), nullable=False)   # "Good" | "Fair" | "Poor" | "Normal" | "Alert" | ... (free text, matches source)
+    lower_bound   = Column(Numeric(14, 6), nullable=True)
+    upper_bound   = Column(Numeric(14, 6), nullable=True)  # NULL = open-ended (the source config's `None`)
+    is_active     = Column(Boolean, default=True)
+    notes         = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ConditionBandRankWord(Base):
+    """Admin-configurable word/phrase → severity rank (0=best, 1=mid,
+    2=worst), used to rank an arbitrary FREE-TEXT band label a test
+    template author typed (e.g. "Good", "Fair", "Not OK", "Alert",
+    "Excellent") — templates don't use a fixed band-name enum, so ranking
+    them needs a word-matching lookup rather than a direct enum mapping.
+
+    Replaces two independent, drifting hardcoded copies of the same word
+    list: routers/analytics.py's _BAND_RANK_WORDS (used by
+    _next_worse_boundary to rank ParameterThresholdBand rows for breach
+    forecasting) and services/evaluation_service.py's _cond_rank (used by
+    _eval_threshold_table to rank a table row's own bands at
+    test-evaluation time) — confirmed live the two copies had already
+    drifted (analytics.py's had "excellent", evaluation_service.py's
+    didn't). Both now read from this one table via
+    services/analytics_engine.py's _load_band_rank_words, the same
+    db-with-hardcoded-fallback pattern as _load_risk_bands/
+    _load_condition_labels/_load_condition_scores just above.
+
+    `phrase` is matched as a case-insensitive substring against the band
+    label text (e.g. "not ok" must be checked before the bare word "ok"
+    would otherwise match first) — ranking here doesn't change how a
+    label is matched, only where the word list itself lives.
+    """
+    __tablename__ = "condition_band_rank_words"
+    __table_args__ = (
+        UniqueConstraint("phrase", name="uq_band_rank_word_phrase"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    phrase    = Column(String(30), nullable=False)   # e.g. "good", "not ok", "critical"
+    rank      = Column(Integer, nullable=False)       # 0 = best, 1 = mid, 2 = worst
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # CONDITION MONITORING RECOMMENDATIONS
 # ═══════════════════════════════════════════════════════════════════════════

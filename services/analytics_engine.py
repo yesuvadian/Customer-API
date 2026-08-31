@@ -32,6 +32,7 @@ from typing import Optional
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+import config
 from models import (
     Equipment,
     EquipmentAnalytics,
@@ -141,6 +142,36 @@ def _load_condition_scores(db: Optional[Session]) -> dict[str, float]:
     return {r.condition: float(r.score) for r in rows}
 
 
+_DEFAULT_BAND_RANK_WORDS: dict[str, int] = {
+    "good": 0, "normal": 0, "pass": 0, "ok": 0, "excellent": 0,
+    "fair": 1, "alert": 1, "warning": 1, "monitor": 1,
+    "poor": 2, "critical": 2, "abnormal": 2, "fail": 2, "not ok": 2,
+}
+
+
+def _load_band_rank_words(db: Optional[Session]) -> dict[str, int]:
+    """Admin-configured {phrase: rank} map (ConditionBandRankWord) used to
+    rank an arbitrary free-text band label (e.g. "Good", "Fair", "Not OK")
+    by severity. Falls back to _DEFAULT_BAND_RANK_WORDS if no db session
+    was given or the table has no active rows yet, same reasoning as
+    _load_risk_bands. Shared by routers/analytics.py's _band_rank (breach
+    forecasting) and services/evaluation_service.py's _cond_rank
+    (test-evaluation-time band ranking) — was two independently hardcoded,
+    already-drifted copies of the same word list before this.
+    """
+    if db is None:
+        return _DEFAULT_BAND_RANK_WORDS
+    from models import ConditionBandRankWord
+    rows = (
+        db.query(ConditionBandRankWord)
+        .filter(ConditionBandRankWord.is_active.is_(True))
+        .all()
+    )
+    if not rows:
+        return _DEFAULT_BAND_RANK_WORDS
+    return {r.phrase.lower(): r.rank for r in rows}
+
+
 def _risk_from_score(
     score: Optional[float],
     critical_findings: list | None = None,
@@ -215,11 +246,24 @@ class ParameterAnalyzer:
     """
 
     # Minimum readings needed for trend calculation
-    MIN_TREND_POINTS = 1
+    MIN_TREND_POINTS = config.ANALYTICS_MIN_TREND_POINTS
     # Slope considered "stable" if |slope * 365| < this fraction of the value range
-    STABLE_FRACTION  = 0.05
+    STABLE_FRACTION  = config.ANALYTICS_STABLE_FRACTION
     # Z-score threshold for anomaly
-    ANOMALY_Z        = 3.0
+    ANOMALY_Z        = config.ANALYTICS_ANOMALY_Z
+    # Minimum goodness-of-fit before a slope's DIRECTION is trusted at all.
+    # Confirmed live: Acidity readings bouncing noisily between 0.004 and
+    # 0.017 mg KOH/g across 10 real tests over 6 years (r_squared=0.0837 —
+    # the line explains 8% of the variance) still came out confidently
+    # labeled "Increasing", because trend classification only ever compared
+    # the slope's annualized MAGNITUDE against STABLE_FRACTION and never
+    # looked at how well the line actually fits. This is a property of the
+    # shared ParameterAnalyzer.analyse() every parameter goes through
+    # (table-row and flat-field alike, every test template), not a
+    # per-template special case, so gating on it here fixes it everywhere
+    # at once rather than needing a separate patch per test type. Tunable
+    # via config.py/ANALYTICS_MIN_TREND_R_SQUARED without a code deploy.
+    MIN_TREND_R_SQUARED = config.ANALYTICS_MIN_TREND_R_SQUARED
 
     @staticmethod
     def analyse(
@@ -309,10 +353,13 @@ class ParameterAnalyzer:
             else:
                 result["trend"] = "Stable"
 
-            if slope != 0:
-                ParameterAnalyzer._forecast_breach(
-                    values[-1], dates[-1], slope, evaluation, result
-                )
+            # No breach forecast off just 2 points: a 2-point line fits
+            # "perfectly" by construction with no way to check it (that's
+            # exactly why r_squared is left None above), which is even less
+            # reliable than a real regression that fails the r² gate below —
+            # forecasting a crossing date from it would be worse than the
+            # low-r² case this fix targets, not better just because r² can't
+            # be computed to catch it.
             return result
 
         # Build x-axis as elapsed days from first observation
@@ -336,15 +383,28 @@ class ParameterAnalyzer:
         # Trend classification
         val_range = max(values) - min(values) if len(values) > 1 else abs(values[0])
         stable_threshold = (val_range or abs(values[-1]) or 1) * ParameterAnalyzer.STABLE_FRACTION
-        if annual_change > stable_threshold:
+        fit_is_reliable = r_sq >= ParameterAnalyzer.MIN_TREND_R_SQUARED
+        if not fit_is_reliable:
+            # The line doesn't explain enough of the actual variance to
+            # trust a direction from it, regardless of how large the
+            # slope's annualized magnitude looks — see MIN_TREND_R_SQUARED's
+            # docstring. trend_slope/annual_change/trend_r_squared above are
+            # still the real, honest numbers (a low r² is itself useful
+            # information), just not promoted into a confident direction.
+            result["trend"] = "Stable"
+        elif annual_change > stable_threshold:
             result["trend"] = "Increasing"
         elif annual_change < -stable_threshold:
             result["trend"] = "Decreasing"
         else:
             result["trend"] = "Stable"
 
-        # Breach forecast — only if slope is non-zero and we have thresholds
-        if slope != 0:
+        # Breach forecast — only if slope is non-zero, we have thresholds,
+        # AND the fit is reliable enough to trust a direction from at all
+        # (see fit_is_reliable above) — forecasting a crossing date off a
+        # slope that barely fits the data would be actively misleading, not
+        # just an unconfirmed trend label.
+        if slope != 0 and fit_is_reliable:
             ParameterAnalyzer._forecast_breach(
                 values[-1], dates[-1], slope, evaluation, result
             )
