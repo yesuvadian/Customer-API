@@ -990,6 +990,52 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # due_date (or a dedicated deadline column) is actually preserved
         # through closure.
         compliance_pct = int((completed_requests / total_requests * 100)) if total_requests > 0 else 0
+
+        # Data Quality Index (DQI) — % of active equipment in this scope
+        # meeting all three data-readiness checks: nameplate completeness
+        # (key fields filled), has at least one test result ever, and not
+        # currently overdue for its next scheduled test. Pure computation
+        # over existing tables (Equipment/TestAnalytics/TestingRequest) —
+        # no new column or table. TestAnalytics (not EquipmentAnalytics) is
+        # used for "has test history" because it's one row per test result,
+        # so equipment with old-but-real test history still counts as
+        # having history even if EquipmentAnalytics' own live snapshot were
+        # ever cleared.
+        from models import Equipment as _DqiEquipment, TestAnalytics as _DqiTestAnalytics
+        dqi_eq_filters = [_DqiEquipment.organization_id == svc.org_id, _DqiEquipment.status == 'active']
+        if dept_ids_for_scope:
+            dqi_eq_filters.append(_DqiEquipment.department_id.in_(dept_ids_for_scope))
+        dqi_equipment_rows = db.query(_DqiEquipment).filter(*dqi_eq_filters).all()
+        dqi_total = len(dqi_equipment_rows)
+        dqi_ready = 0
+        if dqi_total > 0:
+            dqi_eq_ids = [e.id for e in dqi_equipment_rows]
+            dqi_has_test_ids = {
+                row[0] for row in db.query(_DqiTestAnalytics.equipment_id)
+                .filter(_DqiTestAnalytics.equipment_id.in_(dqi_eq_ids))
+                .distinct().all()
+            }
+            dqi_overdue_ids = {
+                row[0] for row in db.query(TestingRequest.equipment_id).filter(
+                    TestingRequest.equipment_id.in_(dqi_eq_ids),
+                    TestingRequest.request_category == 'test',
+                    ~_closed_expr,
+                    TestingRequest.due_date < _now(),
+                ).distinct().all()
+            }
+            for e in dqi_equipment_rows:
+                nameplate_ok = bool(
+                    e.manufacturer and e.factory_serial_number
+                    and e.year_of_manufacture and e.voltage_class
+                    and e.commissioned_date
+                )
+                if nameplate_ok and e.id in dqi_has_test_ids and e.id not in dqi_overdue_ids:
+                    dqi_ready += 1
+        # No active equipment yet isn't a data-quality failure — default to
+        # fully ready rather than 0, matching compliance_pct's own "no
+        # evidence of a problem" convention elsewhere in this function.
+        dqi_pct = int((dqi_ready / dqi_total) * 100) if dqi_total > 0 else 100
+
         return {
             "total_tests": total_requests,
             "overdue_count": overdue_count,
@@ -1000,6 +1046,9 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "open_count": open_count,
             "closed_this_week_count": closed_this_week_count,
             "compliance_pct": compliance_pct,
+            "dqi_pct": dqi_pct,
+            "dqi_ready_count": dqi_ready,
+            "dqi_total_count": dqi_total,
         }
 
     # Pending-approval TestingRequests in the given scope, most-recently-
@@ -1188,11 +1237,63 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # tile is "Equipment", not "Awaiting Approval" (an individual tester
         # doesn't approve anything; that's a supervisor-level concept, see
         # _scope_counts' pending_approval_count for the branch-scope version).
-        from models import Equipment
+        from models import Equipment, TestAnalytics
         equipment_count = db.query(func.count(Equipment.id)).filter(
             Equipment.organization_id == svc.org_id,
             Equipment.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
         ).scalar() or 0
+
+        # Equipment failing at least one DQI check (routers/dashboard_kpi.py's
+        # _scope_counts computes the same three checks for the dqi_pct
+        # number — this is the per-equipment remediation list behind it,
+        # leaf-scope only since a task list is only actionable at a single
+        # substation, matching open_tickets/closed_this_week_tickets below).
+        dqi_all_eq = db.query(Equipment).filter(
+            Equipment.organization_id == svc.org_id,
+            Equipment.status == 'active',
+            Equipment.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
+        ).all()
+        dqi_issues = []
+        if dqi_all_eq:
+            _dqi_eq_ids = [e.id for e in dqi_all_eq]
+            _dqi_has_test = {
+                row[0] for row in db.query(TestAnalytics.equipment_id)
+                .filter(TestAnalytics.equipment_id.in_(_dqi_eq_ids))
+                .distinct().all()
+            }
+            _dqi_overdue = {
+                row[0] for row in db.query(TestingRequest.equipment_id).filter(
+                    TestingRequest.equipment_id.in_(_dqi_eq_ids),
+                    TestingRequest.request_category == 'test',
+                    ~leaf_closed_expr,
+                    TestingRequest.due_date < _now(),
+                ).distinct().all()
+            }
+            for e in dqi_all_eq:
+                # Each missing nameplate field gets its own issue code
+                # instead of one blanket "incomplete_nameplate" flag, so
+                # the remediation list says exactly what to go fill in.
+                issues = []
+                if not e.manufacturer:
+                    issues.append('missing_manufacturer')
+                if not e.factory_serial_number:
+                    issues.append('missing_serial_number')
+                if not e.year_of_manufacture:
+                    issues.append('missing_year_of_manufacture')
+                if not e.voltage_class:
+                    issues.append('missing_voltage_class')
+                if not e.commissioned_date:
+                    issues.append('missing_commissioned_date')
+                if e.id not in _dqi_has_test:
+                    issues.append('no_test_history')
+                if e.id in _dqi_overdue:
+                    issues.append('overdue_test')
+                if issues:
+                    dqi_issues.append({
+                        "equipment_id": str(e.id),
+                        "equipment_label": e.ueic,
+                        "issues": issues,
+                    })
 
         def _ticket_rows(query_rows):
             out = []
@@ -1233,6 +1334,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "open_tickets": _ticket_rows(open_rows),
             "closed_this_week_tickets": _ticket_rows(closed_this_week_rows),
             "equipment_count": equipment_count,
+            "dqi_issues": dqi_issues,
             "can_test": can_test,
             "assigned_test_count": assigned_test_count,
             "can_approve_requests": can_approve_requests,
