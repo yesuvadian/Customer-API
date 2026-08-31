@@ -56,6 +56,7 @@ from models import (
 )
 from services.condition_recommendation_service import evaluate_for_equipment
 from services.analytics_engine import AnalyticsEngine, _risk_from_score
+from utils.common_service import get_user_dept_scope
 
 logger = logging.getLogger(__name__)
 
@@ -615,7 +616,13 @@ def get_analytics_dashboard(
     """
     # ── 1. Resolve equipment IDs in scope ────────────────────────────────────
     org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
-    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+    _user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    is_admin, user_dept_id = get_user_dept_scope(db, _user_id, org_id) if _user_id else (True, None)
+    # An explicit department_id (already drilled in) always wins; otherwise a
+    # dept-scoped (e.g. substation-level) user is confined to their own
+    # subtree so this dashboard never defaults to org-wide data for them.
+    effective_department_id = department_id or (None if is_admin else user_dept_id)
+    dept_ids = _collect_department_ids(effective_department_id, db) if effective_department_id else None
 
     # Testing Kits are excluded from /asset-breakdown's equipment scope (they
     # aren't real substation assets), but this endpoint's KPI scope had no
@@ -957,8 +964,22 @@ def get_analytics_dashboard(
             .filter(OrgDepartment.parent_department_id == department_id)
             .all()
         )
+    elif not is_admin and user_dept_id:
+        # Dept-scoped user's root view — just their own department (mirrors
+        # the root_id behavior in /testing_requests/department_hierarchy),
+        # never the org's full list of top-level zones they can't access.
+        child_ha_rows = (
+            db.query(HierarchyAnalytics)
+            .filter(HierarchyAnalytics.department_id == user_dept_id)
+            .all()
+        )
+        all_child_depts = (
+            db.query(OrgDepartment)
+            .filter(OrgDepartment.id == user_dept_id)
+            .all()
+        )
     else:
-        # No dept selected: return root departments (parent_department_id IS NULL)
+        # No dept selected, org admin: return root departments (parent_department_id IS NULL)
         _scope_org_id = org_id  # use authenticated user's org directly
         _ha_q = db.query(HierarchyAnalytics).filter(
             HierarchyAnalytics.parent_department_id.is_(None)
