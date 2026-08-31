@@ -5395,6 +5395,47 @@ class EquipmentTypeKitMapping(Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# EQUIPMENT CRITICALITY MAPPING
+# ═══════════════════════════════════════════════════════════════════════════
+
+class EquipmentCriticalityMapping(Base):
+    """Default criticality (consequence-of-failure, not condition/health) per
+    equipment type, optionally refined by voltage class — the input KPTCL
+    spec §12.5's Condition Risk Matrix crosses against EquipmentAnalytics'
+    health_score. System-administrator configurable, not hardcoded — mirrors
+    EquipmentTypeKitMapping's own per-equipment-type lookup pattern above.
+
+    Lookup precedence for a given piece of equipment: an exact
+    (equipment_type_id, voltage_class) row first; falling back to the
+    type-level default row (voltage_class IS NULL) if no voltage-specific
+    override exists; falling back to "Low" if the type has no mapping at
+    all yet.
+    """
+    __tablename__ = "equipment_criticality_mappings"
+    __table_args__ = (
+        UniqueConstraint("equipment_type_id", "voltage_class", name="uq_eq_criticality_type_voltage"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    # NULL = the type-level default, applies at any voltage class. A row
+    # with a specific voltage_class overrides that default for just that
+    # voltage (e.g. CT defaults Medium, but a 220kV CT is High).
+    voltage_class = Column(String(20), nullable=True)
+    criticality   = Column(String(20), nullable=False)  # Low | Medium | High | Critical
+    is_active     = Column(Boolean, default=True)
+    notes         = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # CONDITION MONITORING RECOMMENDATIONS
 # ═══════════════════════════════════════════════════════════════════════════
 
