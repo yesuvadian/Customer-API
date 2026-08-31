@@ -55,13 +55,36 @@ from models import (
     TestingRequest,
 )
 from services.condition_recommendation_service import evaluate_for_equipment
-from services.analytics_engine import AnalyticsEngine, _risk_from_score
+from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands
+from category_labels import RiskLevelColors
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 _CAPACITY_NUM_RE = re.compile(r"[\d.]+")
+
+
+def _severity_order_labels(db: Session) -> list[str]:
+    """Risk-band labels, worst first (Critical..Low by default) — derived
+    from EquipmentHealthBandThreshold (services/analytics_engine.py's
+    _load_risk_bands, which already reads that table) rather than a second
+    independent hardcoded list. _load_risk_bands returns highest-threshold
+    (least severe) first; reversed here for "worst first" ordering.
+
+    Reused for both the Condition Risk Matrix's axis labels and equipment
+    worst-first sort order — those two concerns (which band names exist,
+    and which order counts as "worse") previously lived in two more
+    separate hardcoded copies (CRITICALITY_TIERS/HEALTH_BANDS and
+    _risk_order) that could silently drift out of sync with each other and
+    with the admin-configurable table if, say, an admin renamed a band.
+    """
+    return [label for _, label in reversed(_load_risk_bands(db))]
+
+
+def _severity_rank_map(db: Session) -> dict[str, int]:
+    """{label: rank} from _severity_order_labels, 0 = most severe."""
+    return {label: i for i, label in enumerate(_severity_order_labels(db))}
 
 
 def _parse_capacity_mva(raw) -> float | None:
@@ -195,7 +218,7 @@ def _lab_only_scores(eq_ids: list, db: Session) -> dict:
         scores = [float(r.health_score) for r in lab_rows if r.health_score is not None]
         score = round(mean(scores), 2) if scores else None
         findings = [f for r in lab_rows for f in (r.critical_findings or [])]
-        risk = _risk_from_score(score, findings)
+        risk = _risk_from_score(score, findings, db)
         out[eq_id] = (score, risk, findings)
     return out
 
@@ -322,17 +345,26 @@ def get_asset_breakdown(
     }
 
     def _empty_health() -> dict:
-        return {"critical": 0, "high": 0, "healthy": 0, "untested": 0, "sum": 0.0, "cnt": 0}
+        return {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0,
+                "untested": 0, "sum": 0.0, "cnt": 0}
 
     def _add_health(bucket: dict, eq_id, tested: bool, source=None) -> None:
         """Fold one equipment into exactly one bucket, so critical + high +
-        healthy + untested always equals the group's total asset count.
-        `tested` = has a qualifying completed test (in-range when a date
-        filter is active, ever otherwise); equipment with no analytics row
-        yet (never assessed) always lands in "untested" regardless.
-        `source` supplies risk_level/health_score — a date-scoped TestAnalytics
-        snapshot when a range is active; falls back to the all-time
-        lab_ea_map lookup (lab-tests-only score/risk) when omitted."""
+        medium + low + unknown + untested always equals the group's total
+        asset count. `tested` = has a qualifying completed test (in-range
+        when a date filter is active, ever otherwise); equipment with no
+        analytics row yet (never assessed) always lands in "untested"
+        regardless. `source` supplies risk_level/health_score — a date-scoped
+        TestAnalytics snapshot when a range is active; falls back to the
+        all-time lab_ea_map lookup (lab-tests-only score/risk) when omitted.
+
+        Four real bands (Critical/High/Medium/Low), not the previous
+        Critical/High/"everything else called Healthy" — that collapsed
+        Medium into the same bucket as Low, which visibly disagreed with
+        the Condition Risk Matrix's own Critical/High/Medium/Low breakdown
+        for the same equipment (confirmed live: 220kV BIAL Begur showed
+        "4 Healthy" here while the matrix correctly showed 2 Medium + 2 Low).
+        """
         src = source if source is not None else lab_ea_map.get(eq_id)
         if tested and src:
             rl = (src.risk_level or "").strip()
@@ -340,8 +372,12 @@ def get_asset_breakdown(
                 bucket["critical"] += 1
             elif rl == "High":
                 bucket["high"] += 1
+            elif rl == "Medium":
+                bucket["medium"] += 1
+            elif rl == "Low":
+                bucket["low"] += 1
             else:
-                bucket["healthy"] += 1
+                bucket["unknown"] += 1
             if src.health_score is not None:
                 bucket["sum"] += float(src.health_score)
                 bucket["cnt"] += 1
@@ -352,7 +388,9 @@ def get_asset_breakdown(
         return {
             "critical":   bucket["critical"],
             "high":       bucket["high"],
-            "healthy":    bucket["healthy"],
+            "medium":     bucket["medium"],
+            "low":        bucket["low"],
+            "unknown":    bucket["unknown"],
             "untested":   bucket["untested"],
             "avg_health": round(bucket["sum"] / bucket["cnt"], 1) if bucket["cnt"] > 0 else None,
         }
@@ -1329,7 +1367,7 @@ def get_dashboard_equipment(
         at_risk_params_map.setdefault(eq_id, set()).add(label or key)
     at_risk_params_map = {k: sorted(v) for k, v in at_risk_params_map.items()}
 
-    _risk_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+    _risk_order = _severity_rank_map(db)
 
     def _sort_key(eq: Equipment):
         score, risk, _f = lab_map.get(eq.id, (None, "Unknown", []))
@@ -1574,16 +1612,30 @@ def get_condition_risk_matrix(
         m.equipment_type_id: m.criticality for m in mapping_rows if not m.voltage_class
     }
 
+    severity_labels = _severity_order_labels(db)  # worst-first, from EquipmentHealthBandThreshold
+    least_severe_label = severity_labels[-1] if severity_labels else "Low"
+
     def _criticality_for(eq: Equipment) -> str:
         key = (eq.equipment_type_id, eq.voltage_class)
         if key in specific_criticality:
             return specific_criticality[key]
         if eq.equipment_type_id in default_criticality:
             return default_criticality[eq.equipment_type_id]
-        return "Low"
+        return least_severe_label
 
-    CRITICALITY_TIERS = ["Critical", "High", "Medium", "Low"]
-    HEALTH_BANDS = ["Critical", "High", "Medium", "Low", "Unknown"]
+    # Both axes reuse the same admin-configured severity vocabulary
+    # (EquipmentHealthBandThreshold) rather than two more independent
+    # hardcoded label lists: HEALTH_BANDS directly because that table is
+    # literally what produced every equipment's risk_level in the first
+    # place, plus "Unknown" for equipment with no analytics yet.
+    # CRITICALITY_TIERS is a deliberate simplification — criticality
+    # (EquipmentCriticalityMapping) is a conceptually separate axis
+    # (consequence-of-failure, not condition) that happens to share the
+    # same 4 names today; if KPTCL ever wants criticality tiers named
+    # differently from health bands, this reuse should be split into its
+    # own small ordered table instead of assuming they always match.
+    CRITICALITY_TIERS = severity_labels
+    HEALTH_BANDS = severity_labels + ["Unknown"]
 
     cells: dict[tuple, list] = {}
     for e in equipment_rows:
@@ -1612,6 +1664,12 @@ def get_condition_risk_matrix(
     return {
         "criticality_tiers": CRITICALITY_TIERS,
         "health_bands": HEALTH_BANDS,
+        # Colors decided once, here, from RiskLevelColors — not left for the
+        # frontend to guess per screen (that's exactly how this widget's own
+        # earlier bug happened: analytics_dashboard_page.dart colored the
+        # same bands differently from this matrix). The frontend renders
+        # whichever hex string it's given rather than deciding one itself.
+        "band_colors": {label: RiskLevelColors.get(label) for label in HEALTH_BANDS},
         "matrix": matrix,
         "total_equipment": len(equipment_rows),
         "unmapped_type_count": sum(
@@ -1619,6 +1677,135 @@ def get_condition_risk_matrix(
             if e.equipment_type_id not in default_criticality
             and (e.equipment_type_id, e.voltage_class) not in specific_criticality
         ),
+    }
+
+
+@router.get(
+    "/deterioration-watch-list",
+    summary="Equipment trending toward a threshold breach, before they get there (KPTCL spec §12.2 / §14.3)",
+)
+def get_deterioration_watch_list(
+    department_id: Optional[uuid.UUID] = Query(
+        None,
+        description="Scope to this department + all its descendants. Omit for the org root, "
+                    "same organization_id fallback as /condition-risk-matrix and /asset-breakdown.",
+    ),
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    """
+    Surfaces equipment with a statistically significant trend on a key test
+    parameter, even though that parameter's latest reading hasn't crossed
+    into ALERT/CRITICAL yet — the whole point being to catch deterioration
+    before it becomes an incident, not after. Reuses computation the
+    analytics engine already does and stores on every test
+    (ParameterAnalytics.trend/trend_slope/days_to_breach from
+    services/analytics_engine.py's linear-regression + breach-forecast
+    logic) rather than re-deriving trend detection here — this endpoint is
+    just the cross-equipment aggregation of that signal that didn't
+    previously exist anywhere (it was only ever surfaced one equipment at
+    a time, on that equipment's own profile page).
+
+    "Trending toward breach" is read from days_to_breach / breach_threshold
+    (which the analytics engine already resolves in the correct direction
+    per parameter — some parameters are worse going up, e.g. DGA gas ppm,
+    others worse going down, e.g. insulation resistance) rather than
+    assuming trend == "Decreasing" is always the bad direction, which
+    would be wrong for exactly the parameters where it matters most.
+    """
+    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
+    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+
+    equipment_q = db.query(Equipment).filter(Equipment.status != "retired")
+    if org_id:
+        equipment_q = equipment_q.filter(Equipment.organization_id == org_id)
+    if dept_ids:
+        equipment_q = equipment_q.filter(Equipment.department_id.in_(dept_ids))
+    equipment_rows = equipment_q.all()
+    eq_by_id = {e.id: e for e in equipment_rows}
+    eq_ids = list(eq_by_id.keys())
+
+    if not eq_ids:
+        return {"total_equipment": 0, "watch_count": 0, "equipment": []}
+
+    analytics_map = {
+        ea.equipment_id: ea
+        for ea in db.query(EquipmentAnalytics).filter(EquipmentAnalytics.equipment_id.in_(eq_ids)).all()
+    }
+
+    # Every historical row for these equipment, newest first — deduped
+    # below to the latest row per (equipment_id, parameter_key) before any
+    # trend/status filtering, so a stale-but-trending reading superseded
+    # by a newer stable (or already-breached) one is never surfaced.
+    pa_rows = (
+        db.query(ParameterAnalytics)
+        .filter(ParameterAnalytics.equipment_id.in_(eq_ids))
+        .order_by(ParameterAnalytics.calculated_at.desc())
+        .all()
+    )
+    latest_by_key: dict[tuple, ParameterAnalytics] = {}
+    for row in pa_rows:
+        key = (row.equipment_id, row.parameter_key)
+        if key not in latest_by_key:
+            latest_by_key[key] = row
+
+    equipment_type_names = {
+        c.id: c.name for c in db.query(CategoryMaster).all()
+    }
+
+    flagged_by_equipment: dict = {}
+    for row in latest_by_key.values():
+        if row.status != "NORMAL":
+            continue  # already breached — that's the alert feed's job, not this watch list's
+        if row.trend not in ("Increasing", "Decreasing"):
+            continue  # no directional signal yet
+        flagged_by_equipment.setdefault(row.equipment_id, []).append({
+            "parameter_key":       row.parameter_key,
+            "parameter_label":     row.parameter_label,
+            "unit":                row.unit,
+            "current_value":       float(row.current_value) if row.current_value is not None else None,
+            "trend":               row.trend,
+            "annual_change":       float(row.annual_change) if row.annual_change is not None else None,
+            "breach_threshold":    float(row.breach_threshold) if row.breach_threshold is not None else None,
+            "days_to_breach":      row.days_to_breach,
+            "breach_predicted_at": row.breach_predicted_at.isoformat() if row.breach_predicted_at else None,
+        })
+
+    watch_list = []
+    for eq_id, params in flagged_by_equipment.items():
+        eq = eq_by_id.get(eq_id)
+        if not eq:
+            continue
+        ea = analytics_map.get(eq_id)
+        # Sort key: soonest forecast breach first; parameters with no
+        # forecast yet (trend detected but not near enough to project a
+        # crossing date) sort after those that do, ranked among themselves
+        # by the steepest annual rate of change.
+        forecast_days = [p["days_to_breach"] for p in params if p["days_to_breach"] is not None]
+        soonest_days = min(forecast_days) if forecast_days else None
+        steepest_change = max((abs(p["annual_change"]) for p in params if p["annual_change"] is not None), default=0.0)
+        watch_list.append({
+            "equipment_id":    str(eq_id),
+            "equipment_label": eq.ueic,
+            "equipment_type":  equipment_type_names.get(eq.equipment_type_id),
+            "department_id":   str(eq.department_id) if eq.department_id else None,
+            "health_score":    float(ea.health_score) if ea and ea.health_score is not None else None,
+            "risk_level":      ea.risk_level if ea and ea.risk_level else "Unknown",
+            "soonest_days_to_breach": soonest_days,
+            "parameters": sorted(
+                params,
+                key=lambda p: (p["days_to_breach"] is None, p["days_to_breach"] or 0, -(abs(p["annual_change"] or 0))),
+            ),
+        })
+
+    watch_list.sort(key=lambda w: (w["soonest_days_to_breach"] is None, w["soonest_days_to_breach"] or 0, -(
+        max((abs(p["annual_change"]) for p in w["parameters"] if p["annual_change"] is not None), default=0.0)
+    )))
+
+    return {
+        "total_equipment": len(equipment_rows),
+        "watch_count": len(watch_list),
+        "equipment": watch_list,
     }
 
 

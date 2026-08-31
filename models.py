@@ -5435,6 +5435,151 @@ class EquipmentCriticalityMapping(Base):
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
 
 
+class EquipmentHealthBandThreshold(Base):
+    """Admin-configurable score-to-band mapping for the composite equipment
+    health score (KPTCL spec §12.1: "The EHS computation logic and band
+    thresholds shall be configurable by the system administrator... without
+    requiring code changes"). Replaces the previously hardcoded
+    _RISK_BANDS constant in services/analytics_engine.py — that constant
+    only ever set the per-parameter NORMAL/ALERT/CRITICAL evaluation
+    thresholds' downstream aggregate band, which stayed fixed regardless of
+    what a given equipment type's test template (OrgTestTemplate,
+    genuinely already admin-configurable via the Template Designer)
+    specified.
+
+    Row semantics: a health score >= `threshold` maps to `label`, checked
+    in descending threshold order — the first row whose threshold the
+    score clears wins (same rule _RISK_BANDS always applied, just no
+    longer hardcoded). `label` values are kept as the existing Low/Medium/
+    High/Critical set — not the spec's own Healthy/Watch/At Risk/Critical
+    wording — because those exact strings are already load-bearing
+    throughout the app (EquipmentAnalytics.risk_level, the Condition Risk
+    Matrix's health-band axis, DQI, dashboard badge colors); renaming them
+    here would just move the hardcoding problem into every place that
+    branches on the literal string instead of solving it. `label` is still
+    itself editable per row, same as `threshold` is.
+
+    No org scoping (mirrors EquipmentCriticalityMapping just above — this
+    codebase's admin-config tables of this shape are global, not per-org).
+    """
+    __tablename__ = "equipment_health_band_thresholds"
+    __table_args__ = (
+        UniqueConstraint("label", name="uq_health_band_label"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    threshold = Column(Numeric(5, 2), nullable=False)   # minimum score (inclusive) for this band
+    label     = Column(String(30), nullable=False)      # e.g. "Low", "Medium", "High", "Critical"
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TestStatusCondition(Base):
+    """Admin-configurable label for each test-evaluation status
+    (NORMAL/ALERT/CRITICAL) — replaces the previously hardcoded _CONDITION
+    constant in services/analytics_engine.py. `status` is the fixed 3-value
+    vocabulary produced by per-parameter evaluation (against the
+    already-configurable OrgTestTemplate thresholds); `condition_label` is
+    what that status is called on dashboards/reports and is what feeds
+    ParameterConditionScore's point-value lookup — completing the same
+    "EHS computation logic" (KPTCL spec §12.1) chain as
+    EquipmentHealthBandThreshold and ParameterConditionScore: status ->
+    condition_label (this table) -> score (ParameterConditionScore) ->
+    composite health score -> band (EquipmentHealthBandThreshold).
+    """
+    __tablename__ = "test_status_conditions"
+    __table_args__ = (
+        UniqueConstraint("status", name="uq_status_condition_status"),
+        {"schema": "public"},
+    )
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    status          = Column(String(10), nullable=False)   # "NORMAL" | "ALERT" | "CRITICAL"
+    condition_label = Column(String(10), nullable=False)   # "Good" | "Fair" | "Poor"
+    is_active       = Column(Boolean, default=True)
+    notes           = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ParameterConditionScore(Base):
+    """Admin-configurable point value assigned to each field condition
+    (Good/Fair/Poor) when computing a test's composite health score —
+    replaces the previously hardcoded _SCORE constant in
+    services/analytics_engine.py's HealthScorer.score_test. Distinct from
+    EquipmentHealthBandThreshold just above: that table maps a computed
+    SCORE to a BAND LABEL (the output step); this one maps a field's
+    CONDITION to the POINT VALUE that feeds INTO the score in the first
+    place (the input step) — both are part of "EHS computation logic"
+    (KPTCL spec §12.1), just at opposite ends of the same calculation.
+
+    `condition` is always one of Good/Fair/Poor (the fixed 1:1 label for
+    NORMAL/ALERT/CRITICAL — not itself something to add rows for). `score`
+    is negative for Poor by default so a single CRITICAL field actively
+    drags the composite score down rather than just diluting the average.
+    """
+    __tablename__ = "parameter_condition_scores"
+    __table_args__ = (
+        UniqueConstraint("condition", name="uq_condition_score_condition"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    condition = Column(String(10), nullable=False)   # "Good" | "Fair" | "Poor"
+    score     = Column(Numeric(6, 2), nullable=False)
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class EquipmentConditionBandThreshold(Base):
+    """Admin-configurable score-to-band mapping for the AI Graph Dashboard's
+    5-tier condition scale (Excellent/Good/Fair/Poor/Critical) — a
+    genuinely separate scheme from EquipmentHealthBandThreshold's 4-tier
+    one (Low/Medium/High/Critical), not a duplicate of it. Both classify
+    the same underlying composite health score, but with a different band
+    count and different cutoffs, so an equipment can legitimately show
+    different-sounding labels on the two dashboards for the same score —
+    what must NOT happen is either scale being hardcoded so it can drift
+    from what an admin configured. Replaces the previously hardcoded
+    cutoffs (88/75/65/50) in routers/ai_graph.py's _condition_from_score.
+
+    Row semantics: a health score >= `threshold` maps to `label`, checked
+    in descending threshold order — same rule as
+    EquipmentHealthBandThreshold. No org scoping, matching every other
+    table of this shape in this file.
+    """
+    __tablename__ = "equipment_condition_band_thresholds"
+    __table_args__ = (
+        UniqueConstraint("label", name="uq_condition_band_label"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    threshold = Column(Numeric(5, 2), nullable=False)   # minimum score (inclusive) for this band
+    label     = Column(String(20), nullable=False)      # "Excellent" | "Good" | "Fair" | "Poor" | "Critical"
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # CONDITION MONITORING RECOMMENDATIONS
 # ═══════════════════════════════════════════════════════════════════════════

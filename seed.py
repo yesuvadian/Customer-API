@@ -5645,6 +5645,18 @@ def seed_report_definitions(session):
             "group_name": "Equipment Lifecycle",
             "notification_event": None,
         },
+        {
+            "name": "DGA Trend Report",
+            "description": "Transformer-wise DGA gas readings over the trailing months with ppm/month "
+                           "generation rate, acceleration flagging, and Duval Triangle fault-type "
+                           "classification (AI Advisory — pending KPTCL RT & R&D validation of the "
+                           "exact zone boundaries).",
+            "query_key": "dga_trend_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Equipment Lifecycle",
+            "notification_event": None,
+        },
         # ── Failure Register group ────────────────────────────────────────────────
         {
             "name": "Equipment Failure Annual Report",
@@ -6302,6 +6314,33 @@ WHERE  1=1
 GROUP  BY e.id, e.ueic, cm.name, e.voltage_class, e.manufacturer,
           e.status, d.name, e.commissioned_date
 ORDER  BY e.ueic
+"""),
+
+        dict(
+            key="dga_trend_report",
+            label="DGA Trend Report",
+            group_name="Equipment Lifecycle",
+            description="Transformer-wise DGA gas readings with ppm/month generation rate, "
+                        "acceleration flagging, and Duval Triangle fault-type classification "
+                        "(AI Advisory, pending KPTCL RT & R&D validation).",
+            parameters_schema={"months": "int"},
+            sort_order=40,
+            org_alias="",
+            # No functional SQL here on purpose: this report's real
+            # implementation is ReportingService._q_dga_trend_report (a
+            # Python method, registered ahead of this row in _run_query's
+            # dispatch dict, so it always wins) — the gas readings live
+            # inside TestResult.test_data's dga_results JSON array, and the
+            # ppm/month rate needs each equipment's PRIOR reading diffed
+            # against its current one, which a single parameterised SQL
+            # statement can't do as directly or as safely as the Python
+            # version. This row exists purely so the report still appears
+            # correctly labelled in the definitions picker; if the Python
+            # method is ever removed, running this key would need a real
+            # sql_template written in first, not silently start returning
+            # nothing.
+            sql_template="""
+SELECT NULL::text AS note WHERE FALSE
 """),
 
         # ══════════════════════════════════════════════════════════════════════
