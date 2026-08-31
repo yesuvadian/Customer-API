@@ -49,10 +49,18 @@ template_key, org-specific or global.
 Family logic: KPTCL's fleet has two transformer families, and voltage_ratio
 holds ONE plain value naming which family a unit belongs to -
   "400" -> 400/220/33 kV family (400 + 220 + 33 kV bushings, tertiary winding)
-  "220" -> 220/66/11 kV family  (220 + 66 + 11 kV bushings, tertiary winding)
-220 kV is common to both families, so its section (and the tertiary-only
-winding rows, since both families are 3-winding) use operator "in" over both
-values; every other bushing section uses a plain "=" against its own family.
+  "220" or "66" -> 220/66/11 kV family (220 + 66 + 11 kV bushings, tertiary
+                   winding). Both values are registered in practice - some
+                   220/66/11kV units are tagged "220", others "66" - so every
+                   220-family check accepts either via operator "in", not a
+                   plain "=" against "220" alone (that was the original bug:
+                   "66"-tagged equipment matched nothing, so its entire
+                   bushing/winding/IDAX area rendered with zero visible rows).
+220 kV is additionally common to BOTH families (400/220/33's own MV bushing),
+so its section (and the tertiary-only winding rows, since both families are
+3-winding) use operator "in" over all three of "400", "220", "66"; the 400kV
+and 33kV sections use a plain "=" against "400" since only the 400-family
+uses them.
 
 Sections are matched by the voltage tier embedded in their fields' keys
 (e.g. any field key starting with "bushing_400kv_"), not by title, so a
@@ -76,12 +84,20 @@ VOLTAGE_FIELD = "voltage_ratio"
 _ALL_TIERS = ("400", "220", "66", "33", "11")
 
 # tier -> target COMPARE visibility_rule for that tier's sections.
+#
+# "66" is folded into the 220kV family alongside "220" itself:
+# equipment.voltage_class is registered as a plain "66" for standalone
+# 220/66/11kV-family transformers (not just "220"/"400") - confirmed against
+# live data, where 16 real testing requests for this template already exist
+# against voltage_class="66" equipment. Without this, every tier check below
+# ("=220"/"in [400,220]") evaluates false for that equipment, so the entire
+# bushing + winding + IDAX area renders with zero visible rows/sections.
 _TIER_RULES = {
     "400": {"type": "COMPARE", "config": {"field": VOLTAGE_FIELD, "operator": "=", "value": "400"}},
-    "220": {"type": "COMPARE", "config": {"field": VOLTAGE_FIELD, "operator": "in", "values": ["400", "220"]}},
-    "66":  {"type": "COMPARE", "config": {"field": VOLTAGE_FIELD, "operator": "=", "value": "220"}},
+    "220": {"type": "COMPARE", "config": {"field": VOLTAGE_FIELD, "operator": "in", "values": ["400", "220", "66"]}},
+    "66":  {"type": "COMPARE", "config": {"field": VOLTAGE_FIELD, "operator": "in", "values": ["220", "66"]}},
     "33":  {"type": "COMPARE", "config": {"field": VOLTAGE_FIELD, "operator": "=", "value": "400"}},
-    "11":  {"type": "COMPARE", "config": {"field": VOLTAGE_FIELD, "operator": "=", "value": "220"}},
+    "11":  {"type": "COMPARE", "config": {"field": VOLTAGE_FIELD, "operator": "in", "values": ["220", "66"]}},
 }
 
 
@@ -97,12 +113,12 @@ def _row_rule(operator: str, **kw) -> dict:
 _WINDING_ROWS = [
     {"test_configuration": "(HV+LV)-GND", "visibility_rule": _row_rule("=", value="400")},
     {"test_configuration": "(HV+LV)-TV",  "visibility_rule": _row_rule("=", value="400")},
-    {"test_configuration": "TV-GND",      "visibility_rule": _row_rule("in", values=["400", "220"])},
-    {"test_configuration": "HV-LV",       "visibility_rule": _row_rule("=", value="220")},
-    {"test_configuration": "HV-GND",      "visibility_rule": _row_rule("=", value="220")},
-    {"test_configuration": "LV-TV",       "visibility_rule": _row_rule("=", value="220")},
-    {"test_configuration": "LV-GND",      "visibility_rule": _row_rule("=", value="220")},
-    {"test_configuration": "TV-HV",       "visibility_rule": _row_rule("=", value="220")},
+    {"test_configuration": "TV-GND",      "visibility_rule": _row_rule("in", values=["400", "220", "66"])},
+    {"test_configuration": "HV-LV",       "visibility_rule": _row_rule("in", values=["220", "66"])},
+    {"test_configuration": "HV-GND",      "visibility_rule": _row_rule("in", values=["220", "66"])},
+    {"test_configuration": "LV-TV",       "visibility_rule": _row_rule("in", values=["220", "66"])},
+    {"test_configuration": "LV-GND",      "visibility_rule": _row_rule("in", values=["220", "66"])},
+    {"test_configuration": "TV-HV",       "visibility_rule": _row_rule("in", values=["220", "66"])},
 ]
 
 # Retired in a later revision - "% D.F @ 20°C (Previous Test)" (winding +

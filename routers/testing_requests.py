@@ -687,6 +687,16 @@ def list_testing_requests(
     originator_id: Optional[UUID] = None,
     tester_id: Optional[UUID] = None,
     department_id: Optional[UUID] = None,
+    department_ids: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated department ids. Takes precedence over department_id "
+            "and is used AS GIVEN, no subtree expansion or approver-role "
+            "broadening — for callers (e.g. the Kanban board) that already know "
+            "the exact department set a page is showing and want results to "
+            "match it exactly, not the caller's full org-wide visibility."
+        ),
+    ),
     equipment_id: Optional[UUID] = None,
     voltage_class: Optional[str] = Query(None, description="Asset-dashboard filter: voltage class"),
     equipment_type: Optional[str] = Query(None, description="Asset-dashboard filter: equipment type name"),
@@ -698,6 +708,15 @@ def list_testing_requests(
     date_to:   Optional[str] = Query(None, description="Filter completed_at <= YYYY-MM-DD"),
     is_closed: Optional[bool] = Query(None, description="True = legacy-closed or wf-completed; False = still active"),
     wf_active: Optional[bool] = Query(None, description="True = only TRs with an active workflow instance (Kanban use)"),
+    include_direct_submissions: bool = Query(
+        False,
+        description=(
+            "Include direct submissions (Failure Registry, TA&QC Inspection) that "
+            "the general list normally excludes — for callers that want a single "
+            "equipment's full request history (e.g. a Failure Registry detail "
+            "panel's related-requests list), not the org-wide TR worklist."
+        ),
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -707,19 +726,26 @@ def list_testing_requests(
     organization_id = current_user.organization_id
     service = TestingRequestService(db)
 
-    if department_id is None and organization_id:
-        is_admin, scoped_dept = service.get_user_scope(current_user.id, organization_id)
-        if not is_admin and scoped_dept:
-            # Don't narrow by dept for users who have approver roles in any TR workflow stage
-            user_is_approver = service.user_has_tr_wf_approver_role(current_user.id, organization_id)
-            if not user_is_approver:
-                department_id = scoped_dept
-
     dept_ids = None
-    if department_id:
-        subtree = get_dept_subtree_ids(db, department_id)
-        if len(subtree) >= 1:
-            dept_ids = subtree
+    if department_ids:
+        try:
+            dept_ids = [UUID(d.strip()) for d in department_ids.split(",") if d.strip()]
+        except ValueError:
+            dept_ids = None
+
+    if dept_ids is None:
+        if department_id is None and organization_id:
+            is_admin, scoped_dept = service.get_user_scope(current_user.id, organization_id)
+            if not is_admin and scoped_dept:
+                # Don't narrow by dept for users who have approver roles in any TR workflow stage
+                user_is_approver = service.user_has_tr_wf_approver_role(current_user.id, organization_id)
+                if not user_is_approver:
+                    department_id = scoped_dept
+
+        if department_id:
+            subtree = get_dept_subtree_ids(db, department_id)
+            if len(subtree) >= 1:
+                dept_ids = subtree
 
     from datetime import date as _date
     def _parse_date(s):
@@ -748,6 +774,7 @@ def list_testing_requests(
         commissioned_year=commissioned_year,
         failure_year=failure_year,
         capacity_mva=capacity_mva,
+        include_direct_submissions=include_direct_submissions,
     )
 
     total = service.count_requests(**common)

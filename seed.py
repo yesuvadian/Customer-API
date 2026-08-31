@@ -5682,6 +5682,15 @@ def seed_report_definitions(session):
             "group_name": "Failure Register",
             "notification_event": None,
         },
+        {
+            "name": "Maintenance Effectiveness Index",
+            "description": "Equipment health score just before vs. just after each Failure Registry ticket's PM completion — did the maintenance actually help?",
+            "query_key": "maintenance_effectiveness_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Failure Register",
+            "notification_event": None,
+        },
         # ── Stage Workflows group ─────────────────────────────────────────────────
         {
             "name": "Transformer Repair Status Report",
@@ -6526,6 +6535,116 @@ WHERE  fr.request_category = 'failure_registry'
   AND  (:outcome IS NULL OR :outcome = 'all'
         OR fr.form_data->>'next_action' = :outcome)
 ORDER  BY fr.cts DESC
+"""),
+
+        dict(
+            key="maintenance_effectiveness_report",
+            label="Maintenance Effectiveness Index",
+            group_name="Failure Register",
+            description="For each Failure Registry ticket that reached PM "
+                        "completion, the equipment's health score just before "
+                        "vs. just after — did the maintenance actually help? "
+                        "(KPTCL spec §12.4; no dollar-cost field exists on any "
+                        "repair/maintenance table yet, so this is a health-score "
+                        "effectiveness index, not a dollar ROI figure.)",
+            parameters_schema={"date_from": "date", "date_to": "date",
+                               "department_id": "uuid"},
+            sort_order=40,
+            org_alias="tr",
+            sql_template="""
+WITH pm_completions AS (
+    -- One row per Failure Registry ticket that reached the PM Workflow's
+    -- terminal success status. wi.completed_at (set when the instance
+    -- reaches a terminal status) is the maintenance-closure anchor date —
+    -- not tr.mts, which tracks the *request* record's own last edit, not
+    -- specifically when the workflow instance closed.
+    SELECT
+        tr.id            AS testing_request_id,
+        tr.request_number,
+        tr.equipment_id,
+        tr.department_id,
+        wi.completed_at  AS maintenance_completed_at
+    FROM   tr_wf_instances   wi
+    JOIN   tr_wf_definitions wd ON wd.id = wi.wf_definition_id
+    JOIN   public.testing_requests tr ON tr.id = wi.testing_request_id
+    WHERE  wd.name = 'PM Workflow'
+      AND  wi.current_status_code = 'pm_completed'
+      AND  tr.request_category = 'failure_registry'
+      {org_clause}
+      AND  (:date_from::date IS NULL OR wi.completed_at::date >= :date_from::date)
+      AND  (:date_to::date   IS NULL OR wi.completed_at::date <= :date_to::date)
+      AND  (:department_id::uuid IS NULL OR tr.department_id = :department_id::uuid)
+),
+-- Baseline: the equipment's own most recent test BEFORE the maintenance
+-- closed — the condition that (presumably) justified doing the work.
+-- health_score IS NOT NULL (not just tested_at IS NOT NULL) matters here:
+-- the Failure Registry ticket that triggered this whole maintenance event
+-- creates its own test_analytics stub row (template_key='failure_registry',
+-- health_score never computed — it's a report of a problem, not a scored
+-- diagnostic test). Without this filter that stub — dated right at the
+-- failure, always more recent than any real prior test — wins the "most
+-- recent before" slot every time and buries the actual last diagnostic
+-- reading. Confirmed live: for FR-KP-2026-0001, without this filter
+-- "before" resolved to that stub (health_score NULL) instead of the real
+-- 2025-01-22 transformer_oil_test (health_score 0.00).
+before_scores AS (
+    SELECT DISTINCT ON (pc.testing_request_id)
+        pc.testing_request_id,
+        ta.health_score AS before_health_score,
+        ta.tested_at    AS before_tested_at
+    FROM   pm_completions pc
+    JOIN   public.test_analytics ta
+      ON   ta.equipment_id = pc.equipment_id
+     AND   ta.health_score IS NOT NULL
+     AND   ta.tested_at < pc.maintenance_completed_at
+    ORDER  BY pc.testing_request_id, ta.tested_at DESC
+),
+-- Verification: the FIRST scored test taken AFTER the maintenance closed,
+-- not the latest one ever — a reading taken months later would measure
+-- ordinary drift as much as the maintenance's own effect.
+after_scores AS (
+    SELECT DISTINCT ON (pc.testing_request_id)
+        pc.testing_request_id,
+        ta.health_score AS after_health_score,
+        ta.tested_at    AS after_tested_at
+    FROM   pm_completions pc
+    JOIN   public.test_analytics ta
+      ON   ta.equipment_id = pc.equipment_id
+     AND   ta.health_score IS NOT NULL
+     AND   ta.tested_at >= pc.maintenance_completed_at
+    ORDER  BY pc.testing_request_id, ta.tested_at ASC
+)
+SELECT
+    pc.request_number,
+    e.ueic                              AS equipment_ueic,
+    cm.name                             AS equipment_type,
+    d.name                              AS department,
+    pc.maintenance_completed_at::date   AS maintenance_completed_date,
+    bs.before_tested_at::date           AS before_test_date,
+    bs.before_health_score,
+    afs.after_tested_at::date           AS after_test_date,
+    afs.after_health_score,
+    (afs.after_health_score - bs.before_health_score)  AS health_score_change,
+    CASE WHEN bs.before_health_score IS NOT NULL
+              AND bs.before_health_score != 0
+              AND afs.after_health_score IS NOT NULL
+         THEN ROUND(100.0 * (afs.after_health_score - bs.before_health_score)
+                     / bs.before_health_score, 1)
+    END                                  AS improvement_pct,
+    CASE
+        WHEN bs.before_health_score IS NULL THEN 'No pre-maintenance test on record'
+        WHEN afs.after_health_score IS NULL THEN 'Awaiting post-maintenance verification test'
+        WHEN afs.after_health_score > bs.before_health_score THEN 'Improved'
+        WHEN afs.after_health_score < bs.before_health_score THEN 'Declined'
+        ELSE 'Unchanged'
+    END                                  AS effectiveness
+FROM   pm_completions pc
+JOIN   public.equipment e ON e.id = pc.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+LEFT JOIN public.org_departments  d  ON d.id  = pc.department_id
+LEFT JOIN before_scores bs  ON bs.testing_request_id  = pc.testing_request_id
+LEFT JOIN after_scores  afs ON afs.testing_request_id = pc.testing_request_id
+ORDER  BY pc.maintenance_completed_at DESC
 """),
 
         # ══════════════════════════════════════════════════════════════════════
@@ -12685,6 +12804,16 @@ def run_seed():
         except Exception as _e:
             import traceback
             print(f"[WARN] AI-Assisted Comparison View module seed failed (non-fatal): {_e}")
+            traceback.print_exc()
+
+        # ── Consolidated Department (Overview) Dashboard module + admin privileges ──
+        print("\n--- Department Dashboard Module (alter_overview_dashboard_module) ---")
+        try:
+            from alter_overview_dashboard_module import alter_overview_dashboard_module
+            alter_overview_dashboard_module()
+        except Exception as _e:
+            import traceback
+            print(f"[WARN] Department Dashboard module alter failed (non-fatal): {_e}")
             traceback.print_exc()
 
         print("\n" + "=" * 80)

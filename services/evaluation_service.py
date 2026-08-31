@@ -219,12 +219,25 @@ class EvaluationService:
         agg_result = None
         col_results: list[dict] = []
 
-        # Find the first readonly/text column to use as row label
+        # Find the first readonly/text/dropdown column to use as row label -
+        # dropdown counts too (e.g. DFR's "measurement_mode": GST/UST/GSTg),
+        # not just readonly/text, or such tables fall back to meaningless
+        # "Row 1"/"Row 2" labels in critical findings.
         _label_col = next(
             (c.get("key") for c in field.get("columns", [])
-             if c.get("type") in ("readonly", "text") and c.get("key")),
+             if c.get("type") in ("readonly", "text", "dropdown") and c.get("key")),
             None,
         )
+
+        def _row_label_for(row: dict, row_idx: int) -> str:
+            base = (row.get(_label_col) if _label_col else None) or f"Row {row_idx + 1}"
+            # When the label column repeats across rows (e.g. every GST row
+            # is just "GST"), append the frequency so each finding is still
+            # individually identifiable instead of merging into one label.
+            freq = row.get("frequency_hz")
+            if freq not in (None, "") and _label_col != "frequency_hz":
+                base = f"{base} @ {freq}Hz"
+            return base
 
         if table_ev_enabled:
             # Aggregate evaluation
@@ -242,7 +255,7 @@ class EvaluationService:
                     try:
                         num_val = float(val)
                         col_status, col_breach_limit = EvaluationService._classify_number_with_limit(num_val, col_ev)
-                        _row_label = (row.get(_label_col) if _label_col else None) or f"Row {row_idx + 1}"
+                        _row_label = _row_label_for(row, row_idx)
                         col_results.append({
                             "column":       col_key,
                             "row":          row_idx,
@@ -272,7 +285,7 @@ class EvaluationService:
                     if val is None:
                         continue
                     col_status = col_ev.get(str(val), NORMAL)
-                    _row_label = (row.get(_label_col) if _label_col else None) or f"Row {row_idx + 1}"
+                    _row_label = _row_label_for(row, row_idx)
                     col_results.append({
                         "column":    col_key,
                         "row":       row_idx,

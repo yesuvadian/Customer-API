@@ -3291,7 +3291,7 @@ TEST_TEMPLATES = {
                                 "config": {
                                     "field": "voltage_ratio",
                                     "operator": "in",
-                                    "values": ["400", "220"],
+                                    "values": ["400", "220", "66"],
                                 },
                             },
                         },
@@ -3299,35 +3299,35 @@ TEST_TEMPLATES = {
                             "test_configuration": "HV-LV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "HV-GND",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "LV-TV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "LV-GND",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "TV-HV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                     ],
@@ -3485,7 +3485,7 @@ TEST_TEMPLATES = {
                 "config": {
                     "field": "voltage_ratio",
                     "operator": "in",
-                    "values": ["400", "220"],
+                    "values": ["400", "220", "66"],
                 },
             },
             "fields": [
@@ -3519,7 +3519,7 @@ TEST_TEMPLATES = {
                 "config": {
                     "field": "voltage_ratio",
                     "operator": "in",
-                    "values": ["400", "220"],
+                    "values": ["400", "220", "66"],
                 },
             },
             "collapsible": True,
@@ -3607,7 +3607,7 @@ TEST_TEMPLATES = {
             "title": "66 kV Bushing Details",
             "visibility_rule": {
                 "type": "COMPARE",
-                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
             },
             "fields": [
                 {
@@ -3637,7 +3637,7 @@ TEST_TEMPLATES = {
             "title": "66 kV Bushing Test Results",
             "visibility_rule": {
                 "type": "COMPARE",
-                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
             },
             "collapsible": True,
             "collapse_control": {
@@ -3841,7 +3841,7 @@ TEST_TEMPLATES = {
             "title": "11 kV Bushing Details",
             "visibility_rule": {
                 "type": "COMPARE",
-                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
             },
             "fields": [
                 {
@@ -3871,7 +3871,7 @@ TEST_TEMPLATES = {
             "title": "11 kV Bushing Test Results",
             "visibility_rule": {
                 "type": "COMPARE",
-                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
             },
             "collapsible": True,
             "collapse_control": {
@@ -4043,7 +4043,7 @@ TEST_TEMPLATES = {
                                 "config": {
                                     "field": "voltage_ratio",
                                     "operator": "in",
-                                    "values": ["400", "220"],
+                                    "values": ["400", "220", "66"],
                                 },
                             },
                         },
@@ -4051,35 +4051,35 @@ TEST_TEMPLATES = {
                             "test_configuration": "HV-LV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "HV-GND",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "LV-TV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "LV-GND",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                         {
                             "test_configuration": "TV-HV",
                             "visibility_rule": {
                                 "type": "COMPARE",
-                                "config": {"field": "voltage_ratio", "operator": "=", "value": "220"},
+                                "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
                             },
                         },
                     ],
@@ -5754,9 +5754,9 @@ TEST_TEMPLATES = {
     # ────────────────────────────────────────────────────────────
     "dfr_idax_transformer": {
         "key": "dfr_idax_transformer",
-        "name": "Dielectric Frequency Response (DFR / IDAX)",
+        "name": "Dielectric Frequency Response (DFR)",
         "equipment_type": "Power Transformer",
-        "description": "DFR / IDAX insulation diagnostics test for transformer moisture and insulation assessment",
+        "description": "DFR insulation diagnostics test for transformer moisture and insulation assessment",
         "supports_multi_session": True,
         "multi_session": True,
         "enable_cross_session": True,
@@ -5772,24 +5772,32 @@ TEST_TEMPLATES = {
         "context_bindings": {
             "manufacturer":   "equipment.manufacturer",
             "serial_number":  "equipment.factory_serial_number",
+            "hv_voltage_kv":  "equipment.voltage_class",
+            "voltage_ratio":  "equipment.voltage_class",
         },
         "sections": [
             {
                 "title": "Equipment Details",
                 "collapsed": True,
                 "fields": [
-                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "manufacturer",  "label": "Manufacturer",  "type": "readonly"},
                     {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_ratio", "label": "Voltage Ratio", "type": "readonly"},
                 ],
             },
             {
                 "title": "Transformer Configuration",
                 "fields": [
-                    {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
-                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number",   "unit": "MVA", "required": True},
-                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",   "type": "number",   "unit": "kV"},
+                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number", "unit": "MVA", "required": True},
+                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number", "unit": "kV",  "required": True},
+                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number", "unit": "kV",  "required": True},
+                    {
+                        "key": "tv_voltage_kv", "label": "Tertiary Voltage", "type": "number", "unit": "kV",
+                        "visibility_rule": {
+                            "type": "COMPARE",
+                            "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                        },
+                    },
                 ],
             },
             {
@@ -5806,11 +5814,16 @@ TEST_TEMPLATES = {
                 "fields": [
                     {
                         "key": "dfr_measurements",
+                        "analytics_skip": True,
                         "label": "DFR Measurements",
                         "type": "table",
                         "allow_add_rows": True,
                         "allow_delete_rows": True,
                         "columns": [
+                            {
+                                "key": "measurement_mode", "label": "Measurement Mode", "type": "dropdown",
+                                "options": ["GST", "UST", "GSTg"],
+                            },
                             {"key": "frequency_hz",      "label": "Frequency (Hz)",  "type": "number"},
                             {"key": "capacitance_pf",    "label": "Capacitance (pF)","type": "number"},
                             {"key": "tan_delta_percent", "label": "Tan Delta (%)",   "type": "number"},
@@ -5838,7 +5851,7 @@ TEST_TEMPLATES = {
                 ],
             },
             {
-                "title": "IDAX Analysis Results",
+                "title": "DFR Analysis Results",
                 "fields": [
                     {
                         "key": "analysis_results",
@@ -5850,22 +5863,74 @@ TEST_TEMPLATES = {
                         "columns": [
                             {"key": "test_configuration",      "label": "Test Configuration",      "type": "readonly"},
                             {"key": "moisture_percent",        "label": "Moisture in Paper (%)",   "type": "number"},
-                            {"key": "oil_conductivity_psm",   "label": "Oil Conductivity (pS/m)", "type": "number"},
-                            {"key": "moisture_in_oil_percent", "label": "Moisture in Oil (%)",    "type": "number"},
                             {
-                                "key": "assessment",
-                                "label": "Assessment",
-                                "type": "dropdown",
-                                "options": ["Very Dry", "Good", "Acceptable", "Wet", "Critical"],
+                                "key": "tr_analysis_moisture",
+                                "label": "Tr. Analysis (% Moisture)",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "moisture_percent",
+                                        "thresholds": {
+                                            "% Moisture (IDAX)": {
+                                                "As New":         [None, 1.0],
+                                                "Dry":            [1.0,  2.0],
+                                                "Moderately Wet": [2.0,  3.0],
+                                                "Wet":            [3.0,  None],
+                                            }
+                                        },
+                                    },
+                                },
                             },
+                            {"key": "oil_conductivity_psm",   "label": "Oil Conductivity (pS/m)", "type": "number"},
+                            {
+                                "key": "tr_analysis_oil",
+                                "label": "Tr. Analysis (Oil Conductivity)",
+                                "type": "calculated",
+                                "read_only": True,
+                                "rule": {
+                                    "type": "THRESHOLD",
+                                    "config": {
+                                        "input_field": "oil_conductivity_psm",
+                                        "thresholds": {
+                                            "Oil Conductivity (IDAX)": {
+                                                "As New":       [None, 0.37],
+                                                "Good":         [0.37, 3.7],
+                                                "Service Aged": [3.7,  37],
+                                                "Deteriorated": [37,   None],
+                                            }
+                                        },
+                                    },
+                                },
+                            },
+                            {"key": "moisture_in_oil_percent", "label": "Moisture in Oil (%)",    "type": "number"},
                         ],
                         "default_rows": [
                             {"test_configuration": "HV-GND"},
                             {"test_configuration": "HV-LV"},
                             {"test_configuration": "LV-GND"},
-                            {"test_configuration": "LV-TV"},
-                            {"test_configuration": "TV-GND"},
-                            {"test_configuration": "TV-HV"},
+                            {
+                                "test_configuration": "LV-TV",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                                },
+                            },
+                            {
+                                "test_configuration": "TV-GND",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                                },
+                            },
+                            {
+                                "test_configuration": "TV-HV",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                                },
+                            },
                         ],
                         # Cross-session: row-by-row vs FACTORY, matched by test_configuration
                         "cross_session_evaluation": {
@@ -5902,6 +5967,35 @@ TEST_TEMPLATES = {
                                     "alert_min": None,
                                     "critical_above": 15.0,
                                     "critical_below": None,
+                                },
+                            },
+                        },
+                        # Numeric evaluation on the raw readings — the analytics
+                        # engine's primary evaluator (_eval_table_field) looks
+                        # here first; without it, a row would only be picked
+                        # up by the fallback band-name ranker, which doesn't
+                        # recognise IDAX vocabulary ("Wet"/"Deteriorated") and
+                        # would silently score every row NORMAL regardless of
+                        # actual severity. Mirrors capacitance_tandelta_
+                        # transformer's idax_test_results block exactly.
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "moisture_percent": {
+                                    "normal_min": None, "normal_max": 2.0,
+                                    "alert_min":  None, "alert_max":  None,
+                                    "critical_below": None, "critical_above": 3.0,
+                                    "trend_watch": True,
+                                    "weight": 2.0,
+                                    "remedial_action_text": "High moisture content — arrange drying treatment.",
+                                },
+                                "oil_conductivity_psm": {
+                                    "normal_min": None, "normal_max": 3.7,
+                                    "alert_min":  None, "alert_max":  None,
+                                    "critical_below": None, "critical_above": 37,
+                                    "trend_watch": True,
+                                    "weight": 1.0,
+                                    "remedial_action_text": "High oil conductivity — arrange oil reconditioning or replacement.",
                                 },
                             },
                         },
@@ -5961,25 +6055,32 @@ TEST_TEMPLATES = {
             "manufacturer":  "equipment.manufacturer",
             "serial_number": "equipment.factory_serial_number",
             "vector_group":  "equipment.vector_group",
+            "voltage_ratio": "equipment.voltage_class",
         },
         "sections": [
             {
                 "title": "Equipment Details",
                 "collapsed": True,
                 "fields": [
-                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "manufacturer",  "label": "Manufacturer",  "type": "readonly"},
                     {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
-                    {"key": "vector_group", "label": "Vector Group", "type": "readonly"},
+                    {"key": "vector_group",  "label": "Vector Group",  "type": "readonly"},
+                    {"key": "voltage_ratio", "label": "Voltage Ratio", "type": "readonly"},
                 ],
             },
             {
                 "title": "Transformer Configuration",
                 "fields": [
-                    {"key": "transformer_type",       "label": "Transformer Type",   "type": "dropdown", "options": ["Two Winding", "Three Winding"], "required": True},
-                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number",   "unit": "MVA", "required": True},
-                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number",   "unit": "kV",  "required": True},
-                    {"key": "tv_voltage_kv",          "label": "Tertiary Voltage",   "type": "number",   "unit": "kV"},
+                    {"key": "transformer_rating_mva", "label": "Transformer Rating", "type": "number", "unit": "MVA", "required": True},
+                    {"key": "hv_voltage_kv",          "label": "HV Voltage",         "type": "number", "unit": "kV",  "required": True},
+                    {"key": "lv_voltage_kv",          "label": "LV Voltage",         "type": "number", "unit": "kV",  "required": True},
+                    {
+                        "key": "tv_voltage_kv", "label": "Tertiary Voltage", "type": "number", "unit": "kV",
+                        "visibility_rule": {
+                            "type": "COMPARE",
+                            "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                        },
+                    },
                 ],
             },
             {
@@ -5998,6 +6099,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {
                         "key": "sfra_measurements",
+                        "analytics_skip": True,
                         "label": "SFRA Measurements (Amplitude vs Frequency)",
                         "type": "table",
                         "allow_add_rows": True,
@@ -6055,8 +6157,24 @@ TEST_TEMPLATES = {
                             {
                                 "key": "assessment",
                                 "label": "Assessment",
-                                "type": "dropdown",
-                                "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"],
+                                "type": "calculated",
+                                "read_only": True,
+                                # Worst-of-three: any one degraded frequency band
+                                # (LF/MF/HF) drives the winding's overall
+                                # Assessment, even if the other two look fine.
+                                # Bands mirror this table's own
+                                # table_evaluation.column_evaluations below.
+                                "rule": {
+                                    "type": "WORST_OF_BANDS",
+                                    "config": {
+                                        "fields": {
+                                            "cc_lf": {"normal_min": 0.98, "alert_min": 0.95},
+                                            "cc_mf": {"normal_min": 0.98, "alert_min": 0.95},
+                                            "cc_hf": {"normal_min": 0.97, "alert_min": 0.93},
+                                        },
+                                        "labels": {"NORMAL": "Normal", "ALERT": "Marginal", "CRITICAL": "Abnormal"},
+                                    },
+                                },
                             },
                         ],
                         "default_rows": [
@@ -6721,11 +6839,25 @@ TEST_TEMPLATES = {
         "description": "Single-session Dielectric Frequency Response measurement for routine/maintenance testing (no factory-baseline comparison).",
         "supports_multi_session": False,
         "typical_total_sessions": 1,
+        "context_bindings": {
+            "hv_voltage_kv":  "equipment.voltage_class",
+            "voltage_ratio":  "equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Test Conditions",
                 "fields": [
-                    {"key": "test_kit",         "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "test_kit",       "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "voltage_ratio",  "label": "Voltage Ratio",       "type": "readonly"},
+                    {"key": "hv_voltage_kv",  "label": "HV Voltage",          "type": "number", "unit": "kV", "required": True},
+                    {"key": "lv_voltage_kv",  "label": "LV Voltage",          "type": "number", "unit": "kV", "required": True},
+                    {
+                        "key": "tv_voltage_kv", "label": "Tertiary Voltage",  "type": "number", "unit": "kV",
+                        "visibility_rule": {
+                            "type": "COMPARE",
+                            "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                        },
+                    },
                     {"key": "test_voltage_v",   "label": "Test Voltage",        "type": "number", "unit": "V",  "required": True},
                     {"key": "ambient_temp_c",   "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
                     {"key": "oil_temp_c",       "label": "Oil Temperature",     "type": "number", "unit": "°C", "required": True},
@@ -6736,11 +6868,16 @@ TEST_TEMPLATES = {
                 "fields": [
                     {
                         "key": "dfr_measurements",
+                        "analytics_skip": True,
                         "label": "DFR Measurements",
                         "type": "table",
                         "allow_add_rows": True,
                         "allow_delete_rows": True,
                         "columns": [
+                            {
+                                "key": "measurement_mode", "label": "Measurement Mode", "type": "dropdown",
+                                "options": ["GST", "UST", "GSTg"],
+                            },
                             {"key": "frequency_hz",      "label": "Frequency (Hz)",   "type": "number"},
                             {"key": "capacitance_pf",    "label": "Capacitance (pF)", "type": "number"},
                             {"key": "tan_delta_percent", "label": "Tan Delta (%)",    "type": "number"},
@@ -6754,6 +6891,7 @@ TEST_TEMPLATES = {
                                     "critical_below": None, "critical_above": 1.0,
                                 },
                             },
+                            "remedial_action_text": "Tan delta above the acceptable limit (normal ≤ 0.5%, critical above 1.0%) — investigate insulation moisture/aging; consider oil reconditioning or drying.",
                         },
                     },
                 ],
@@ -6781,11 +6919,26 @@ TEST_TEMPLATES = {
         "description": "Single-session SFRA measurement for routine/maintenance testing. Uses static correlation-coefficient acceptance floors (no factory-baseline session).",
         "supports_multi_session": False,
         "typical_total_sessions": 1,
+        # Mirrors dfr_routine's voltage-class binding — this is the lean
+        # single-session sibling of sfra_transformer, so voltage_ratio/
+        # tv_voltage_kv are folded straight into Test Conditions rather than
+        # a separate Equipment Details/Transformer Configuration section.
+        "context_bindings": {
+            "voltage_ratio": "equipment.voltage_class",
+        },
         "sections": [
             {
                 "title": "Test Conditions",
                 "fields": [
                     {"key": "test_kit",          "label": "Testing Kit Used",         "type": "text",   "required": True},
+                    {"key": "voltage_ratio",     "label": "Voltage Ratio",            "type": "readonly"},
+                    {
+                        "key": "tv_voltage_kv", "label": "Tertiary Voltage", "type": "number", "unit": "kV",
+                        "visibility_rule": {
+                            "type": "COMPARE",
+                            "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "230"]},
+                        },
+                    },
                     {"key": "sweep_range",       "label": "Sweep Frequency Range",    "type": "text",   "required": True},
                     {"key": "measurement_points","label": "No. of Measurement Points","type": "number"},
                     {"key": "tap_position",      "label": "Tap Position",             "type": "text"},
@@ -6798,6 +6951,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {
                         "key": "sfra_measurements",
+                        "analytics_skip": True,
                         "label": "SFRA Measurements (Amplitude vs Frequency)",
                         "type": "table",
                         "allow_add_rows": True,
@@ -6826,13 +6980,93 @@ TEST_TEMPLATES = {
                             {"key": "cc_lf",     "label": "CC — LF (1k–100kHz)",   "type": "number"},
                             {"key": "cc_mf",     "label": "CC — MF (100k–600kHz)", "type": "number"},
                             {"key": "cc_hf",     "label": "CC — HF (600k–1MHz)",   "type": "number"},
-                            {"key": "assessment","label": "Assessment", "type": "dropdown",
-                             "options": ["Normal", "Slight Deviation", "Marginal", "Abnormal"],
-                             "column_evaluation": _EV_SFRA_ASSESS},
+                            {
+                                "key": "assessment",
+                                "label": "Assessment",
+                                "type": "calculated",
+                                "read_only": True,
+                                # Worst-of-three: any one degraded frequency band
+                                # (LF/MF/HF) drives the winding's overall
+                                # Assessment. Bands mirror this table's own
+                                # table_evaluation.column_evaluations below.
+                                # _EV_SFRA_ASSESS maps "Slight Deviation" and
+                                # "Marginal" to the same ALERT severity, so
+                                # collapsing the ALERT tier to "Marginal" here
+                                # loses no distinction the app actually makes.
+                                "rule": {
+                                    "type": "WORST_OF_BANDS",
+                                    "config": {
+                                        "fields": {
+                                            "cc_lf": {"normal_min": 0.98, "alert_min": 0.95},
+                                            "cc_mf": {"normal_min": 0.98, "alert_min": 0.95},
+                                            "cc_hf": {"normal_min": 0.97, "alert_min": 0.93},
+                                        },
+                                        "labels": {"NORMAL": "Normal", "ALERT": "Marginal", "CRITICAL": "Abnormal"},
+                                    },
+                                },
+                            },
                         ],
+                        # Row set/scoping mirrors capacitance_tandelta_transformer's
+                        # winding_test_results exactly (same 3 rows for 400kV, same
+                        # 6 for 220/66kV, same shared TV-GND row) — same electrode
+                        # convention, just carried over to SFRA's per-winding table.
                         "default_rows": [
-                            {"winding": "HV-N"}, {"winding": "LV-N"}, {"winding": "TV-N"},
-                            {"winding": "HV-LV"}, {"winding": "HV-TV"}, {"winding": "LV-TV"},
+                            {
+                                "winding": "(HV+LV)-GND",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+                                },
+                            },
+                            {
+                                "winding": "(HV+LV)-TV",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "=", "value": "400"},
+                                },
+                            },
+                            {
+                                "winding": "TV-GND",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["400", "220", "66"]},
+                                },
+                            },
+                            {
+                                "winding": "HV-LV",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
+                                },
+                            },
+                            {
+                                "winding": "HV-GND",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
+                                },
+                            },
+                            {
+                                "winding": "LV-TV",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
+                                },
+                            },
+                            {
+                                "winding": "LV-GND",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
+                                },
+                            },
+                            {
+                                "winding": "TV-HV",
+                                "visibility_rule": {
+                                    "type": "COMPARE",
+                                    "config": {"field": "voltage_ratio", "operator": "in", "values": ["220", "66"]},
+                                },
+                            },
                         ],
                         "table_evaluation": {
                             "enabled": True,
@@ -6919,7 +7153,8 @@ TEST_TYPE_TO_TEMPLATE = {
     # CVT
     "CVT Test Report": "cvt_test",
 
-    # ── DFR / IDAX (multi-session, cross-session comparison) ──
+    # ── DFR (multi-session, cross-session comparison) ──
+    "Dielectric Frequency Response (DFR)":        "dfr_idax_transformer",
     "Dielectric Frequency Response (DFR / IDAX)": "dfr_idax_transformer",
     "DFR / IDAX":                                 "dfr_idax_transformer",
 
