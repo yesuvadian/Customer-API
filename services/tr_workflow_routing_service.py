@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     TestingRequest,
+    TestRequestSchedule,
     TrWfDefinition,
     TrWfInstance,
     TrWfInstanceResolvedRole,
@@ -541,6 +542,25 @@ class WorkflowRoutingService:
             instance.current_status_code = terminal_status_code
             instance.completed_at = datetime.now(timezone.utc)
             to_status_code = terminal_status_code
+
+            # If this ticket was auto-generated from a one-off schedule (a
+            # single ad-hoc test, not a recurring cadence), that schedule
+            # was deliberately kept visible (deactivated but not deleted)
+            # until this ticket's workflow actually closed. Retire it now.
+            if testing_request.source_schedule_id:
+                _src_sched = (
+                    self.db.query(TestRequestSchedule)
+                    .filter(
+                        TestRequestSchedule.id == testing_request.source_schedule_id,
+                        TestRequestSchedule.is_recurring.is_(False),
+                        TestRequestSchedule.is_deleted.is_(False),
+                    )
+                    .first()
+                )
+                if _src_sched:
+                    _src_sched.is_deleted = True
+                    _src_sched.deleted_at = datetime.now(timezone.utc)
+                    _src_sched.deleted_by = performed_by_id
         else:
             # If next stage has the @originator token role, auto-assign to the request creator
             effective_assigned_user_id = assigned_user_id

@@ -473,6 +473,7 @@ class TestScheduleDashboardService:
                     "days_until_due": days,
                     "status":       status,
                     "frequency":    s.frequency.value if s.frequency else None,
+                    "is_recurring": s.is_recurring,
                     "is_overdue":   days <= 0,
                     "overdue_by":   abs(days) if days <= 0 else None,
                 })
@@ -901,6 +902,7 @@ class TestScheduleDashboardService:
                 "test_type":        tt.name if tt else None,
                 "department":       dept.name if dept else None,
                 "frequency":        s.frequency.value if s.frequency else None,
+                "is_recurring":     s.is_recurring,
                 "next_due":         next_date.isoformat() if next_date else None,
                 "days_until_due":   days,
                 "status":           status,

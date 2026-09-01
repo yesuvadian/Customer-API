@@ -18,6 +18,7 @@ from sqlalchemy import (
     Index,
     func,
     Text,
+    text,
 )
  
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
@@ -3219,10 +3220,22 @@ class TestRequestSchedule(Base):
 
     __table_args__ = (
 
-        UniqueConstraint(
+        # Only recurring schedules are deduplicated per (equipment, test
+        # type) — a one-off schedule (is_recurring=false) is a single
+        # ad-hoc test, not a cadence, so any number of them may coexist
+        # for the same equipment+test, including alongside an existing
+        # recurring schedule. NULLs (master schedules, equipment_id IS
+        # NULL) are never considered equal by Postgres anyway, so this
+        # only constrains equipment-bound recurring rows, same as the
+        # blanket constraint it replaces did in practice.
+        Index(
+            "uq_equipment_test_schedule_recurring",
             "equipment_id",
             "test_type_id",
-            name="uq_equipment_test_schedule"
+            unique=True,
+            postgresql_where=text(
+                "is_recurring = true AND is_deleted = false"
+            ),
         ),
 
         {"schema": "public"},

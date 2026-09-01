@@ -606,7 +606,11 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     )
                 )
             else:
-                # One-off schedule — it has served its purpose.
+                # One-off schedule — it has fired, so it won't run again,
+                # but it deliberately stays visible (deactivated, not
+                # deleted) until the ticket it generated actually closes —
+                # see tr_workflow_routing_service.advance_stage(), which
+                # soft-deletes it at that point.
                 schedule.is_active = False
 
             schedule.last_run_date = now
@@ -893,27 +897,13 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 detail="Equipment not found.",
             )
 
-        existing = (
-            self.db.query(TestRequestSchedule)
-            .filter(
-                TestRequestSchedule.equipment_id == equipment.id,
-
-                TestRequestSchedule.test_type_id
-                    == data["test_type_id"],
-
-                TestRequestSchedule.is_deleted == False,
-            )
-            .first()
-        )
-
-        if existing:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "A schedule already exists for this equipment "
-                    "and test type."
-                ),
-            )
+        # Deliberately no duplicate check here: a one-off schedule is a
+        # single ad-hoc test, not a recurring cadence, so it's fine for
+        # several to exist for the same (equipment_id, test_type_id) —
+        # including alongside an existing recurring schedule. The DB's
+        # uq_equipment_test_schedule_recurring index only deduplicates
+        # is_recurring=true rows (see migration 041), so this insert
+        # never collides.
 
         schedule = TestRequestSchedule(
 
@@ -1312,6 +1302,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 ),
                 "title": s.title,
                 "frequency": s.frequency.value if s.frequency else None,
+                "is_recurring": s.is_recurring,
                 "is_active": s.is_active,
                 "is_deleted": s.is_deleted,
                 "next_run_date": s.next_run_date.isoformat() if s.next_run_date else None,
