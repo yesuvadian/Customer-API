@@ -28,12 +28,13 @@ Drill-down chain:
 import uuid
 import re
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from statistics import mean
 from types import SimpleNamespace
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import asc, func
 from sqlalchemy.orm import Session, joinedload
 
@@ -43,6 +44,7 @@ from auth_utils import get_current_user
 from models import (
     CategoryMaster,
     Equipment,
+    User,
     EquipmentAnalytics,
     EquipmentCriticalityMapping,
     HierarchyAnalytics,
@@ -51,6 +53,7 @@ from models import (
     OverhaulRecommendation,
     ParameterAnalytics,
     ParameterThresholdBand,
+    DeteriorationReviewRecord,
     RepairWorkflow,
     TestAnalytics,
     TestResult,
@@ -1986,8 +1989,10 @@ def get_deterioration_watch_list(
             continue
 
         flagged_by_equipment.setdefault(row.equipment_id, []).append({
+            "analytics_id":          str(row.id),
             "parameter_key":         row.parameter_key,
             "parameter_label":       row.parameter_label,
+            "template_key":          row.template_key,
             "unit":                  row.unit,
             "current_value":         float(row.current_value) if row.current_value is not None else None,
             "trend":                 row.trend,
@@ -1997,7 +2002,46 @@ def get_deterioration_watch_list(
             "breach_predicted_at":   forecast["breach_predicted_at"] if forecast else None,
             "days_to_breach":        forecast["days_to_breach"] if forecast else None,
             "is_overdue_for_retest": forecast["is_overdue_for_retest"] if forecast else False,
+            "history_count":         row.history_count,
+            # Real last-test date this snapshot is based on — how the
+            # overdue-review scheduler (main.py's daily job) ages a pending
+            # advisory for T+7/T+15 escalation, same "anchor to the real
+            # test date" discipline _real_breach_forecast already uses.
+            "tested_at": (
+                tested_at_map.get(row.test_result_id).isoformat()
+                if tested_at_map.get(row.test_result_id) else None
+            ),
         })
+
+    # Officer review state (KPTCL spec §14.3: "Deterioration Watch List
+    # advisories pending officer review") — keyed to the exact snapshot
+    # (equipment_id, parameter_key, history_count) each flagged parameter
+    # was computed at, so a new test that changes the trend correctly shows
+    # as unreviewed again rather than staying silently reviewed forever.
+    review_keys = {
+        (eq_id, p["parameter_key"], p["history_count"])
+        for eq_id, params in flagged_by_equipment.items()
+        for p in params
+    }
+    reviews_by_key: dict = {}
+    if review_keys:
+        review_rows = (
+            db.query(DeteriorationReviewRecord)
+            .filter(DeteriorationReviewRecord.equipment_id.in_({k[0] for k in review_keys}))
+            .all()
+        )
+        for r in review_rows:
+            reviews_by_key[(r.equipment_id, r.parameter_key, r.history_count)] = r
+
+    pending_review_count = 0
+    for eq_id, params in flagged_by_equipment.items():
+        for p in params:
+            review = reviews_by_key.get((eq_id, p["parameter_key"], p["history_count"]))
+            p["is_reviewed"] = review is not None
+            p["review_disposition"] = review.disposition if review else None
+            p["review_note"] = review.note if review else None
+            if review is None:
+                pending_review_count += 1
 
     watch_list = []
     for eq_id, params in flagged_by_equipment.items():
@@ -2033,8 +2077,117 @@ def get_deterioration_watch_list(
     return {
         "total_equipment": len(equipment_rows),
         "watch_count": len(watch_list),
+        "pending_review_count": pending_review_count,
         "equipment": watch_list,
     }
+
+
+class DeteriorationReviewIn(BaseModel):
+    equipment_id: uuid.UUID
+    parameter_key: str
+    template_key: str
+    disposition: Literal[
+        "monitor", "request_retest", "escalate_repair", "dismiss",
+    ]
+    note: Optional[str] = None
+
+
+@router.post(
+    "/deterioration-watch-list/review",
+    summary="Record an officer's disposition on one Deterioration Watch List advisory",
+)
+def review_deterioration_advisory(
+    body: DeteriorationReviewIn,
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    """KPTCL spec §14.3's "advisories pending officer review", same
+    disposition-and-lock pattern as the Result Review workflow (§8) —
+    'dismiss' requires a note (§8's "No Action" needs "mandatory
+    justification"). Does NOT create a Testing Request itself for
+    'request_retest' — the app already has a score-based recommendation/
+    scheduling path (condition_recommendation_service.py) and an ad-hoc
+    Quick Test Request flow; the Flutter side opens that existing dialog
+    rather than a second request-creation path being built here.
+    """
+    if body.disposition == "dismiss" and not (body.note and body.note.strip()):
+        raise HTTPException(status_code=422, detail="note is required when dismissing an advisory")
+
+    # Resolve the CURRENT history_count server-side — never trust a value
+    # from the client — so a stale client can't "review" a snapshot that's
+    # already been superseded by a newer test.
+    latest = (
+        db.query(ParameterAnalytics)
+        .filter(
+            ParameterAnalytics.equipment_id == body.equipment_id,
+            ParameterAnalytics.parameter_key == body.parameter_key,
+        )
+        .order_by(ParameterAnalytics.history_count.desc(), ParameterAnalytics.calculated_at.desc())
+        .first()
+    )
+    if not latest:
+        raise HTTPException(status_code=404, detail="No analytics found for this equipment/parameter")
+
+    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
+    reviewer_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+
+    existing = (
+        db.query(DeteriorationReviewRecord)
+        .filter(
+            DeteriorationReviewRecord.equipment_id == body.equipment_id,
+            DeteriorationReviewRecord.parameter_key == body.parameter_key,
+            DeteriorationReviewRecord.history_count == latest.history_count,
+        )
+        .first()
+    )
+    if existing:
+        existing.disposition = body.disposition
+        existing.note = body.note
+        existing.reviewed_by = reviewer_id
+        existing.reviewed_at = datetime.now(timezone.utc)
+    else:
+        db.add(DeteriorationReviewRecord(
+            equipment_id=body.equipment_id,
+            parameter_key=body.parameter_key,
+            template_key=body.template_key,
+            history_count=latest.history_count,
+            disposition=body.disposition,
+            note=body.note,
+            reviewed_by=reviewer_id,
+            organization_id=org_id,
+        ))
+    db.commit()
+
+    # "Escalate to Repair Review" isn't just a label to record — it should
+    # actually reach the officers who'd act on it (KPTCL spec's own pattern:
+    # every escalation-shaped disposition elsewhere in this app fires a real
+    # notification, not a silent audit row).
+    if body.disposition == "escalate_repair":
+        try:
+            from services.notification_service import NotificationService
+            eq = db.get(Equipment, body.equipment_id)
+            reviewer = db.get(User, reviewer_id) if reviewer_id else None
+            reviewer_name = (
+                " ".join(filter(None, [reviewer.firstname, reviewer.lastname])) or reviewer.email
+                if reviewer else "An officer"
+            )
+            NotificationService(db).notify_deterioration_escalated(
+                equipment_label=eq.ueic if eq else "Equipment",
+                parameter_label=latest.parameter_label or latest.parameter_key,
+                trend=latest.trend,
+                days_to_breach=None,  # not recomputed here — the review sheet already showed it
+                escalated_by=reviewer_name,
+                note=body.note or "",
+                analytics_id=latest.id,
+                organization_id=org_id,
+                department_id=eq.department_id if eq else None,
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "deterioration_watch_escalated notification failed", exc_info=True
+            )
+
+    return {"status": "ok", "history_count": latest.history_count, "disposition": body.disposition}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

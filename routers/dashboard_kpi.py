@@ -1106,9 +1106,28 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             else:
                 cal_t0 += 1
 
-        cal_fail_count = db.query(func.count(TestingRequest.id)).filter(
-            *cal_filters, TestingRequest.status == 'rejected',
-        ).scalar() or 0
+        # The real pass/fail signal lives on the certificate's own TestResult
+        # (test_data.recommendation_type, or test_data.overall_result as a
+        # fallback — same priority order calibration_service.py's own
+        # _get_latest_reading() already uses), NOT TestingRequest.status.
+        # Confirmed live: calibration_hooks.py's _record_certificate_as_
+        # test_result() hardcodes the TestResult.overall_result COLUMN to
+        # "pass" unconditionally at creation — only test_data carries the
+        # real value — and status=='rejected' reflects whether the workflow
+        # itself was rejected (e.g. a malformed certificate upload), not
+        # whether the calibration the certificate describes actually
+        # passed. An officer can approve/verify a certificate that itself
+        # says "Fail" or "Conditional" — workflow status stays 'completed',
+        # not 'rejected' — so counting by status alone silently missed
+        # those.
+        from models import TestResult
+        _cal_result = func.lower(func.coalesce(
+            TestResult.test_data["recommendation_type"].astext,
+            TestResult.test_data["overall_result"].astext,
+        ))
+        cal_fail_count = db.query(func.count(func.distinct(TestingRequest.id))).join(
+            TestResult, TestResult.testing_request_id == TestingRequest.id,
+        ).filter(*cal_filters, _cal_result == 'fail').scalar() or 0
 
         cal_expiring_30 = db.query(func.count(TestingRequest.id)).filter(
             *cal_filters, ~cal_closed_expr,
@@ -1127,17 +1146,19 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         trend_cutoff = now - timedelta(days=365)
         month_col = func.date_trunc('month', TestingRequest.mts)
         trend_rows = db.query(
-            month_col.label('month'), TestingRequest.status, func.count(TestingRequest.id),
+            month_col.label('month'), _cal_result, func.count(func.distinct(TestingRequest.id)),
+        ).join(
+            TestResult, TestResult.testing_request_id == TestingRequest.id,
         ).filter(
             *cal_filters, TestingRequest.mts >= trend_cutoff,
             TestingRequest.status.in_(['closed', 'rejected']),
-        ).group_by('month', TestingRequest.status).all()
+        ).group_by('month', _cal_result).all()
         by_month: dict = {}
-        for month, status, count in trend_rows:
+        for month, cal_result, count in trend_rows:
             key = month.strftime('%Y-%m') if month else 'unknown'
             entry = by_month.setdefault(key, {'total': 0, 'fail': 0})
             entry['total'] += count
-            if status == 'rejected':
+            if cal_result == 'fail':
                 entry['fail'] += count
         fail_rate_trend = [
             {

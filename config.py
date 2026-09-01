@@ -224,3 +224,12 @@ ANALYTICS_MIN_TREND_R_SQUARED = float(os.getenv("ANALYTICS_MIN_TREND_R_SQUARED",
 # all is trusted enough to surface there (a 2-3 point trend fits ~perfectly
 # by construction regardless of whether the movement is real or noise).
 ANALYTICS_MIN_WATCH_HISTORY = int(os.getenv("ANALYTICS_MIN_WATCH_HISTORY", 4))
+# Deterioration Watch List overdue-review escalation (main.py's daily
+# scheduled job): days an advisory can sit unreviewed before the system
+# auto-escalates on its own. NOT wired through NotificationScheduleRule —
+# that engine only evaluates TestingRequest.due_date-shaped triggers, and a
+# Deterioration Watch advisory (a ParameterAnalytics row, not a
+# TestingRequest) has no due_date to compare against, so these live as
+# their own tunable rather than a rule row in that table.
+ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS", 7))
+ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS", 15))

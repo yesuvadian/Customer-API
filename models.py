@@ -5675,6 +5675,57 @@ class ConditionBandRankWord(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class DeteriorationReviewRecord(Base):
+    """Officer disposition on one Deterioration Watch List advisory (KPTCL
+    spec §14.3: "Deterioration Watch List advisories pending officer
+    review") — same shape as the Result Review workflow (§8) already uses
+    for ALERT/CRITICAL results (one disposition, locked, audit-logged), not
+    a new heavyweight Workflow-Configuration-style workflow with its own
+    stages/SLA — a deterioration advisory is the same kind of officer
+    decision as a result review, just triggered by a trend signal instead
+    of an absolute threshold breach.
+
+    Keyed to a SPECIFIC flagged-parameter snapshot via `history_count`
+    (ParameterAnalytics.history_count at the time of review), not the
+    equipment/parameter alone — once a new test recomputes that parameter's
+    trend (a higher history_count), this review no longer matches the
+    current snapshot and the advisory correctly shows as unreviewed again,
+    the same way a dismissed concern shouldn't stay silently dismissed
+    forever if the parameter is re-tested and still trending.
+
+    Disposition 'request_retest' does not itself create a Testing Request —
+    the app already has a score-based recommendation/scheduling path
+    (ConditionMonitoringRecommendation/TestRequestSchedule, condition_
+    recommendation_service.py) and an ad-hoc Quick Test Request flow; this
+    just records the officer's intent, and the Flutter side opens the
+    existing Quick Test Request dialog rather than a second, parallel
+    request-creation path being built here.
+    """
+    __tablename__ = "deterioration_review_records"
+    __table_args__ = (
+        UniqueConstraint("equipment_id", "parameter_key", "history_count",
+                          name="uq_deterioration_review_snapshot"),
+        {"schema": "public"},
+    )
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    equipment_id   = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=False, index=True)
+    parameter_key  = Column(String(200), nullable=False)
+    template_key   = Column(String(100), nullable=False)
+    history_count  = Column(Integer, nullable=False)
+    disposition    = Column(String(30), nullable=False)
+    # "monitor" | "request_retest" | "preventive_maintenance" |
+    # "escalate_repair" | "dismiss" — mirrors Result Review's disposition
+    # set (Monitor / Preventive Maintenance Required / Repair Required /
+    # Immediate Isolation / No Action), trimmed to what makes sense for a
+    # pre-breach trend advisory rather than an already-classified result.
+    note           = Column(Text, nullable=True)  # required by the API for "dismiss", same as §8's "No Action" needing mandatory justification
+
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), server_default=func.now())
+    organization_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # CONDITION MONITORING RECOMMENDATIONS
 # ═══════════════════════════════════════════════════════════════════════════
