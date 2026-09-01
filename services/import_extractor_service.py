@@ -923,6 +923,42 @@ def _rt_threshold(config: dict, row: dict, form_data: dict) -> Optional[str]:
     return None
 
 
+_RANK = {"NORMAL": 0, "ALERT": 1, "CRITICAL": 2}
+
+
+def _rt_worst_of_bands(config: dict, row: dict) -> Optional[str]:
+    """Mirrors rule_engine.dart's _worstOfBands: evaluates several
+    row-scoped fields against their own two-cutoff band (higher-is-better),
+    reports the label for the WORST severity found. A field with no value
+    yet is skipped rather than treated as a failure; returns None only if
+    none of the configured fields have a value."""
+    fields = config.get("fields") or {}
+    labels = config.get("labels") or {"NORMAL": "Normal", "ALERT": "Alert", "CRITICAL": "Critical"}
+    eps = 1e-9
+
+    worst = None
+    for field_key, band in fields.items():
+        value = _rt_num(row.get(field_key))
+        if value is None:
+            continue
+        normal_min = _rt_num((band or {}).get("normal_min"))
+        alert_min = _rt_num((band or {}).get("alert_min"))
+
+        if normal_min is not None and (value > normal_min or abs(value - normal_min) <= eps):
+            status = "NORMAL"
+        elif alert_min is not None and (value > alert_min or abs(value - alert_min) <= eps):
+            status = "ALERT"
+        else:
+            status = "CRITICAL"
+
+        if worst is None or _RANK[status] > _RANK[worst]:
+            worst = status
+
+    if worst is None:
+        return None
+    return labels.get(worst, worst)
+
+
 def _rt_row_inputs_present(rule: dict, row: dict) -> bool:
     """True when every ROW-scoped input the rule needs (the row's own
     measurement) is present. $form.-prefixed inputs are shared, section-wide
@@ -939,6 +975,11 @@ def _rt_row_inputs_present(rule: dict, row: dict) -> bool:
             if not _rt_has_value(row, ref if isinstance(ref, str) else None):
                 return False
         return True
+    if rtype == "WORST_OF_BANDS":
+        # At least one of the several fields needs a value — unlike THRESHOLD/
+        # FORMULA's single input, a partially-filled row (e.g. only CC-LF
+        # measured so far) still has something worth classifying.
+        return any(_rt_has_value(row, k) for k in (config.get("fields") or {}))
     return True
 
 
@@ -977,6 +1018,8 @@ def apply_calculated_columns(template_key: str, form_data: dict) -> dict:
                         computed = _rt_formula(config, row, form_data)
                     elif rtype == "THRESHOLD":
                         computed = _rt_threshold(config, row, form_data)
+                    elif rtype == "WORST_OF_BANDS":
+                        computed = _rt_worst_of_bands(config, row)
                     else:
                         continue
                     col_key = col.get("key")

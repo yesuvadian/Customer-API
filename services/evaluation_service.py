@@ -64,6 +64,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from services.analytics_engine import _load_band_rank_words
+
 
 # ─── Status constants ──────────────────────────────────────────────────────────
 NORMAL   = "NORMAL"
@@ -79,7 +81,8 @@ class EvaluationService:
     # ─── Core evaluation ──────────────────────────────────────────────────────
 
     @staticmethod
-    def evaluate_test_data(template_data: dict, test_data: dict) -> dict:
+    def evaluate_test_data(template_data: dict, test_data: dict,
+                            db: Optional[Session] = None) -> dict:
         """
         Walk every field in *template_data* that has evaluation enabled,
         read its value from *test_data*, compare against criteria, and return:
@@ -123,7 +126,7 @@ class EvaluationService:
                     # rule-based THRESHOLD calculated-column evaluation.
                     result = EvaluationService._eval_table_field(field, test_data)
                     if result is None:
-                        result = EvaluationService._eval_threshold_table(field, test_data)
+                        result = EvaluationService._eval_threshold_table(field, test_data, db)
                 elif field_type in ("dropdown", "radio", "readonly"):
                     result = EvaluationService._eval_dropdown_field(field, test_data)
                 elif field_type == "date":
@@ -314,7 +317,8 @@ class EvaluationService:
         }
 
     @staticmethod
-    def _eval_threshold_table(field: dict, test_data: dict) -> Optional[dict]:
+    def _eval_threshold_table(field: dict, test_data: dict,
+                               db: Optional[Session] = None) -> Optional[dict]:
         """
         Generic evaluator for table fields whose condition column uses
         rule.type == "THRESHOLD".
@@ -401,11 +405,11 @@ class EvaluationService:
         # Band name → NORMAL / ALERT / CRITICAL (template bands are free-text)
         # Full band-name phrases checked first (e.g. "not ok" must resolve to
         # CRITICAL, not fall through to the "not" first-word default below).
-        _cond_rank: dict = {
-            "good": 0, "normal": 0, "pass": 0, "ok": 0,
-            "fair": 1, "alert": 1, "warning": 1, "monitor": 1,
-            "poor": 2, "critical": 2, "abnormal": 2, "fail": 2, "not ok": 2,
-        }
+        # Admin-configured (ConditionBandRankWord), same source
+        # routers/analytics.py's breach forecasting reads for the identical
+        # word-ranking problem — falls back to the same default word list
+        # if no db session was given or the table isn't seeded yet.
+        _cond_rank: dict = _load_band_rank_words(db)
 
         row_results: list = []
         worst_rank  = 0
@@ -1099,7 +1103,7 @@ class EvaluationService:
         tpl = EvaluationService.get_template_data(template_key, db, org_id=org_id)
         if not tpl:
             return {"overall": NORMAL, "evaluated_at": datetime.now(timezone.utc).isoformat(), "fields": []}
-        return EvaluationService.evaluate_test_data(tpl, test_data)
+        return EvaluationService.evaluate_test_data(tpl, test_data, db)
 
 
 # ─── Utility ──────────────────────────────────────────────────────────────────

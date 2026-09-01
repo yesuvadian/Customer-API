@@ -3296,6 +3296,74 @@ class NotificationService:
             equipment_type=equipment_type,
         )
 
+    def notify_deterioration_escalated(
+        self, *, equipment_label: str, parameter_label: str, trend: str,
+        days_to_breach, escalated_by: str, note: str,
+        analytics_id, organization_id=None, department_id=None,
+    ) -> None:
+        """
+        Fired when an officer picks "Escalate to Repair Review" on a
+        Deterioration Watch List advisory (KPTCL spec §12.2/§14.3) — a
+        human decision, distinct from notify_deterioration_watch_overdue_review
+        below (the system's own T+7/T+15 escalation when NO officer acts at
+        all). source_id is the specific ParameterAnalytics row this
+        advisory was computed from, so dedup/audit can be traced to the
+        exact snapshot, same as every other row-anchored notify_* method.
+        """
+        self.fire(
+            event_type="deterioration_watch_escalated",
+            context={
+                "equipment": equipment_label,
+                "parameter_label": parameter_label,
+                "trend": trend or "",
+                "days_to_breach": str(days_to_breach) if days_to_breach is not None else "n/a",
+                "escalated_by": escalated_by,
+                "note": note or "",
+            },
+            organization_id=organization_id,
+            department_id=department_id,
+            source_id=analytics_id,
+            source_type="parameter_analytics",
+            severity="alert",
+        )
+
+    def notify_deterioration_watch_overdue_review(
+        self, *, equipment_label: str, parameter_label: str, trend: str,
+        days_to_breach, days_pending: int, analytics_id,
+        organization_id=None, department_id=None,
+    ) -> None:
+        """
+        Fired automatically by main.py's daily scheduler when a
+        Deterioration Watch List advisory has sat unreviewed past the SLA
+        (config.ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS/_CRITICAL_DAYS, .env-
+        tunable — NOT a NotificationScheduleRule row, since that engine only
+        evaluates TestingRequest.due_date-shaped triggers and this is a
+        ParameterAnalytics row with no due_date) — the same escalation
+        pattern §5/§8 already use for overdue tests and result review,
+        applied to trend advisories for the first time. severity bands the
+        same way eval_critical/eval_alert do: past the critical threshold is
+        "critical", past just the alert threshold is "alert".
+        """
+        import config
+        self.fire(
+            event_type="deterioration_watch_overdue_review",
+            context={
+                "equipment": equipment_label,
+                "parameter_label": parameter_label,
+                "trend": trend or "",
+                "days_to_breach": str(days_to_breach) if days_to_breach is not None else "n/a",
+                "days_pending": str(days_pending),
+            },
+            organization_id=organization_id,
+            department_id=department_id,
+            source_id=analytics_id,
+            source_type="parameter_analytics",
+            severity=(
+                "critical" if days_pending >= config.ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS
+                else "alert"
+            ),
+        )
+
     def notify_repair_delay(
         self, equipment, repair_stage: str, stage_deadline: str, days_delayed: int,
         organization_id=None, department_id=None,
