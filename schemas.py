@@ -1262,6 +1262,25 @@ class TestRequestScheduleUpdate(BaseModel):
     description: Optional[str] = None
 
 
+class TestRequestScheduleCreateOneOff(BaseModel):
+    """
+    Creates a one-off, equipment-specific operational schedule (not a
+    recurring master schedule). Used to defer an ad-hoc testing request
+    whose start date is further out than the immediate-eligibility
+    window — the actual TestingRequest ticket is auto-created later by
+    the daily scheduler and the schedule deactivates itself afterward.
+    """
+    equipment_id: UUID
+    test_type_id: int
+    title: str
+    start_date: datetime
+    advance_days: int = 15
+    priority: Optional[str] = None
+    description: Optional[str] = None
+    notes: Optional[str] = None
+    request_category: Optional[Literal["test", "maintenance"]] = "test"
+
+
 class TestRequestScheduleCreateByType(BaseModel):
     equipment_type_id: int
     test_type_id: int

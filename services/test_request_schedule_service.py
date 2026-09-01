@@ -532,6 +532,10 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     schedule.next_run_date
                 ),
 
+                "scheduled_start_date": (
+                    schedule.next_run_date
+                ),
+
                 "is_schedule_template": False,
 
                 "source_schedule_id": (
@@ -594,12 +598,16 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
             db.add(log_entry)
 
-            schedule.next_run_date = (
-                _advance_date(
-                    schedule.next_run_date,
-                    schedule.frequency,
+            if schedule.is_recurring:
+                schedule.next_run_date = (
+                    _advance_date(
+                        schedule.next_run_date,
+                        schedule.frequency,
+                    )
                 )
-            )
+            else:
+                # One-off schedule — it has served its purpose.
+                schedule.is_active = False
 
             schedule.last_run_date = now
 
@@ -840,6 +848,109 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             ),
 
             is_active=True,
+
+            created_by=user_id,
+        )
+
+        self.db.add(schedule)
+
+        self.db.commit()
+
+        self.db.refresh(schedule)
+
+        return schedule
+
+    # ============================================================
+    # CREATE ONE-OFF OPERATIONAL SCHEDULE
+    # equipment_id != NULL, is_recurring = False
+    #
+    # Defers creation of an ad-hoc testing request whose requested
+    # start date is further out than the immediate-eligibility window.
+    # The actual TestingRequest ticket is auto-created later by the
+    # daily scheduler (advance_days before next_run_date), and the
+    # schedule deactivates itself after firing once — see
+    # create_one_ticket()'s is_recurring branch.
+    # ============================================================
+
+    def create_one_off_operational_schedule(
+        self,
+        data: dict,
+        user_id: UUID,
+    ):
+
+        equipment = (
+            self.db.query(Equipment)
+            .filter(
+                Equipment.id == data["equipment_id"],
+                Equipment.organization_id == data["organization_id"],
+            )
+            .first()
+        )
+
+        if not equipment:
+            raise HTTPException(
+                status_code=404,
+                detail="Equipment not found.",
+            )
+
+        existing = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id == equipment.id,
+
+                TestRequestSchedule.test_type_id
+                    == data["test_type_id"],
+
+                TestRequestSchedule.is_deleted == False,
+            )
+            .first()
+        )
+
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "A schedule already exists for this equipment "
+                    "and test type."
+                ),
+            )
+
+        schedule = TestRequestSchedule(
+
+            equipment_id=equipment.id,
+
+            organization_id=data["organization_id"],
+
+            equipment_type_id=equipment.equipment_type_id,
+
+            test_type_id=data["test_type_id"],
+
+            title=data["title"],
+
+            description=data.get("description"),
+
+            request_category=data.get(
+                "request_category", "test"
+            ),
+
+            priority=data.get("priority"),
+
+            notes=data.get("notes"),
+
+            # Placeholder — never consulted, since is_recurring=False
+            # short-circuits the next_run_date advance in
+            # create_one_ticket() after this schedule fires.
+            frequency=ScheduleFrequency.yearly,
+
+            start_date=datetime.now(timezone.utc),
+
+            next_run_date=data["start_date"],
+
+            advance_days=data.get("advance_days", 15),
+
+            is_active=True,
+
+            is_recurring=False,
 
             created_by=user_id,
         )

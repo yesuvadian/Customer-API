@@ -3417,6 +3417,17 @@ class TestRequestSchedule(Base):
         nullable=False,
     )
 
+    # False for a one-off operational schedule (e.g. an ad-hoc testing
+    # request deferred to a future start date) — create_one_ticket()
+    # deactivates the schedule after it fires once instead of advancing
+    # next_run_date. True (default) preserves existing recurring behavior
+    # for master-derived operational schedules.
+    is_recurring = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
     # ============================================================
     # TEST REGISTER / OEM
     # ============================================================
