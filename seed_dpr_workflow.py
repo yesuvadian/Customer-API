@@ -104,12 +104,16 @@ TRANSITIONS = [
 # Unknown role names are skipped with a [WARN], same as
 # seed_precommission_role_mappings() — safe to run speculatively.
 ROLE_MAP = {
-    # stage_code: {"edit": [...roles that can fill the form...], "approve": [...roles that can advance/reject...]}
-    "DPR_INITIATION":         {"edit": ["AEE_MAINTENANCE"], "approve": ["EE_TLSS"]},
-    "DPR_COST_ESTIMATION":    {"edit": ["AEE_MAINTENANCE"], "approve": ["EE_TLSS"]},
-    "DPR_TECHNICAL_REVIEW":   {"edit": ["EE_TLSS"],          "approve": ["CEE_TRANSMISSION_ZONE"]},
-    "DPR_AUTHORITY_APPROVAL": {"edit": [],                    "approve": ["CEE_TRANSMISSION_ZONE"]},  # see tiering note above — highest existing role, re-tag once real approval tiers exist
-    "DPR_EXECUTION_TRACKING": {"edit": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"], "approve": ["EE_TLSS"]},
+    # stage_code: {
+    #   "edit": [...roles that can fill the form...],
+    #   "approve": [...roles that can advance/reject...],
+    #   "assign": [...roles that can assign users to this stage (coordinators)...]
+    # }
+    "DPR_INITIATION":         {"edit": ["AEE_MAINTENANCE"], "approve": ["EE_TLSS"], "assign": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"]},
+    "DPR_COST_ESTIMATION":    {"edit": ["AEE_MAINTENANCE"], "approve": ["EE_TLSS"], "assign": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"]},
+    "DPR_TECHNICAL_REVIEW":   {"edit": ["EE_TLSS"],          "approve": ["CEE_TRANSMISSION_ZONE"], "assign": ["EE_TLSS", "Transformer Repair Coordinator"]},
+    "DPR_AUTHORITY_APPROVAL": {"edit": [],                    "approve": ["CEE_TRANSMISSION_ZONE"], "assign": ["CEE_TRANSMISSION_ZONE"]},  # see tiering note above — highest existing role, re-tag once real approval tiers exist
+    "DPR_EXECUTION_TRACKING": {"edit": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"], "approve": ["EE_TLSS"], "assign": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"]},
 }
 
 # ── Per-stage dynamic-form schemas (OrgTestTemplate.template_data) ─────────
@@ -408,10 +412,12 @@ def seed_dpr_role_mappings(db, organization_id) -> int:
         if not mapping:
             mapping = RepairStageRole(id=uuid.uuid4(), stage_id=stage.id, role_id=role.id)
             db.add(mapping)
-        mapping.can_edit = can_edit
-        mapping.can_approve = can_approve
-        mapping.can_assign = can_assign
-        upserted += 1
+            upserted += 1
+        # Always update permissions (OR them together if role appears in multiple grant lists)
+        mapping.can_edit = mapping.can_edit or can_edit
+        mapping.can_approve = mapping.can_approve or can_approve
+        mapping.can_assign = mapping.can_assign or can_assign
+        db.flush()  # Force flush after each role to avoid session conflicts
 
     for stage_code, grants in ROLE_MAP.items():
         stage = db.query(RepairStageDefinition).filter_by(code=stage_code).first()
@@ -419,9 +425,11 @@ def seed_dpr_role_mappings(db, organization_id) -> int:
             print(f"[WARN] Stage not found: {stage_code} — run seed_dpr_stages first")
             continue
         for role_name in grants.get("edit", []):
-            _upsert(stage, role_name, can_edit=True, can_approve=False)
+            _upsert(stage, role_name, can_edit=True, can_approve=False, can_assign=False)
         for role_name in grants.get("approve", []):
-            _upsert(stage, role_name, can_edit=False, can_approve=True)
+            _upsert(stage, role_name, can_edit=False, can_approve=True, can_assign=False)
+        for role_name in grants.get("assign", []):
+            _upsert(stage, role_name, can_edit=False, can_approve=False, can_assign=True)
 
     db.commit()
     print(f"[OK] DPR role mappings: {upserted} upserted for org {organization_id}")
@@ -467,6 +475,17 @@ def seed_dpr_role_permissions(db, organization_id) -> int:
             g = grants_by_role.setdefault(role_name, {})
             g["can_view"] = True
             g["can_approve"] = True
+            g["can_assign"] = True
+        # A role that's only a coordinator (assign, not edit/approve) at every
+        # stage it appears in - e.g. "Transformer Repair Coordinator" isn't in
+        # any stage's "approve" list - would otherwise never enter
+        # grants_by_role at all and get zero module access. Doesn't apply
+        # today (every current "assign" role also holds "edit" somewhere),
+        # but keeps this in sync with ROLE_MAP instead of silently gapping if
+        # that stops being true.
+        for role_name in stage_grants.get("assign", []):
+            g = grants_by_role.setdefault(role_name, {})
+            g["can_view"] = True
             g["can_assign"] = True
 
     # System Administrator gets full access regardless of ROLE_MAP — same
