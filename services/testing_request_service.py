@@ -281,6 +281,7 @@ class TestingRequestService:
         commissioned_year: Optional[str] = None,
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
+        include_direct_submissions: bool = False,
     ):
         query = (
             self.db.query(TestingRequest)
@@ -404,10 +405,12 @@ class TestingRequestService:
 
         if category_filter:
             query = query.filter(TestingRequest.request_category == category_filter)
-        else:
+        elif not include_direct_submissions:
             # Exclude direct submissions (failure_registry, taqc_inspection) from
             # the general TR list — they have their own /direct-submissions endpoint.
-            from models import RequestCategory as RC
+            # Callers that want equipment-history context spanning BOTH kinds
+            # (e.g. a Failure Registry detail panel showing this equipment's
+            # other requests) opt in via include_direct_submissions=True.
             query = query.filter(
                 TestingRequest.is_direct_submission.is_not(True)
             )
@@ -582,6 +585,7 @@ class TestingRequestService:
         commissioned_year: Optional[str] = None,
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
+        include_direct_submissions: bool = False,
     ) -> List[TestingRequest]:
         query = self._base_request_query(
             status_filter=status_filter,
@@ -603,6 +607,7 @@ class TestingRequestService:
             commissioned_year=commissioned_year,
             failure_year=failure_year,
             capacity_mva=capacity_mva,
+            include_direct_submissions=include_direct_submissions,
         )
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
 
@@ -627,6 +632,7 @@ class TestingRequestService:
         commissioned_year: Optional[str] = None,
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
+        include_direct_submissions: bool = False,
         **_ignored,
     ) -> int:
         query = self._base_request_query(
@@ -649,6 +655,7 @@ class TestingRequestService:
             commissioned_year=commissioned_year,
             failure_year=failure_year,
             capacity_mva=capacity_mva,
+            include_direct_submissions=include_direct_submissions,
         )
         return query.with_entities(func.count(TestingRequest.id)).scalar() or 0
 

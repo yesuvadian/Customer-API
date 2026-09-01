@@ -1325,6 +1325,22 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             "cts",
         ]
 
+        # A frequency change must move next_run_date too — otherwise the
+        # schedule keeps whatever due date it had under the old frequency
+        # (e.g. switching weekly → monthly still shows a ~week-old due date
+        # instead of ~a month out) since nothing else in this generic
+        # setattr loop touches next_run_date.
+        new_frequency = data.get("frequency")
+        new_frequency_enum = (
+            ScheduleFrequency(new_frequency.value)
+            if new_frequency is not None
+            else None
+        )
+        frequency_changed = (
+            new_frequency_enum is not None
+            and new_frequency_enum != schedule.frequency
+        )
+
         for key, value in data.items():
 
             if key in protected_fields:
@@ -1332,6 +1348,11 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
             if hasattr(schedule, key):
                 setattr(schedule, key, value)
+
+        if frequency_changed:
+            schedule.next_run_date = _advance_date(
+                self._utc_now(), schedule.frequency
+            )
 
         schedule.modified_by = user_id
 

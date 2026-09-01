@@ -48,6 +48,7 @@ from models import (
     TestRequestSchedule,
 )
 from routers.analytics import _collect_department_ids
+from utils.common_service import get_user_dept_scope
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,21 @@ _CONDITION_TO_BUCKET = {"Good": "normal", "Fair": "warning", "Poor": "critical"}
 
 def _org_id(user) -> Optional[uuid.UUID]:
     return user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
+
+
+def _dept_scope(user, org_id, db: Session) -> tuple[bool, Optional[uuid.UUID]]:
+    """(is_admin, user_dept_id) for the requesting user.
+
+    Same rule already used by /testing_requests/department_hierarchy and the
+    equipment endpoints, applied here too so a dept-scoped (e.g. substation
+    -level) user is confined to their own subtree by default — not just once
+    they explicitly drill into a department_id, which otherwise leaves the
+    dashboard defaulting to every top-level zone in the org.
+    """
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if user_id is None:
+        return True, None
+    return get_user_dept_scope(db, user_id, org_id)
 
 
 def _overdue_counts_for_scope(template_keys: list[str], root_dept_ids: list[uuid.UUID], db: Session) -> dict:
@@ -223,7 +239,12 @@ def get_dashboard(
     org_id = _org_id(user)
     if not template_keys:
         template_keys = []
-    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+    is_admin, user_dept_id = _dept_scope(user, org_id, db)
+    # An explicit department_id (the user drilled into a card) always wins;
+    # otherwise a dept-scoped user is confined to their own subtree so the
+    # dashboard never defaults to org-wide data for them.
+    effective_department_id = department_id or (None if is_admin else user_dept_id)
+    dept_ids = _collect_department_ids(effective_department_id, db) if effective_department_id else None
 
     # ── Equipment in scope ──────────────────────────────────────────────────
     eq_q = db.query(Equipment.id, Equipment.department_id).filter(Equipment.status != "retired")
@@ -310,6 +331,15 @@ def get_dashboard(
         child_depts = (
             db.query(OrgDepartment)
             .filter(OrgDepartment.parent_department_id == department_id)
+            .all()
+        )
+    elif not is_admin and user_dept_id:
+        # Dept-scoped user's root view — just their own department (mirrors
+        # the root_id behavior in /testing_requests/department_hierarchy),
+        # never the org's full list of top-level zones they can't access.
+        child_depts = (
+            db.query(OrgDepartment)
+            .filter(OrgDepartment.id == user_dept_id)
             .all()
         )
     elif org_id:
@@ -549,7 +579,9 @@ def get_equipment_for_slice(
     user: dict = Depends(get_current_user),
 ):
     org_id = _org_id(user)
-    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+    is_admin, user_dept_id = _dept_scope(user, org_id, db)
+    effective_department_id = department_id or (None if is_admin else user_dept_id)
+    dept_ids = _collect_department_ids(effective_department_id, db) if effective_department_id else None
 
     eq_q = db.query(Equipment).filter(Equipment.status != "retired")
     if org_id:
