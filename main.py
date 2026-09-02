@@ -95,6 +95,7 @@ from routers import (
     annual_audits,       # Annual Audit observation workflow module
     test_register,       # NEW: Test Register — periodic maintenance catalogue
     test_schedule_dashboard,  # Test Schedule compliance matrix dashboard
+    dpr_projects,        # NEW: Detailed Project Report (DPR) approval workflow
 )
 from routers import cumulative  # Cumulative / Overhaul lifecycle module
 from routers import calibration as calibration_router  # Calibration lifecycle module
@@ -1115,6 +1116,106 @@ scheduler.add_job(
 )
 
 
+# Deterioration Watch List — overdue review escalation (runs daily at 09:30 UTC)
+# Same T+7/T+15 escalation pattern §5/§8 already use for overdue tests and
+# result review, applied here for the first time: an advisory that's sat
+# unreviewed since the test that produced it fires a real notification on
+# its own, rather than only escalating when an officer manually picks
+# "Escalate to Repair Review". Reuses get_deterioration_watch_list's own
+# computation (real threshold bands, r² gate, is_reviewed) rather than a
+# second copy of that filtering logic — one org's watch list at a time,
+# same iterate-active-orgs shape _run_monthly_mis_report already uses.
+def _check_deterioration_watch_overdue():
+    from datetime import date as _date
+    import config
+    db = SessionLocal()
+    try:
+        from models import Organization, NotificationLog
+        from routers.analytics import get_deterioration_watch_list
+        from services.notification_service import NotificationService
+
+        today = _date.today()
+        nsvc = NotificationService(db)
+        fired = 0
+
+        orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        for org in orgs:
+            try:
+                result = get_deterioration_watch_list(
+                    department_id=None, db=db, user={"organization_id": org.id, "id": None},
+                )
+            except Exception as _oe:
+                logger.warning(f"[DeteriorationWatch] watch-list fetch failed org={org.id}: {_oe}")
+                continue
+
+            for eq in result.get("equipment", []):
+                for p in eq.get("parameters", []):
+                    if p.get("is_reviewed"):
+                        continue
+                    tested_at = p.get("tested_at")
+                    if not tested_at:
+                        continue
+                    try:
+                        days_pending = (today - _date.fromisoformat(tested_at[:10])).days
+                    except ValueError:
+                        continue
+                    if days_pending < config.ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS:
+                        continue
+
+                    # Dedup by (source, event): NotificationLog has no
+                    # severity column, so this fires once per snapshot the
+                    # first time it crosses the alert threshold — not every
+                    # day it stays unreviewed after that. Whatever band it's
+                    # in the day this job first catches it (usually "alert",
+                    # occasionally "critical" if the daily job missed a run
+                    # and it's already past the critical threshold) is what
+                    # gets sent.
+                    already = (
+                        db.query(NotificationLog.id)
+                        .filter(
+                            NotificationLog.event_type == "deterioration_watch_overdue_review",
+                            NotificationLog.source_id == p["analytics_id"],
+                        )
+                        .first()
+                    )
+                    if already:
+                        continue
+
+                    try:
+                        nsvc.notify_deterioration_watch_overdue_review(
+                            equipment_label=eq.get("equipment_label") or "Equipment",
+                            parameter_label=p.get("parameter_label") or p.get("parameter_key"),
+                            trend=p.get("trend"),
+                            days_to_breach=p.get("days_to_breach"),
+                            days_pending=days_pending,
+                            analytics_id=p["analytics_id"],
+                            organization_id=org.id,
+                            department_id=eq.get("department_id"),
+                        )
+                        fired += 1
+                    except Exception as _fe:
+                        logger.warning(
+                            f"[DeteriorationWatch] notify failed analytics_id={p.get('analytics_id')}: {_fe}"
+                        )
+
+        if fired:
+            logger.info(f"[DeteriorationWatch] Overdue-review escalation fired={fired}")
+
+    except Exception as e:
+        logger.error(f"[DeteriorationWatch] Overdue check job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_deterioration_watch_overdue,
+    trigger="cron",
+    hour=9,
+    minute=30,
+    id="deterioration_watch_overdue_review_job",
+)
+
+
 # Scheduled report generation (runs every hour, service decides which are due)
 def _run_scheduled_reports():
     from services.reporting_service import run_scheduled_reports
@@ -1467,6 +1568,7 @@ app.include_router(test_request_schedules.router)
 app.include_router(test_schedule_dashboard.router)  # Compliance matrix dashboard
 app.include_router(direct_submissions.router)  # NEW: Failure Registry & TA&QC
 app.include_router(annual_audits.router)       # Annual Audit observations
+app.include_router(dpr_projects.router)        # Detailed Project Report (DPR) approval workflow
 app.include_router(test_register.router)       # NEW: Test Register catalogue
 app.include_router(cumulative.router)          # Cumulative / Overhaul lifecycle
 app.include_router(calibration_router.router)  # Calibration lifecycle

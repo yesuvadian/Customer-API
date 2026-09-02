@@ -320,7 +320,7 @@ class TestingService:
             .all()
         )
 
-    def submit_test_results(self, request_id: UUID, tester_id: UUID, replacement_products=None) -> TestingRequest:
+    def submit_test_results(self, request_id: UUID, tester_id: UUID, replacement_products=None, overwrite_schedule_ids: Optional[List[str]] = None) -> TestingRequest:
         request = self._get_request(request_id)
         _prev_status = request.status.value
 
@@ -432,7 +432,10 @@ class TestingService:
                     rec_obj.approved_at = UTCDateTimeMixin._utc_now()
                     self.db.flush()
                     from services.workflow_dispatch_service import WorkflowDispatchService
-                    WorkflowDispatchService(self.db).dispatch(request, rec_obj, tester_id)
+                    WorkflowDispatchService(self.db).dispatch(
+                        request, rec_obj, tester_id,
+                        overwrite_schedule_ids=overwrite_schedule_ids,
+                    )
                     _auto_closed = True
 
             if not _auto_closed:

@@ -965,6 +965,17 @@ def tr_wf_get_pending_queue(
                     if r.can_approve or r.can_assign or r.can_act_as_tester
                 ]
 
+        # Does the caller hold a can_approve role on the CURRENT stage?
+        # Used (together with stage_is_result_stage below) to gate whether
+        # the schedule-overwrite prompt is even offered — an explicit
+        # authorization rule, separate from whether an action is
+        # technically terminal.
+        caller_can_approve_here = db.query(TrWfStageRole).filter(
+            TrWfStageRole.stage_id == inst.current_stage_id,
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_approve.is_(True),
+        ).first() is not None
+
         eq = req.equipment
         result.append({
             "request_id": str(req.id),
@@ -1025,6 +1036,7 @@ def tr_wf_get_pending_queue(
                 "stage_can_act_as_tester": False,
                 "current_stage_approver_role_names": [],
             }),
+            "caller_can_approve_here": caller_can_approve_here,
             "wf_instance_id": str(inst.id),
             "resolved_tester_role_id": str(inst.resolved_tester_role_id) if inst.resolved_tester_role_id else None,
             "resolved_tester_role_name": inst.resolved_tester_role.name if inst.resolved_tester_role else None,
@@ -1139,12 +1151,20 @@ def tr_wf_advance_stage(
     action_code: str,
     role_id: Optional[UUID] = None,
     comment: Optional[str] = None,
+    overwrite_schedule_ids: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Generic stage advance for the configurable workflow engine.
     Used by L3 reviewer (approve/reject recommendation) and any future stage actions.
+
+    overwrite_schedule_ids: comma-separated ids of existing schedules (from
+    GET /testing/{request_id}/schedule-conflicts) the reviewer explicitly
+    chose to overwrite, sent only when this transition is terminal and
+    auto-dispatches a pending recommendation. A schedule not in this list is
+    left untouched; selecting more than one for the same test type merges
+    them into the first.
     """
     req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
     if not req:
@@ -1152,8 +1172,16 @@ def tr_wf_advance_stage(
     if not req.wf_instance_id:
         raise HTTPException(status_code=422, detail="Request is not on the configurable workflow path")
 
+    _overwrite_ids = (
+        [s for s in overwrite_schedule_ids.split(",") if s]
+        if overwrite_schedule_ids else None
+    )
+
     svc = TestingRequestWorkflowService(db)
-    success, message = svc.tr_wf_advance(req, current_user, action_code, role_id, comment)
+    success, message = svc.tr_wf_advance(
+        req, current_user, action_code, role_id, comment,
+        overwrite_schedule_ids=_overwrite_ids,
+    )
     if not success:
         raise HTTPException(status_code=422, detail=message)
 

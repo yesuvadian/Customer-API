@@ -258,16 +258,49 @@ def _life_bucket(years: float) -> str:
     return "25+ yrs"
 
 
-def _condition_from_score(score: float | None) -> str:
-    if score is None:     return "Unknown"
-    if score >= 88:       return "Excellent"
-    if score >= 75:       return "Good"
-    if score >= 65:       return "Fair"
-    if score >= 50:       return "Poor"
+# Safety fallback only — used when no db session is available. The
+# admin-configurable source of truth is EquipmentConditionBandThreshold;
+# see _load_condition_bands.
+_DEFAULT_CONDITION_BANDS = [
+    (88, "Excellent"),
+    (75, "Good"),
+    (65, "Fair"),
+    (50, "Poor"),
+    (0,  "Critical"),
+]
+
+
+def _load_condition_bands(db: Session | None) -> list[tuple[float, str]]:
+    """Admin-configured (threshold, label) pairs for the 5-tier condition
+    scale, highest threshold first. Falls back to _DEFAULT_CONDITION_BANDS
+    if no db session was given or the table has no active rows yet.
+    """
+    if db is None:
+        return _DEFAULT_CONDITION_BANDS
+    from models import EquipmentConditionBandThreshold
+    rows = (
+        db.query(EquipmentConditionBandThreshold)
+        .filter(EquipmentConditionBandThreshold.is_active.is_(True))
+        .order_by(EquipmentConditionBandThreshold.threshold.desc())
+        .all()
+    )
+    if not rows:
+        return _DEFAULT_CONDITION_BANDS
+    return [(float(r.threshold), r.label) for r in rows]
+
+
+def _condition_from_score(score: float | None, db: Session | None = None) -> str:
+    if score is None:
+        return "Unknown"
+    for threshold, label in _load_condition_bands(db):
+        if score >= threshold:
+            return label
     return "Critical"
 
 
-def _condition_from_score_and_risk(score: float | None, risk_level: str | None) -> str:
+def _condition_from_score_and_risk(
+    score: float | None, risk_level: str | None, db: Session | None = None,
+) -> str:
     """Same score bands as _condition_from_score, but honors a stored
     risk_level of "Critical" the way _risk_from_score's critical-findings
     override does - otherwise an equipment/test with a critical finding but
@@ -275,7 +308,7 @@ def _condition_from_score_and_risk(score: float | None, risk_level: str | None) 
     risk_level directly) still counts it as critical, so the two disagree."""
     if risk_level == "Critical":
         return "Critical"
-    return _condition_from_score(score)
+    return _condition_from_score(score, db)
 
 
 def _normalize_0_100(values: list[float]) -> float:
@@ -429,7 +462,7 @@ def get_overview(
                         type_map.get(eq.equipment_type_id) if eq else None)
         bucket = _life_bucket(ll) if ll is not None else "25+ yrs"
         cond = _condition_from_score_and_risk(
-            _eff_health(ea.equipment_id, ea), _eff_risk(ea.equipment_id, ea)
+            _eff_health(ea.equipment_id, ea), _eff_risk(ea.equipment_id, ea), db
         )
         key = cond.lower()
         if key in CONDITIONS:
@@ -461,7 +494,7 @@ def get_overview(
         bucket_sort_key[q_key] = sort_key
         quarter_buckets.setdefault(q_key, []).append(float(ta.health_score))
         qc = quarter_conditions.setdefault(q_key, {"critical": 0, "fair": 0, "good": 0})
-        cond = _condition_from_score_and_risk(float(ta.health_score), ta.risk_level)
+        cond = _condition_from_score_and_risk(float(ta.health_score), ta.risk_level, db)
         if cond in ("Critical", "Poor"):
             qc["critical"] += 1
         elif cond == "Fair":
@@ -548,7 +581,7 @@ def get_life_left(
             "expected_life":      exp_life,
             "life_left_years":    round(ll, 1) if ll is not None else None,
             "health_score":       float(ea.health_score) if ea and ea.health_score is not None else None,
-            "condition":          _condition_from_score(float(ea.health_score) if ea and ea.health_score is not None else None),
+            "condition":          _condition_from_score(float(ea.health_score) if ea and ea.health_score is not None else None, db),
             "risk_level":         ea.risk_level if ea else "Unknown",
         })
 
@@ -1019,7 +1052,7 @@ def get_grouped(
         score = _eff_health(eq.id, ea)
         if score is not None:
             group_scores[label].append(score)
-            cond = _condition_from_score(score).lower()
+            cond = _condition_from_score(score, db).lower()
             if cond in group_conditions[label]:
                 group_conditions[label][cond] += 1
 

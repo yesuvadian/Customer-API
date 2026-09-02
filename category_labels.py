@@ -97,26 +97,55 @@ class RequestCategoryColors(LabelPairRegistry):
     TAQC_INSPECTION = LabelPair("taqc_inspection", "#40C4FF")
 
 
-# ── Test-evaluation status labels and colors ──────────────────────────────────
+class RiskLevelColors(LabelPairRegistry):
+    """Canonical hex color per risk/health band label (EquipmentAnalytics.
+    risk_level / EquipmentHealthBandThreshold.label), for UI badges, the
+    Condition Risk Matrix, and any dashboard chart that colors by band.
+    Same reasoning as RequestCategoryColors above: this exists because
+    frontend files previously disagreed — analytics_dashboard_page.dart's
+    own _healthColor used 50/65/80 score cutoffs with Warning/Fair
+    labels, while the Condition Risk Matrix widget used a different
+    Critical/High/Medium/Low palette, for the same underlying data. Coloring
+    decisions belong here, once, not recomputed independently per screen.
 
-class TestEvaluationStatusLabels(LabelPairRegistry):
-    """Human-readable label per test-evaluation overall status — the
-    NORMAL/ALERT/CRITICAL vocabulary services/evaluation_service.py's
-    evaluate() computes onto TestResult.evaluation_result['overall']."""
-    NORMAL   = LabelPair("NORMAL",   "Normal")
-    ALERT    = LabelPair("ALERT",    "Alert")
-    CRITICAL = LabelPair("CRITICAL", "Critical")
+    Labels are the current default seed of EquipmentHealthBandThreshold
+    (Critical/High/Medium/Low) plus "Unknown" for equipment with no
+    analytics yet. If an admin renames a band's label in that table, add
+    the matching color here too — this registry colors by label text, the
+    same way the DB table's own rows are looked up by label."""
+
+    CRITICAL = LabelPair("Critical", "#E53E3E")
+    HIGH = LabelPair("High", "#DD6B20")
+    MEDIUM = LabelPair("Medium", "#D69E2E")
+    LOW = LabelPair("Low", "#38A169")
+    UNKNOWN = LabelPair("Unknown", "#64748B")
 
 
 class TestEvaluationStatusColors(LabelPairRegistry):
-    """Canonical hex color per test-evaluation overall status. Sourced from
-    analytics_dashboard_page.dart's _StatusBadge palette — other frontend
-    files (e.g. base_role_dashboard.dart's flagged-equipment badge) had
-    independently invented a different CRITICAL/ALERT pair with no NORMAL
-    color at all; this is now the single source those should read from."""
-    NORMAL   = LabelPair("NORMAL",   "#16A34A")
-    ALERT    = LabelPair("ALERT",    "#D97706")
+    """Canonical hex color per test-parameter evaluation status
+    (NORMAL/ALERT/CRITICAL — services/evaluation_service.py's own status
+    vocabulary, TestResult.evaluation_result['overall']). Same reasoning as
+    RiskLevelColors: this was independently re-colored per screen (e.g.
+    test_result_form.dart's post-submission banner, ee_tlss_dashboard_
+    page.dart's alert feed), all picking their own red/orange/green."""
+
+    NORMAL = LabelPair("NORMAL", "#16A34A")
+    ALERT = LabelPair("ALERT", "#D97706")
     CRITICAL = LabelPair("CRITICAL", "#DC2626")
+
+
+class ConditionBandColors(LabelPairRegistry):
+    """Canonical hex color per condition-band label (the AI Graph
+    Dashboard's separate 5-tier Excellent/Good/Fair/Poor/Critical scale —
+    see EquipmentConditionBandThreshold). Kept as its own registry, not
+    merged with RiskLevelColors, because it's a genuinely different band
+    count classifying the same score differently for a different chart."""
+
+    EXCELLENT = LabelPair("Excellent", "#16A34A")
+    GOOD = LabelPair("Good", "#65A30D")
+    FAIR = LabelPair("Fair", "#3B82F6")
+    POOR = LabelPair("Poor", "#D97706")
+    CRITICAL = LabelPair("Critical", "#DC2626")
 
 
 # ── Billing status labels, colors, and icons ──────────────────────────────────

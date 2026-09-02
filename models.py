@@ -18,6 +18,7 @@ from sqlalchemy import (
     Index,
     func,
     Text,
+    text,
 )
  
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB, ARRAY
@@ -3219,10 +3220,22 @@ class TestRequestSchedule(Base):
 
     __table_args__ = (
 
-        UniqueConstraint(
+        # Only recurring schedules are deduplicated per (equipment, test
+        # type) — a one-off schedule (is_recurring=false) is a single
+        # ad-hoc test, not a cadence, so any number of them may coexist
+        # for the same equipment+test, including alongside an existing
+        # recurring schedule. NULLs (master schedules, equipment_id IS
+        # NULL) are never considered equal by Postgres anyway, so this
+        # only constrains equipment-bound recurring rows, same as the
+        # blanket constraint it replaces did in practice.
+        Index(
+            "uq_equipment_test_schedule_recurring",
             "equipment_id",
             "test_type_id",
-            name="uq_equipment_test_schedule"
+            unique=True,
+            postgresql_where=text(
+                "is_recurring = true AND is_deleted = false"
+            ),
         ),
 
         {"schema": "public"},
@@ -3412,6 +3425,17 @@ class TestRequestSchedule(Base):
     )
 
     is_active = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    # False for a one-off operational schedule (e.g. an ad-hoc testing
+    # request deferred to a future start date) — create_one_ticket()
+    # deactivates the schedule after it fires once instead of advancing
+    # next_run_date. True (default) preserves existing recurring behavior
+    # for master-derived operational schedules.
+    is_recurring = Column(
         Boolean,
         default=True,
         nullable=False,
@@ -5433,6 +5457,297 @@ class EquipmentCriticalityMapping(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+
+
+class EquipmentHealthBandThreshold(Base):
+    """Admin-configurable score-to-band mapping for the composite equipment
+    health score (KPTCL spec §12.1: "The EHS computation logic and band
+    thresholds shall be configurable by the system administrator... without
+    requiring code changes"). Replaces the previously hardcoded
+    _RISK_BANDS constant in services/analytics_engine.py — that constant
+    only ever set the per-parameter NORMAL/ALERT/CRITICAL evaluation
+    thresholds' downstream aggregate band, which stayed fixed regardless of
+    what a given equipment type's test template (OrgTestTemplate,
+    genuinely already admin-configurable via the Template Designer)
+    specified.
+
+    Row semantics: a health score >= `threshold` maps to `label`, checked
+    in descending threshold order — the first row whose threshold the
+    score clears wins (same rule _RISK_BANDS always applied, just no
+    longer hardcoded). `label` values are kept as the existing Low/Medium/
+    High/Critical set — not the spec's own Healthy/Watch/At Risk/Critical
+    wording — because those exact strings are already load-bearing
+    throughout the app (EquipmentAnalytics.risk_level, the Condition Risk
+    Matrix's health-band axis, DQI, dashboard badge colors); renaming them
+    here would just move the hardcoding problem into every place that
+    branches on the literal string instead of solving it. `label` is still
+    itself editable per row, same as `threshold` is.
+
+    No org scoping (mirrors EquipmentCriticalityMapping just above — this
+    codebase's admin-config tables of this shape are global, not per-org).
+    """
+    __tablename__ = "equipment_health_band_thresholds"
+    __table_args__ = (
+        UniqueConstraint("label", name="uq_health_band_label"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    threshold = Column(Numeric(5, 2), nullable=False)   # minimum score (inclusive) for this band
+    label     = Column(String(30), nullable=False)      # e.g. "Low", "Medium", "High", "Critical"
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TestStatusCondition(Base):
+    """Admin-configurable label for each test-evaluation status
+    (NORMAL/ALERT/CRITICAL) — replaces the previously hardcoded _CONDITION
+    constant in services/analytics_engine.py. `status` is the fixed 3-value
+    vocabulary produced by per-parameter evaluation (against the
+    already-configurable OrgTestTemplate thresholds); `condition_label` is
+    what that status is called on dashboards/reports and is what feeds
+    ParameterConditionScore's point-value lookup — completing the same
+    "EHS computation logic" (KPTCL spec §12.1) chain as
+    EquipmentHealthBandThreshold and ParameterConditionScore: status ->
+    condition_label (this table) -> score (ParameterConditionScore) ->
+    composite health score -> band (EquipmentHealthBandThreshold).
+    """
+    __tablename__ = "test_status_conditions"
+    __table_args__ = (
+        UniqueConstraint("status", name="uq_status_condition_status"),
+        {"schema": "public"},
+    )
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    status          = Column(String(10), nullable=False)   # "NORMAL" | "ALERT" | "CRITICAL"
+    condition_label = Column(String(10), nullable=False)   # "Good" | "Fair" | "Poor"
+    is_active       = Column(Boolean, default=True)
+    notes           = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ParameterConditionScore(Base):
+    """Admin-configurable point value assigned to each field condition
+    (Good/Fair/Poor) when computing a test's composite health score —
+    replaces the previously hardcoded _SCORE constant in
+    services/analytics_engine.py's HealthScorer.score_test. Distinct from
+    EquipmentHealthBandThreshold just above: that table maps a computed
+    SCORE to a BAND LABEL (the output step); this one maps a field's
+    CONDITION to the POINT VALUE that feeds INTO the score in the first
+    place (the input step) — both are part of "EHS computation logic"
+    (KPTCL spec §12.1), just at opposite ends of the same calculation.
+
+    `condition` is always one of Good/Fair/Poor (the fixed 1:1 label for
+    NORMAL/ALERT/CRITICAL — not itself something to add rows for). `score`
+    is negative for Poor by default so a single CRITICAL field actively
+    drags the composite score down rather than just diluting the average.
+    """
+    __tablename__ = "parameter_condition_scores"
+    __table_args__ = (
+        UniqueConstraint("condition", name="uq_condition_score_condition"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    condition = Column(String(10), nullable=False)   # "Good" | "Fair" | "Poor"
+    score     = Column(Numeric(6, 2), nullable=False)
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class EquipmentConditionBandThreshold(Base):
+    """Admin-configurable score-to-band mapping for the AI Graph Dashboard's
+    5-tier condition scale (Excellent/Good/Fair/Poor/Critical) — a
+    genuinely separate scheme from EquipmentHealthBandThreshold's 4-tier
+    one (Low/Medium/High/Critical), not a duplicate of it. Both classify
+    the same underlying composite health score, but with a different band
+    count and different cutoffs, so an equipment can legitimately show
+    different-sounding labels on the two dashboards for the same score —
+    what must NOT happen is either scale being hardcoded so it can drift
+    from what an admin configured. Replaces the previously hardcoded
+    cutoffs (88/75/65/50) in routers/ai_graph.py's _condition_from_score.
+
+    Row semantics: a health score >= `threshold` maps to `label`, checked
+    in descending threshold order — same rule as
+    EquipmentHealthBandThreshold. No org scoping, matching every other
+    table of this shape in this file.
+    """
+    __tablename__ = "equipment_condition_band_thresholds"
+    __table_args__ = (
+        UniqueConstraint("label", name="uq_condition_band_label"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    threshold = Column(Numeric(5, 2), nullable=False)   # minimum score (inclusive) for this band
+    label     = Column(String(20), nullable=False)      # "Excellent" | "Good" | "Fair" | "Poor" | "Critical"
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ParameterThresholdBand(Base):
+    """Flattened, queryable per-parameter threshold bounds — a projection
+    of the table-row THRESHOLD rule configs already in test_templates.py
+    (transformer_oil_test's Acidity/Resistivity/etc bands, transformer_dga's
+    per-gas IS/IEC bands, and any other table field with rule.type ==
+    "THRESHOLD"), extracted by alter_parameter_threshold_band.py.
+
+    Exists because breach-proximity forecasting needs "how far is this
+    parameter's current value from its own real alert/critical bound" as a
+    fast, single query — the source config is nested JSON keyed by row
+    identifier and (for most templates) a second context key (voltage
+    band, calibration standard), which is fine for the form-rendering /
+    evaluation-at-submission-time use it was built for
+    (services/evaluation_service.py's _eval_threshold_table already parses
+    it correctly for that), but awkward and slow to re-parse per
+    equipment on every dashboard request.
+
+    The nested template config stays authoritative (edited via the
+    Template Designer) — this table is a read-optimized copy of it,
+    refreshed by re-running the alter script, not an independent second
+    place admins edit thresholds. band_label/lower_bound/upper_bound
+    mirror the config's own [lo, hi] pairs exactly; NULL upper_bound means
+    "no upper limit" (the config's own `None` for the open-ended worst
+    band), matching the source format's own convention.
+    """
+    __tablename__ = "parameter_threshold_bands"
+    __table_args__ = (
+        UniqueConstraint("template_key", "parameter_key", "context_key", "band_label",
+                          name="uq_threshold_band"),
+        {"schema": "public"},
+    )
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    template_key  = Column(String(100), nullable=False, index=True)   # e.g. "transformer_oil_test"
+    parameter_key = Column(String(200), nullable=False, index=True)   # row identifier, e.g. "Acidity", "Methane"
+    # NULL = the threshold applies regardless of context (a flat, single-
+    # level thresholds config). Non-NULL is whatever context the source
+    # config keys on for that parameter — a voltage band (">170kV"), a
+    # calibration standard ("IS 10593:2017"), etc. — free text, not a
+    # fixed enum, since different templates use different context axes.
+    context_key   = Column(String(50), nullable=True)
+    band_label    = Column(String(30), nullable=False)   # "Good" | "Fair" | "Poor" | "Normal" | "Alert" | ... (free text, matches source)
+    lower_bound   = Column(Numeric(14, 6), nullable=True)
+    upper_bound   = Column(Numeric(14, 6), nullable=True)  # NULL = open-ended (the source config's `None`)
+    is_active     = Column(Boolean, default=True)
+    notes         = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ConditionBandRankWord(Base):
+    """Admin-configurable word/phrase → severity rank (0=best, 1=mid,
+    2=worst), used to rank an arbitrary FREE-TEXT band label a test
+    template author typed (e.g. "Good", "Fair", "Not OK", "Alert",
+    "Excellent") — templates don't use a fixed band-name enum, so ranking
+    them needs a word-matching lookup rather than a direct enum mapping.
+
+    Replaces two independent, drifting hardcoded copies of the same word
+    list: routers/analytics.py's _BAND_RANK_WORDS (used by
+    _next_worse_boundary to rank ParameterThresholdBand rows for breach
+    forecasting) and services/evaluation_service.py's _cond_rank (used by
+    _eval_threshold_table to rank a table row's own bands at
+    test-evaluation time) — confirmed live the two copies had already
+    drifted (analytics.py's had "excellent", evaluation_service.py's
+    didn't). Both now read from this one table via
+    services/analytics_engine.py's _load_band_rank_words, the same
+    db-with-hardcoded-fallback pattern as _load_risk_bands/
+    _load_condition_labels/_load_condition_scores just above.
+
+    `phrase` is matched as a case-insensitive substring against the band
+    label text (e.g. "not ok" must be checked before the bare word "ok"
+    would otherwise match first) — ranking here doesn't change how a
+    label is matched, only where the word list itself lives.
+    """
+    __tablename__ = "condition_band_rank_words"
+    __table_args__ = (
+        UniqueConstraint("phrase", name="uq_band_rank_word_phrase"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    phrase    = Column(String(30), nullable=False)   # e.g. "good", "not ok", "critical"
+    rank      = Column(Integer, nullable=False)       # 0 = best, 1 = mid, 2 = worst
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DeteriorationReviewRecord(Base):
+    """Officer disposition on one Deterioration Watch List advisory (KPTCL
+    spec §14.3: "Deterioration Watch List advisories pending officer
+    review") — same shape as the Result Review workflow (§8) already uses
+    for ALERT/CRITICAL results (one disposition, locked, audit-logged), not
+    a new heavyweight Workflow-Configuration-style workflow with its own
+    stages/SLA — a deterioration advisory is the same kind of officer
+    decision as a result review, just triggered by a trend signal instead
+    of an absolute threshold breach.
+
+    Keyed to a SPECIFIC flagged-parameter snapshot via `history_count`
+    (ParameterAnalytics.history_count at the time of review), not the
+    equipment/parameter alone — once a new test recomputes that parameter's
+    trend (a higher history_count), this review no longer matches the
+    current snapshot and the advisory correctly shows as unreviewed again,
+    the same way a dismissed concern shouldn't stay silently dismissed
+    forever if the parameter is re-tested and still trending.
+
+    Disposition 'request_retest' does not itself create a Testing Request —
+    the app already has a score-based recommendation/scheduling path
+    (ConditionMonitoringRecommendation/TestRequestSchedule, condition_
+    recommendation_service.py) and an ad-hoc Quick Test Request flow; this
+    just records the officer's intent, and the Flutter side opens the
+    existing Quick Test Request dialog rather than a second, parallel
+    request-creation path being built here.
+    """
+    __tablename__ = "deterioration_review_records"
+    __table_args__ = (
+        UniqueConstraint("equipment_id", "parameter_key", "history_count",
+                          name="uq_deterioration_review_snapshot"),
+        {"schema": "public"},
+    )
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    equipment_id   = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id"), nullable=False, index=True)
+    parameter_key  = Column(String(200), nullable=False)
+    template_key   = Column(String(100), nullable=False)
+    history_count  = Column(Integer, nullable=False)
+    disposition    = Column(String(30), nullable=False)
+    # "monitor" | "request_retest" | "preventive_maintenance" |
+    # "escalate_repair" | "dismiss" — mirrors Result Review's disposition
+    # set (Monitor / Preventive Maintenance Required / Repair Required /
+    # Immediate Isolation / No Action), trimmed to what makes sense for a
+    # pre-breach trend advisory rather than an already-classified result.
+    note           = Column(Text, nullable=True)  # required by the API for "dismiss", same as §8's "No Action" needing mandatory justification
+
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), server_default=func.now())
+    organization_id = Column(UUID(as_uuid=True), nullable=True, index=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

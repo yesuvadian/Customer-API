@@ -28,20 +28,23 @@ Drill-down chain:
 import uuid
 import re
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from statistics import mean
 from types import SimpleNamespace
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import asc, func
 from sqlalchemy.orm import Session, joinedload
 
+import config
 from database import get_vendor_db
 from auth_utils import get_current_user
 from models import (
     CategoryMaster,
     Equipment,
+    User,
     EquipmentAnalytics,
     EquipmentCriticalityMapping,
     HierarchyAnalytics,
@@ -49,13 +52,16 @@ from models import (
     OrgTestTemplate,
     OverhaulRecommendation,
     ParameterAnalytics,
+    ParameterThresholdBand,
+    DeteriorationReviewRecord,
     RepairWorkflow,
     TestAnalytics,
     TestResult,
     TestingRequest,
 )
 from services.condition_recommendation_service import evaluate_for_equipment
-from services.analytics_engine import AnalyticsEngine, _risk_from_score
+from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words
+from category_labels import RiskLevelColors
 from utils.common_service import get_user_dept_scope
 
 logger = logging.getLogger(__name__)
@@ -63,6 +69,137 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 _CAPACITY_NUM_RE = re.compile(r"[\d.]+")
+
+
+def _severity_order_labels(db: Session) -> list[str]:
+    """Risk-band labels, worst first (Critical..Low by default) — derived
+    from EquipmentHealthBandThreshold (services/analytics_engine.py's
+    _load_risk_bands, which already reads that table) rather than a second
+    independent hardcoded list. _load_risk_bands returns highest-threshold
+    (least severe) first; reversed here for "worst first" ordering.
+
+    Reused for both the Condition Risk Matrix's axis labels and equipment
+    worst-first sort order — those two concerns (which band names exist,
+    and which order counts as "worse") previously lived in two more
+    separate hardcoded copies (CRITICALITY_TIERS/HEALTH_BANDS and
+    _risk_order) that could silently drift out of sync with each other and
+    with the admin-configurable table if, say, an admin renamed a band.
+    """
+    return [label for _, label in reversed(_load_risk_bands(db))]
+
+
+def _severity_rank_map(db: Session) -> dict[str, int]:
+    """{label: rank} from _severity_order_labels, 0 = most severe."""
+    return {label: i for i, label in enumerate(_severity_order_labels(db))}
+
+
+# ── Table-based threshold breach forecasting (ParameterThresholdBand) ──────
+# Real fix for the Deterioration Watch List's original gap: it could tell a
+# parameter was trending, but not whether that trend was actually heading
+# toward a real problem, because services/analytics_engine.py's breach-
+# forecast logic only reads a flat evaluation dict (alert_min/alert_max/
+# etc) — table-row tests (oil tests, DGA, most others: this app's dominant
+# real pattern) store their thresholds keyed by row/parameter name instead,
+# a shape that logic never reads, so days_to_breach was effectively always
+# None for them. ParameterThresholdBand (alter_parameter_threshold_band.py)
+# is a flattened, queryable projection of those same table-row threshold
+# configs; the functions below use it to compute a real breach distance
+# on demand, without touching the core engine or needing a full recompute.
+
+def _band_rank(label: str, rank_words: dict[str, int]) -> int:
+    """0 = best band, higher = worse. rank_words comes from
+    services/analytics_engine.py's _load_band_rank_words (admin-configured
+    ConditionBandRankWord table, same word-matching convention
+    services/evaluation_service.py's own _cond_rank uses) — not a
+    hardcoded copy, so a template's bands are ranked the same way here as
+    they are at test-evaluation time, from the same source."""
+    low = (label or "").lower()
+    for word, rank in rank_words.items():
+        if word in low:
+            return rank
+    return 1  # unrecognized band name — treat as a middle tier, not best/worst
+
+
+_VOLTAGE_CONTEXT_RE = [
+    (re.compile(r"^>\s*([\d.]+)\s*kV$", re.I), lambda v, lo: v > lo),
+    (re.compile(r"^<=\s*([\d.]+)\s*kV$", re.I), lambda v, lo: v <= lo),
+]
+_VOLTAGE_RANGE_RE = re.compile(r"^([\d.]+)\s*-\s*([\d.]+)\s*kV$", re.I)
+
+
+def _resolve_context_key(context_keys: list[str], voltage_class: str | None) -> str | None:
+    """Picks which context_key applies to this equipment. If the available
+    context_keys look like voltage bands (>170kV, 72.5-170kV, <=72.5kV —
+    the oil-test template's own shape), matches the equipment's own
+    voltage_class against them directly from the label text, without
+    needing a separate hardcoded copy of the template's voltage->bucket
+    mapping. Falls back to the first available context otherwise (e.g.
+    DGA's context_key is a calibration standard name, not a voltage band —
+    same fallback services/evaluation_service.py's own _eval_threshold_table
+    uses when it can't resolve a sub_key)."""
+    if not context_keys:
+        return None
+    try:
+        v = float(str(voltage_class)) if voltage_class else None
+    except (TypeError, ValueError):
+        v = None
+    if v is not None:
+        for ck in context_keys:
+            for pattern, test in _VOLTAGE_CONTEXT_RE:
+                m = pattern.match(ck.strip())
+                if m and test(v, float(m.group(1))):
+                    return ck
+            m = _VOLTAGE_RANGE_RE.match(ck.strip())
+            if m and float(m.group(1)) < v <= float(m.group(2)):
+                return ck
+    return context_keys[0]
+
+
+def _table_row_id(parameter_key: str) -> str:
+    """ParameterAnalytics.parameter_key for a table-row field is a 3-part
+    composite key: "{table_field_key}.{row_id}.{column_key}" (confirmed
+    live, e.g. "oil_test_results.Acidity.measured_value"). Extracts just
+    the row_id — what ParameterThresholdBand.parameter_key stores — since
+    a flat field's parameter_key has no dots and passes through unchanged."""
+    parts = parameter_key.split(".")
+    return parts[1] if len(parts) == 3 else parameter_key
+
+
+def _next_worse_boundary(bands: list, current_value: float, slope_per_day: float,
+                          rank_words: dict[str, int]):
+    """Returns (breach_value, band_label) for the next threshold boundary
+    this parameter will cross, moving in slope_per_day's direction, into a
+    WORSE band than the one current_value is in now — or (None, None) if
+    there isn't one (already in the worst band, or trending toward a
+    better one, not a worse one)."""
+    def lb(r):
+        return float(r.lower_bound) if r.lower_bound is not None else float("-inf")
+
+    def ub(r):
+        return float(r.upper_bound) if r.upper_bound is not None else float("inf")
+
+    sorted_bands = sorted(bands, key=lb)
+    current_rank = None
+    for r in sorted_bands:
+        if lb(r) <= current_value < ub(r):
+            current_rank = _band_rank(r.band_label, rank_words)
+            break
+    if current_rank is None:
+        # current_value outside every defined range — treat as whichever
+        # end it's beyond (already past the last band's bound, or below
+        # the first's).
+        edge = sorted_bands[-1] if current_value >= lb(sorted_bands[-1]) else sorted_bands[0]
+        current_rank = _band_rank(edge.band_label, rank_words)
+
+    if slope_per_day > 0:
+        for r in sorted_bands:
+            if lb(r) > current_value and _band_rank(r.band_label, rank_words) > current_rank:
+                return lb(r), r.band_label
+    elif slope_per_day < 0:
+        for r in reversed(sorted_bands):
+            if ub(r) <= current_value and _band_rank(r.band_label, rank_words) > current_rank:
+                return ub(r), r.band_label
+    return None, None
 
 
 def _parse_capacity_mva(raw) -> float | None:
@@ -196,7 +333,7 @@ def _lab_only_scores(eq_ids: list, db: Session) -> dict:
         scores = [float(r.health_score) for r in lab_rows if r.health_score is not None]
         score = round(mean(scores), 2) if scores else None
         findings = [f for r in lab_rows for f in (r.critical_findings or [])]
-        risk = _risk_from_score(score, findings)
+        risk = _risk_from_score(score, findings, db)
         out[eq_id] = (score, risk, findings)
     return out
 
@@ -323,17 +460,26 @@ def get_asset_breakdown(
     }
 
     def _empty_health() -> dict:
-        return {"critical": 0, "high": 0, "healthy": 0, "untested": 0, "sum": 0.0, "cnt": 0}
+        return {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0,
+                "untested": 0, "sum": 0.0, "cnt": 0}
 
     def _add_health(bucket: dict, eq_id, tested: bool, source=None) -> None:
         """Fold one equipment into exactly one bucket, so critical + high +
-        healthy + untested always equals the group's total asset count.
-        `tested` = has a qualifying completed test (in-range when a date
-        filter is active, ever otherwise); equipment with no analytics row
-        yet (never assessed) always lands in "untested" regardless.
-        `source` supplies risk_level/health_score — a date-scoped TestAnalytics
-        snapshot when a range is active; falls back to the all-time
-        lab_ea_map lookup (lab-tests-only score/risk) when omitted."""
+        medium + low + unknown + untested always equals the group's total
+        asset count. `tested` = has a qualifying completed test (in-range
+        when a date filter is active, ever otherwise); equipment with no
+        analytics row yet (never assessed) always lands in "untested"
+        regardless. `source` supplies risk_level/health_score — a date-scoped
+        TestAnalytics snapshot when a range is active; falls back to the
+        all-time lab_ea_map lookup (lab-tests-only score/risk) when omitted.
+
+        Four real bands (Critical/High/Medium/Low), not the previous
+        Critical/High/"everything else called Healthy" — that collapsed
+        Medium into the same bucket as Low, which visibly disagreed with
+        the Condition Risk Matrix's own Critical/High/Medium/Low breakdown
+        for the same equipment (confirmed live: 220kV BIAL Begur showed
+        "4 Healthy" here while the matrix correctly showed 2 Medium + 2 Low).
+        """
         src = source if source is not None else lab_ea_map.get(eq_id)
         if tested and src:
             rl = (src.risk_level or "").strip()
@@ -341,8 +487,12 @@ def get_asset_breakdown(
                 bucket["critical"] += 1
             elif rl == "High":
                 bucket["high"] += 1
+            elif rl == "Medium":
+                bucket["medium"] += 1
+            elif rl == "Low":
+                bucket["low"] += 1
             else:
-                bucket["healthy"] += 1
+                bucket["unknown"] += 1
             if src.health_score is not None:
                 bucket["sum"] += float(src.health_score)
                 bucket["cnt"] += 1
@@ -353,7 +503,9 @@ def get_asset_breakdown(
         return {
             "critical":   bucket["critical"],
             "high":       bucket["high"],
-            "healthy":    bucket["healthy"],
+            "medium":     bucket["medium"],
+            "low":        bucket["low"],
+            "unknown":    bucket["unknown"],
             "untested":   bucket["untested"],
             "avg_health": round(bucket["sum"] / bucket["cnt"], 1) if bucket["cnt"] > 0 else None,
         }
@@ -1102,7 +1254,7 @@ def run_test_analytics(
         tr.template_key, db, org_id=tr.organization_id
     )
     if template_data:
-        fresh_eval = EvaluationService.evaluate_test_data(template_data, tr.test_data or {})
+        fresh_eval = EvaluationService.evaluate_test_data(template_data, tr.test_data or {}, db)
         tr.evaluation_result = fresh_eval
         db.flush()
 
@@ -1350,7 +1502,7 @@ def get_dashboard_equipment(
         at_risk_params_map.setdefault(eq_id, set()).add(label or key)
     at_risk_params_map = {k: sorted(v) for k, v in at_risk_params_map.items()}
 
-    _risk_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+    _risk_order = _severity_rank_map(db)
 
     def _sort_key(eq: Equipment):
         score, risk, _f = lab_map.get(eq.id, (None, "Unknown", []))
@@ -1595,16 +1747,30 @@ def get_condition_risk_matrix(
         m.equipment_type_id: m.criticality for m in mapping_rows if not m.voltage_class
     }
 
+    severity_labels = _severity_order_labels(db)  # worst-first, from EquipmentHealthBandThreshold
+    least_severe_label = severity_labels[-1] if severity_labels else "Low"
+
     def _criticality_for(eq: Equipment) -> str:
         key = (eq.equipment_type_id, eq.voltage_class)
         if key in specific_criticality:
             return specific_criticality[key]
         if eq.equipment_type_id in default_criticality:
             return default_criticality[eq.equipment_type_id]
-        return "Low"
+        return least_severe_label
 
-    CRITICALITY_TIERS = ["Critical", "High", "Medium", "Low"]
-    HEALTH_BANDS = ["Critical", "High", "Medium", "Low", "Unknown"]
+    # Both axes reuse the same admin-configured severity vocabulary
+    # (EquipmentHealthBandThreshold) rather than two more independent
+    # hardcoded label lists: HEALTH_BANDS directly because that table is
+    # literally what produced every equipment's risk_level in the first
+    # place, plus "Unknown" for equipment with no analytics yet.
+    # CRITICALITY_TIERS is a deliberate simplification — criticality
+    # (EquipmentCriticalityMapping) is a conceptually separate axis
+    # (consequence-of-failure, not condition) that happens to share the
+    # same 4 names today; if KPTCL ever wants criticality tiers named
+    # differently from health bands, this reuse should be split into its
+    # own small ordered table instead of assuming they always match.
+    CRITICALITY_TIERS = severity_labels
+    HEALTH_BANDS = severity_labels + ["Unknown"]
 
     cells: dict[tuple, list] = {}
     for e in equipment_rows:
@@ -1633,6 +1799,12 @@ def get_condition_risk_matrix(
     return {
         "criticality_tiers": CRITICALITY_TIERS,
         "health_bands": HEALTH_BANDS,
+        # Colors decided once, here, from RiskLevelColors — not left for the
+        # frontend to guess per screen (that's exactly how this widget's own
+        # earlier bug happened: analytics_dashboard_page.dart colored the
+        # same bands differently from this matrix). The frontend renders
+        # whichever hex string it's given rather than deciding one itself.
+        "band_colors": {label: RiskLevelColors.get(label) for label in HEALTH_BANDS},
         "matrix": matrix,
         "total_equipment": len(equipment_rows),
         "unmapped_type_count": sum(
@@ -1641,6 +1813,402 @@ def get_condition_risk_matrix(
             and (e.equipment_type_id, e.voltage_class) not in specific_criticality
         ),
     }
+
+
+@router.get(
+    "/deterioration-watch-list",
+    summary="Equipment trending toward a threshold breach, before they get there (KPTCL spec §12.2 / §14.3)",
+)
+def get_deterioration_watch_list(
+    department_id: Optional[uuid.UUID] = Query(
+        None,
+        description="Scope to this department + all its descendants. Omit for the org root, "
+                    "same organization_id fallback as /condition-risk-matrix and /asset-breakdown.",
+    ),
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    """
+    Surfaces equipment with a statistically significant trend on a key test
+    parameter, even though that parameter's latest reading hasn't crossed
+    into ALERT/CRITICAL yet — the whole point being to catch deterioration
+    before it becomes an incident, not after. Reuses computation the
+    analytics engine already does and stores on every test
+    (ParameterAnalytics.trend/trend_slope/days_to_breach from
+    services/analytics_engine.py's linear-regression + breach-forecast
+    logic) rather than re-deriving trend detection here — this endpoint is
+    just the cross-equipment aggregation of that signal that didn't
+    previously exist anywhere (it was only ever surfaced one equipment at
+    a time, on that equipment's own profile page).
+
+    Each flagged parameter's days_to_breach / breach_threshold /
+    breach_predicted_at / is_overdue_for_retest are computed HERE, via the
+    shared _real_breach_forecast() (also used by get_parameter_analytics),
+    from ParameterThresholdBand — NOT read from the analytics engine's own
+    days_to_breach/breach_predicted_at columns. Confirmed live those are
+    populated only for flat-field parameters with a simple evaluation dict
+    (alert_min/alert_max/etc); the table-row-based tests that are this
+    app's dominant real pattern (oil tests, DGA, most others) store
+    thresholds keyed by row/parameter name instead, a shape the engine's
+    own breach-forecast code never reads, so those columns are effectively
+    always None for them — a real architecture gap in the engine itself
+    (tracked separately), not something to paper over here.
+    ParameterThresholdBand (alter_parameter_threshold_band.py) is a
+    flattened, queryable projection of those same table-row threshold
+    configs, built from any test template's table field whose rule is
+    THRESHOLD-typed — not specific to any one test type, so a new template
+    that defines THRESHOLD bands on a table row is picked up automatically,
+    the same way transformer_oil_test/transformer_dga/tan-delta templates
+    already are; a template with no THRESHOLD-typed rule at all (or one
+    using flat-field alert_min/alert_max instead) has no rows here and
+    falls back to the _MIN_WATCH_HISTORY bar below. _real_breach_forecast
+    walks the bands to find the real next worse-band boundary in the
+    direction this parameter is actually trending, and only a genuine
+    forecast toward a WORSE band qualifies — a parameter trending toward a
+    BETTER band is correctly excluded, not just unmeasured — then anchors
+    the predicted date to this parameter's own last real test date (not
+    "today"), so equipment that hasn't been retested since the trend
+    implied a breach comes back is_overdue_for_retest instead of a
+    misleading future date.
+
+    A parameter with no threshold config found at all (so materiality
+    can't be checked against a real boundary) falls back to a minimum
+    reading-count bar (_MIN_WATCH_HISTORY) instead of trend direction
+    alone — confirmed live: with only 2-3 readings, a straight line
+    trivially fits perfectly (trend_r_squared ~1.0) regardless of whether
+    the movement is real or noise, which is how a 100%-health/"Low"-risk
+    transformer with 3 historical readings per parameter first showed up
+    here with 8 flagged parameters, none of them real.
+    """
+    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
+    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+
+    equipment_q = db.query(Equipment).filter(Equipment.status != "retired")
+    if org_id:
+        equipment_q = equipment_q.filter(Equipment.organization_id == org_id)
+    if dept_ids:
+        equipment_q = equipment_q.filter(Equipment.department_id.in_(dept_ids))
+    equipment_rows = equipment_q.all()
+    eq_by_id = {e.id: e for e in equipment_rows}
+    eq_ids = list(eq_by_id.keys())
+
+    if not eq_ids:
+        return {"total_equipment": 0, "watch_count": 0, "equipment": []}
+
+    analytics_map = {
+        ea.equipment_id: ea
+        for ea in db.query(EquipmentAnalytics).filter(EquipmentAnalytics.equipment_id.in_(eq_ids)).all()
+    }
+
+    # Every historical row for these equipment, newest test first — deduped
+    # below to the latest row per (equipment_id, parameter_key) before any
+    # trend/status filtering, so a stale-but-trending reading superseded
+    # by a newer stable (or already-breached) one is never surfaced.
+    #
+    # Ordered by history_count, NOT calculated_at: confirmed live these can
+    # disagree — calculated_at is when the analytics engine happened to
+    # (re)compute a row, which is processing order, not test chronology. A
+    # batch recompute (or a re-run for one specific historical test) can
+    # process an OLDER test's row after a NEWER test's row, so "most
+    # recently calculated" silently picked a stale, small-history_count
+    # snapshot instead of the equipment's actual latest test. history_count
+    # is populated per-test as "how many readings existed as of THIS test",
+    # so it strictly increases with true test chronology regardless of
+    # when it was (re)computed — the reliable ordering key here.
+    pa_rows = (
+        db.query(ParameterAnalytics)
+        .filter(ParameterAnalytics.equipment_id.in_(eq_ids))
+        .order_by(ParameterAnalytics.history_count.desc(), ParameterAnalytics.calculated_at.desc())
+        .all()
+    )
+    latest_by_key: dict[tuple, ParameterAnalytics] = {}
+    for row in pa_rows:
+        key = (row.equipment_id, row.parameter_key)
+        if key not in latest_by_key:
+            latest_by_key[key] = row
+
+    equipment_type_names = {
+        c.id: c.name for c in db.query(CategoryMaster).all()
+    }
+
+    # Minimum readings before a trend counts as a real signal at all, not
+    # the engine's own bare computational minimum (2 points — services/
+    # analytics_engine.py's MIN_TREND_POINTS = 1, i.e. 1 prior + current).
+    # With only 2-3 points, trend_r_squared is trivially ~1.0 regardless of
+    # whether the movement is real or noise (a line always fits 2-3 points
+    # well). Still the only signal available for a parameter with no
+    # ParameterThresholdBand config at all; superseded by a real breach
+    # forecast below wherever one is available.
+    _MIN_WATCH_HISTORY = config.ANALYTICS_MIN_WATCH_HISTORY
+
+    # Real breach-proximity check, using ParameterThresholdBand (see the
+    # module-level helpers above) instead of the engine's own
+    # days_to_breach/breach_threshold columns — confirmed live those are
+    # populated only for flat-field parameters, not table-row ones (oil
+    # tests, DGA, most others), so relying on them here would silence this
+    # endpoint almost entirely. Bulk-fetch every band this batch of
+    # equipment could need, once, rather than one query per parameter.
+    needed_templates = {row.template_key for row in latest_by_key.values()}
+    band_rows = (
+        db.query(ParameterThresholdBand)
+        .filter(ParameterThresholdBand.template_key.in_(needed_templates),
+                ParameterThresholdBand.is_active.is_(True))
+        .all()
+    ) if needed_templates else []
+    bands_by_param: dict[tuple, list] = {}
+    for b in band_rows:
+        bands_by_param.setdefault((b.template_key, b.parameter_key), []).append(b)
+
+    # Bulk-fetch each flagged-candidate row's real test date, same pattern
+    # get_parameter_analytics uses — _real_breach_forecast anchors
+    # breach_predicted_at to this (the last REAL test), not to today, so a
+    # parameter that hasn't been retested in years correctly comes back
+    # is_overdue_for_retest instead of a nonsensical future date computed
+    # by adding the trend-fit's day-count to today's date.
+    result_ids = [row.test_result_id for row in latest_by_key.values()]
+    tested_at_map = {
+        r.id: (r.tested_at or r.cts)
+        for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
+    } if result_ids else {}
+
+    flagged_by_equipment: dict = {}
+    for row in latest_by_key.values():
+        if row.status != "NORMAL":
+            continue  # already breached — that's the alert feed's job, not this watch list's
+        if row.trend not in ("Increasing", "Decreasing"):
+            continue  # no directional signal yet
+        if row.current_value is None or row.trend_slope is None:
+            continue
+
+        row_id = _table_row_id(row.parameter_key)
+        candidate_bands = bands_by_param.get((row.template_key, row_id), [])
+        forecast = None
+        if candidate_bands:
+            eq_for_row = eq_by_id.get(row.equipment_id)
+            forecast = _real_breach_forecast(
+                row, db,
+                eq_for_row.voltage_class if eq_for_row else None,
+                tested_at_map.get(row.test_result_id),
+                candidate_bands=candidate_bands,
+            )
+            if forecast["breach_value"] is None:
+                # Real threshold config exists and was checked — either the
+                # trend is heading toward a BETTER band (or none at all,
+                # the whole point of doing this lookup: a genuinely benign
+                # trend, not just an unmeasured one), or the forecast crossed
+                # the same 10-year cap services/analytics_engine.py's own
+                # flat-field breach forecast already uses (a real forecast
+                # 188 years out — confirmed live: Acidity trending at its
+                # actual measured rate — is technically genuine but not
+                # meaningfully "worth watching" over any equipment's real
+                # service life).
+                continue
+        elif (row.history_count or 0) < _MIN_WATCH_HISTORY:
+            # No threshold config to check materiality against at all —
+            # fall back to the cruder "enough readings to trust the trend"
+            # bar rather than silently including or excluding it.
+            continue
+
+        flagged_by_equipment.setdefault(row.equipment_id, []).append({
+            "analytics_id":          str(row.id),
+            "parameter_key":         row.parameter_key,
+            "parameter_label":       row.parameter_label,
+            "template_key":          row.template_key,
+            "unit":                  row.unit,
+            "current_value":         float(row.current_value) if row.current_value is not None else None,
+            "trend":                 row.trend,
+            "annual_change":         float(row.annual_change) if row.annual_change is not None else None,
+            "breach_threshold":      forecast["breach_value"] if forecast else None,
+            "breach_band":           forecast["breach_band"] if forecast else None,
+            "breach_predicted_at":   forecast["breach_predicted_at"] if forecast else None,
+            "days_to_breach":        forecast["days_to_breach"] if forecast else None,
+            "is_overdue_for_retest": forecast["is_overdue_for_retest"] if forecast else False,
+            "history_count":         row.history_count,
+            # Real last-test date this snapshot is based on — how the
+            # overdue-review scheduler (main.py's daily job) ages a pending
+            # advisory for T+7/T+15 escalation, same "anchor to the real
+            # test date" discipline _real_breach_forecast already uses.
+            "tested_at": (
+                tested_at_map.get(row.test_result_id).isoformat()
+                if tested_at_map.get(row.test_result_id) else None
+            ),
+        })
+
+    # Officer review state (KPTCL spec §14.3: "Deterioration Watch List
+    # advisories pending officer review") — keyed to the exact snapshot
+    # (equipment_id, parameter_key, history_count) each flagged parameter
+    # was computed at, so a new test that changes the trend correctly shows
+    # as unreviewed again rather than staying silently reviewed forever.
+    review_keys = {
+        (eq_id, p["parameter_key"], p["history_count"])
+        for eq_id, params in flagged_by_equipment.items()
+        for p in params
+    }
+    reviews_by_key: dict = {}
+    if review_keys:
+        review_rows = (
+            db.query(DeteriorationReviewRecord)
+            .filter(DeteriorationReviewRecord.equipment_id.in_({k[0] for k in review_keys}))
+            .all()
+        )
+        for r in review_rows:
+            reviews_by_key[(r.equipment_id, r.parameter_key, r.history_count)] = r
+
+    pending_review_count = 0
+    for eq_id, params in flagged_by_equipment.items():
+        for p in params:
+            review = reviews_by_key.get((eq_id, p["parameter_key"], p["history_count"]))
+            p["is_reviewed"] = review is not None
+            p["review_disposition"] = review.disposition if review else None
+            p["review_note"] = review.note if review else None
+            if review is None:
+                pending_review_count += 1
+
+    watch_list = []
+    for eq_id, params in flagged_by_equipment.items():
+        eq = eq_by_id.get(eq_id)
+        if not eq:
+            continue
+        ea = analytics_map.get(eq_id)
+        # Sort key: soonest forecast breach first; parameters with no
+        # forecast yet (trend detected but not near enough to project a
+        # crossing date) sort after those that do, ranked among themselves
+        # by the steepest annual rate of change.
+        forecast_days = [p["days_to_breach"] for p in params if p["days_to_breach"] is not None]
+        soonest_days = min(forecast_days) if forecast_days else None
+        steepest_change = max((abs(p["annual_change"]) for p in params if p["annual_change"] is not None), default=0.0)
+        watch_list.append({
+            "equipment_id":    str(eq_id),
+            "equipment_label": eq.ueic,
+            "equipment_type":  equipment_type_names.get(eq.equipment_type_id),
+            "department_id":   str(eq.department_id) if eq.department_id else None,
+            "health_score":    float(ea.health_score) if ea and ea.health_score is not None else None,
+            "risk_level":      ea.risk_level if ea and ea.risk_level else "Unknown",
+            "soonest_days_to_breach": soonest_days,
+            "parameters": sorted(
+                params,
+                key=lambda p: (p["days_to_breach"] is None, p["days_to_breach"] or 0, -(abs(p["annual_change"] or 0))),
+            ),
+        })
+
+    watch_list.sort(key=lambda w: (w["soonest_days_to_breach"] is None, w["soonest_days_to_breach"] or 0, -(
+        max((abs(p["annual_change"]) for p in w["parameters"] if p["annual_change"] is not None), default=0.0)
+    )))
+
+    return {
+        "total_equipment": len(equipment_rows),
+        "watch_count": len(watch_list),
+        "pending_review_count": pending_review_count,
+        "equipment": watch_list,
+    }
+
+
+class DeteriorationReviewIn(BaseModel):
+    equipment_id: uuid.UUID
+    parameter_key: str
+    template_key: str
+    disposition: Literal[
+        "monitor", "request_retest", "escalate_repair", "dismiss",
+    ]
+    note: Optional[str] = None
+
+
+@router.post(
+    "/deterioration-watch-list/review",
+    summary="Record an officer's disposition on one Deterioration Watch List advisory",
+)
+def review_deterioration_advisory(
+    body: DeteriorationReviewIn,
+    db:   Session = Depends(get_vendor_db),
+    user: dict    = Depends(get_current_user),
+):
+    """KPTCL spec §14.3's "advisories pending officer review", same
+    disposition-and-lock pattern as the Result Review workflow (§8) —
+    'dismiss' requires a note (§8's "No Action" needs "mandatory
+    justification"). Does NOT create a Testing Request itself for
+    'request_retest' — the app already has a score-based recommendation/
+    scheduling path (condition_recommendation_service.py) and an ad-hoc
+    Quick Test Request flow; the Flutter side opens that existing dialog
+    rather than a second request-creation path being built here.
+    """
+    if body.disposition == "dismiss" and not (body.note and body.note.strip()):
+        raise HTTPException(status_code=422, detail="note is required when dismissing an advisory")
+
+    # Resolve the CURRENT history_count server-side — never trust a value
+    # from the client — so a stale client can't "review" a snapshot that's
+    # already been superseded by a newer test.
+    latest = (
+        db.query(ParameterAnalytics)
+        .filter(
+            ParameterAnalytics.equipment_id == body.equipment_id,
+            ParameterAnalytics.parameter_key == body.parameter_key,
+        )
+        .order_by(ParameterAnalytics.history_count.desc(), ParameterAnalytics.calculated_at.desc())
+        .first()
+    )
+    if not latest:
+        raise HTTPException(status_code=404, detail="No analytics found for this equipment/parameter")
+
+    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
+    reviewer_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+
+    existing = (
+        db.query(DeteriorationReviewRecord)
+        .filter(
+            DeteriorationReviewRecord.equipment_id == body.equipment_id,
+            DeteriorationReviewRecord.parameter_key == body.parameter_key,
+            DeteriorationReviewRecord.history_count == latest.history_count,
+        )
+        .first()
+    )
+    if existing:
+        existing.disposition = body.disposition
+        existing.note = body.note
+        existing.reviewed_by = reviewer_id
+        existing.reviewed_at = datetime.now(timezone.utc)
+    else:
+        db.add(DeteriorationReviewRecord(
+            equipment_id=body.equipment_id,
+            parameter_key=body.parameter_key,
+            template_key=body.template_key,
+            history_count=latest.history_count,
+            disposition=body.disposition,
+            note=body.note,
+            reviewed_by=reviewer_id,
+            organization_id=org_id,
+        ))
+    db.commit()
+
+    # "Escalate to Repair Review" isn't just a label to record — it should
+    # actually reach the officers who'd act on it (KPTCL spec's own pattern:
+    # every escalation-shaped disposition elsewhere in this app fires a real
+    # notification, not a silent audit row).
+    if body.disposition == "escalate_repair":
+        try:
+            from services.notification_service import NotificationService
+            eq = db.get(Equipment, body.equipment_id)
+            reviewer = db.get(User, reviewer_id) if reviewer_id else None
+            reviewer_name = (
+                " ".join(filter(None, [reviewer.firstname, reviewer.lastname])) or reviewer.email
+                if reviewer else "An officer"
+            )
+            NotificationService(db).notify_deterioration_escalated(
+                equipment_label=eq.ueic if eq else "Equipment",
+                parameter_label=latest.parameter_label or latest.parameter_key,
+                trend=latest.trend,
+                days_to_breach=None,  # not recomputed here — the review sheet already showed it
+                escalated_by=reviewer_name,
+                note=body.note or "",
+                analytics_id=latest.id,
+                organization_id=org_id,
+                department_id=eq.department_id if eq else None,
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "deterioration_watch_escalated notification failed", exc_info=True
+            )
+
+    return {"status": "ok", "history_count": latest.history_count, "disposition": body.disposition}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1872,8 +2440,11 @@ def get_parameter_analytics(
         ),
     )
 
+    eq_for_context = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+    voltage_class = eq_for_context.voltage_class if eq_for_context else None
+
     return [
-        _serialize_parameter_analytics(r, tested_at_map.get(r.test_result_id))
+        _serialize_parameter_analytics(r, tested_at_map.get(r.test_result_id), db, voltage_class)
         for r in ordered
     ]
 
@@ -2311,9 +2882,106 @@ def _serialize_test_history_item(row: TestAnalytics, tested_at) -> dict:
     }
 
 
-def _serialize_parameter_analytics(row: ParameterAnalytics, tested_at=None) -> dict:
+def _real_breach_forecast(
+    row: ParameterAnalytics,
+    db: Optional[Session],
+    voltage_class: Optional[str],
+    tested_at=None,
+    candidate_bands: Optional[list] = None,
+) -> dict:
+    """{is_concerning, breach_value, breach_band, breach_predicted_at,
+    days_to_breach, is_overdue_for_retest} computed from
+    ParameterThresholdBand. Single shared implementation for both the
+    Deterioration Watch List and the equipment/parameter-detail endpoint
+    — was duplicated between the two, which is how the date-anchoring bug
+    below only got caught in one of them.
+
+    Pass candidate_bands when the caller already bulk-fetched
+    ParameterThresholdBand rows for a batch of equipment (the Watch List
+    does, to avoid one query per parameter) — skips the per-row query
+    below. Leave it None (default) to have this function fetch them
+    itself, one row at a time (fine for the single-equipment
+    parameter-detail endpoint).
+
+    is_concerning is None (not False) when there's no threshold config to
+    judge by at all — the frontend should fall back to a neutral
+    treatment then, not guess.
+
+    Fixes three things table-row parameters previously got wrong: (1) the
+    stored ParameterAnalytics.breach_threshold/days_to_breach columns are
+    only ever populated for flat-field parameters, so they were always
+    None here; (2) "Increasing = bad" was assumed universally, backwards
+    for every parameter where lower is the bad direction (confirmed live:
+    Interfacial Tension trending down toward its own real Fair boundary
+    showed in green); (3) the trend-fit's own "N days to breach" is
+    measured from the LAST TEST's own position on the line, not from
+    today — confirmed live: an equipment last tested 25/11/2022 had a
+    59-day trend-fit result, which one code path added to today's date
+    (29/10/2026 — nonsensical, implies the countdown only started now)
+    while another correctly added it to the actual test date (23/1/2023).
+    Anchoring to the test date is the only one that's actually true: if
+    nothing has been retested since, the trend already implied a probable
+    breach almost 4 years ago — that's a "this needs retesting now" flag,
+    is_overdue_for_retest, not a future date to display as if it hasn't
+    happened yet.
+    """
+    out = {
+        "is_concerning": None, "breach_value": None, "breach_band": None,
+        "breach_predicted_at": None, "days_to_breach": None, "is_overdue_for_retest": False,
+    }
+    if db is None or row.trend not in ("Increasing", "Decreasing") or row.current_value is None or row.trend_slope is None:
+        return out
+    row_id = _table_row_id(row.parameter_key)
+    if candidate_bands is None:
+        candidate_bands = (
+            db.query(ParameterThresholdBand)
+            .filter(
+                ParameterThresholdBand.template_key == row.template_key,
+                ParameterThresholdBand.parameter_key == row_id,
+                ParameterThresholdBand.is_active.is_(True),
+            )
+            .all()
+        )
+    if not candidate_bands:
+        return out
+    context_keys = sorted({b.context_key for b in candidate_bands if b.context_key})
+    if context_keys:
+        resolved_ctx = _resolve_context_key(context_keys, voltage_class)
+        scoped_bands = [b for b in candidate_bands if b.context_key == resolved_ctx]
+    else:
+        scoped_bands = candidate_bands
+    breach_value, breach_label = _next_worse_boundary(
+        scoped_bands, float(row.current_value), float(row.trend_slope),
+        _load_band_rank_words(db),
+    )
+    out["is_concerning"] = breach_value is not None
+    if breach_value is None:
+        return out
+
+    days_from_test = (breach_value - float(row.current_value)) / float(row.trend_slope)
+    if not (0 <= days_from_test <= 3650):  # same 10-year cap as before
+        return out
+
+    anchor = (tested_at.date() if hasattr(tested_at, "date") else tested_at) if tested_at else date.today()
+    predicted_date = anchor + timedelta(days=round(days_from_test))
+    days_from_today = (predicted_date - date.today()).days
+
+    out["breach_value"] = breach_value
+    out["breach_band"] = breach_label
+    out["breach_predicted_at"] = predicted_date.isoformat()
+    out["days_to_breach"] = max(0, days_from_today)
+    out["is_overdue_for_retest"] = days_from_today < 0
+    return out
+
+
+def _serialize_parameter_analytics(row: ParameterAnalytics, tested_at=None,
+                                    db: Optional[Session] = None,
+                                    voltage_class: Optional[str] = None) -> dict:
+    forecast = _real_breach_forecast(row, db, voltage_class, tested_at)
     return {
         "last_tested_at": tested_at.isoformat() if tested_at else None,
+        "trend_is_concerning": forecast["is_concerning"],
+        "is_overdue_for_retest": forecast["is_overdue_for_retest"],
         "id":                   str(row.id),
         "equipment_id":         str(row.equipment_id),
         "test_result_id":       str(row.test_result_id),
@@ -2332,9 +3000,10 @@ def _serialize_parameter_analytics(row: ParameterAnalytics, tested_at=None) -> d
         "history_count":        row.history_count,
         "annual_change":        float(row.annual_change)     if row.annual_change     is not None else None,
         "pct_change_annual":    float(row.pct_change_annual) if row.pct_change_annual is not None else None,
-        "breach_threshold":     float(row.breach_threshold)  if row.breach_threshold  is not None else None,
-        "breach_predicted_at":  row.breach_predicted_at.isoformat() if row.breach_predicted_at else None,
-        "days_to_breach":       row.days_to_breach,
+        "breach_threshold":     forecast["breach_value"],
+        "breach_band":          forecast["breach_band"],
+        "breach_predicted_at":  forecast["breach_predicted_at"],
+        "days_to_breach":       forecast["days_to_breach"],
         "is_anomaly":           row.is_anomaly,
         "anomaly_type":         row.anomaly_type,
         "anomaly_detail":       row.anomaly_detail,

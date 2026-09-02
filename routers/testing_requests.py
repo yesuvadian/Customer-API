@@ -10,10 +10,7 @@ from models import RepairWorkflow, TrWfInstance, EquipmentAnalytics
 from auth_utils import get_current_user
 from database import get_db
 from models import User
-from category_labels import (
-    RequestCategoryLabels, RequestCategoryColors,
-    TestEvaluationStatusLabels, TestEvaluationStatusColors,
-)
+from category_labels import RequestCategoryLabels, RequestCategoryColors, TestEvaluationStatusColors
 from schemas import (
     TestingRequestCreate,
     TestingRequestUpdate,
@@ -700,18 +697,21 @@ def list_request_categories():
 
 @router.get("/test-evaluation-statuses")
 def list_test_evaluation_statuses():
-    """Return the NORMAL/ALERT/CRITICAL test-evaluation vocabulary with
-    label/color per entry — services/evaluation_service.py's evaluate()
-    is the only place this value set is actually computed
-    (TestResult.evaluation_result['overall']); this just exposes its
-    display metadata for Flutter dropdowns/badges/legends."""
+    """Return the NORMAL/ALERT/CRITICAL test-evaluation statuses with their
+    canonical colors, for Flutter screens that render a test's
+    evaluation_result['overall'] as a colored badge/banner — the single
+    source those screens should read from instead of each independently
+    hardcoding its own red/orange/green (test_result_form.dart's
+    post-submission banner and ee_tlss_dashboard_page.dart's alert feed
+    previously disagreed on the exact shades used)."""
+    _entries = [
+        ("NORMAL",   "Normal"),
+        ("ALERT",    "Alert"),
+        ("CRITICAL", "Critical"),
+    ]
     return [
-        {
-            "value": value,
-            "label": TestEvaluationStatusLabels.get(value),
-            "color": TestEvaluationStatusColors.get(value),
-        }
-        for value in ("NORMAL", "ALERT", "CRITICAL")
+        {"value": value, "label": label, "color": TestEvaluationStatusColors.get(value)}
+        for value, label in _entries
     ]
 
 

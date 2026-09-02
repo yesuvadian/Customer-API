@@ -1106,6 +1106,140 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "dqi_total_count": dqi_total,
         }
 
+    def _calibration_summary(dept_ids_for_scope):
+        """Zone-wide relay/ETV calibration KPIs (KPTCL spec §14.6's CEE
+        RT & R&D Wing Dashboard) — compliance, T+0/T+7/T+15
+        overdue-escalation buckets, and 30/60-day expiring-soon counts.
+        Scoped once at the top level (not per rollup-table row, unlike
+        _scope_counts) since these are whole-zone KPIs in the spec, not a
+        per-substation breakdown — the old dashboard_role_kpi.py /cee-rt-rd
+        endpoint (still live, unrelated to this consolidated dashboard) had
+        a narrower version of this same idea (compliance/fail_count/one
+        30-day expiring bucket only, no T+0/7/15 split).
+        """
+        from sqlalchemy import or_ as _or_cal
+
+        cal_filters = [TestingRequest.organization_id == svc.org_id,
+                        TestingRequest.is_calibration.is_(True)]
+        if dept_ids_for_scope:
+            cal_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+
+        # Same closed-expression shape as _scope_counts' own _closed_expr —
+        # not reused directly since that's local to _scope_counts' own
+        # closure, not reachable from here.
+        cal_closed_expr = _or_cal(
+            TestingRequest.status == 'closed',
+            TestingRequest.current_status_code.in_(terminal_status_codes),
+        )
+
+        now = _now()
+        ninety_days = now - timedelta(days=90)
+        cal_due_90 = db.query(func.count(TestingRequest.id)).filter(
+            *cal_filters, TestingRequest.due_date.between(ninety_days, now),
+        ).scalar() or 0
+        cal_on_time_90 = db.query(func.count(TestingRequest.id)).filter(
+            *cal_filters, TestingRequest.due_date.between(ninety_days, now), cal_closed_expr,
+        ).scalar() or 0
+        cal_compliance_pct = int((cal_on_time_90 / cal_due_90) * 100) if cal_due_90 > 0 else 100
+
+        # T+0 / T+7 / T+15 — currently-open calibration requests bucketed by
+        # how many days overdue they are, matching the spec's own
+        # escalation-tier naming (an org's real escalation cadence — e.g.
+        # notify at 0 days, escalate to next authority at 7, again at 15 —
+        # isn't itself stored anywhere; this buckets by elapsed time, the
+        # same information those escalation rules would act on).
+        overdue_cal_rows = db.query(TestingRequest.due_date).filter(
+            *cal_filters, ~cal_closed_expr, TestingRequest.due_date < now,
+        ).all()
+        cal_t0 = cal_t7 = cal_t15 = 0
+        for (due_date,) in overdue_cal_rows:
+            days_over = (now - due_date).days
+            if days_over >= 15:
+                cal_t15 += 1
+            elif days_over >= 7:
+                cal_t7 += 1
+            else:
+                cal_t0 += 1
+
+        # The real pass/fail signal lives on the certificate's own TestResult
+        # (test_data.recommendation_type, or test_data.overall_result as a
+        # fallback — same priority order calibration_service.py's own
+        # _get_latest_reading() already uses), NOT TestingRequest.status.
+        # Confirmed live: calibration_hooks.py's _record_certificate_as_
+        # test_result() hardcodes the TestResult.overall_result COLUMN to
+        # "pass" unconditionally at creation — only test_data carries the
+        # real value — and status=='rejected' reflects whether the workflow
+        # itself was rejected (e.g. a malformed certificate upload), not
+        # whether the calibration the certificate describes actually
+        # passed. An officer can approve/verify a certificate that itself
+        # says "Fail" or "Conditional" — workflow status stays 'completed',
+        # not 'rejected' — so counting by status alone silently missed
+        # those.
+        from models import TestResult
+        _cal_result = func.lower(func.coalesce(
+            TestResult.test_data["recommendation_type"].astext,
+            TestResult.test_data["overall_result"].astext,
+        ))
+        cal_fail_count = db.query(func.count(func.distinct(TestingRequest.id))).join(
+            TestResult, TestResult.testing_request_id == TestingRequest.id,
+        ).filter(*cal_filters, _cal_result == 'fail').scalar() or 0
+
+        cal_expiring_30 = db.query(func.count(TestingRequest.id)).filter(
+            *cal_filters, ~cal_closed_expr,
+            TestingRequest.due_date.between(now, now + timedelta(days=30)),
+        ).scalar() or 0
+        cal_expiring_60 = db.query(func.count(TestingRequest.id)).filter(
+            *cal_filters, ~cal_closed_expr,
+            TestingRequest.due_date.between(now, now + timedelta(days=60)),
+        ).scalar() or 0
+
+        # 12-month FAIL-rate trend — "Calibration failure trend" (§14.6),
+        # previously only ever a current-snapshot count with no history.
+        # mts is the best available proxy for "when it closed/failed" —
+        # same convention _scope_counts' closed_this_week_count already
+        # uses, there's no dedicated closed_at/completed_at column.
+        trend_cutoff = now - timedelta(days=365)
+        month_col = func.date_trunc('month', TestingRequest.mts)
+        trend_rows = db.query(
+            month_col.label('month'), _cal_result, func.count(func.distinct(TestingRequest.id)),
+        ).join(
+            TestResult, TestResult.testing_request_id == TestingRequest.id,
+        ).filter(
+            *cal_filters, TestingRequest.mts >= trend_cutoff,
+            TestingRequest.status.in_(['closed', 'rejected']),
+        ).group_by('month', _cal_result).all()
+        by_month: dict = {}
+        for month, cal_result, count in trend_rows:
+            key = month.strftime('%Y-%m') if month else 'unknown'
+            entry = by_month.setdefault(key, {'total': 0, 'fail': 0})
+            entry['total'] += count
+            if cal_result == 'fail':
+                entry['fail'] += count
+        fail_rate_trend = [
+            {
+                "month": key,
+                "total": v['total'],
+                "fail": v['fail'],
+                "fail_rate_pct": round(v['fail'] / v['total'] * 100, 1) if v['total'] > 0 else 0,
+            }
+            for key, v in sorted(by_month.items())
+        ]
+
+        return {
+            # Lets the frontend tell "no calibration activity at all in this
+            # scope" apart from "100% compliant" — both leave compliance_pct
+            # at 100, only one of them is worth showing a tile for.
+            "due_90d": cal_due_90,
+            "compliance_pct": cal_compliance_pct,
+            "fail_count": cal_fail_count,
+            "overdue_t0": cal_t0,
+            "overdue_t7": cal_t7,
+            "overdue_t15": cal_t15,
+            "expiring_30d": cal_expiring_30,
+            "expiring_60d": cal_expiring_60,
+            "fail_rate_trend": fail_rate_trend,
+        }
+
     # Pending-approval TestingRequests in the given scope, most-recently-
     # submitted first — real, verifiable data (no invented "escalation"
     # duration; HierarchyAnalytics has no trend/history to compute one from,
@@ -1447,6 +1581,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "can_assign_requests": can_assign_requests,
             "can_review": can_review,
             "weekly_trend": _weekly_trend(svc.dept_ids),
+            "calibration": _calibration_summary(svc.dept_ids),
             **ticket_lists,
             **_scope_counts(svc.dept_ids),
         }
@@ -1500,6 +1635,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         "can_approve_requests": can_approve_requests,
         "can_review": can_review,
         "weekly_trend": _weekly_trend(svc.dept_ids),
+        "calibration": _calibration_summary(svc.dept_ids),
         "rows": rows,
         # Full-subtree ticket lists behind the summary counts above — see
         # _ticket_lists' docstring for why a branch shape needs these too,
