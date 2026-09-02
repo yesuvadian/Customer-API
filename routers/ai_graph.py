@@ -292,10 +292,15 @@ def _load_condition_bands(db: Session | None) -> list[tuple[float, str]]:
 def _condition_from_score(score: float | None, db: Session | None = None) -> str:
     if score is None:
         return "Unknown"
-    for threshold, label in _load_condition_bands(db):
+    bands = _load_condition_bands(db)
+    for threshold, label in bands:
         if score >= threshold:
             return label
-    return "Critical"
+    # Score cleared none of the active bands - typically because the
+    # lowest-threshold band (normally "Critical") was deactivated. The
+    # lowest-threshold *active* band is the catch-all for everything below
+    # it (same reasoning as analytics_engine.py's _risk_from_score).
+    return bands[-1][1] if bands else "Critical"
 
 
 def _condition_from_score_and_risk(

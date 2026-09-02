@@ -186,10 +186,17 @@ def _risk_from_score(
         return "Critical"
     if score is None:
         return "Unknown"
-    for threshold, label in _load_risk_bands(db):
+    bands = _load_risk_bands(db)
+    for threshold, label in bands:
         if score >= threshold:
             return label
-    return "Critical"
+    # Score cleared none of the active bands - typically because the
+    # lowest-threshold band (normally "Critical") was deactivated. The
+    # lowest-threshold *active* band is the catch-all for everything below
+    # it, so deactivating "Critical" actually stops new equipment from
+    # being labeled Critical instead of silently keeping the old label via
+    # a hardcoded fallback.
+    return bands[-1][1] if bands else "Critical"
 
 
 def _condition_from_score(score: Optional[float]) -> str:
@@ -602,8 +609,13 @@ class HealthScorer:
                 or {}
             )
             weight    = float(ev.get("weight", 1.0))
-            condition = condition_labels.get(status, "Poor")
-            score     = scores.get(condition, 0.0)
+            # Fall back to the hardcoded defaults (not a blanket "Poor"/0.0)
+            # when a status/condition is missing from the admin-configured
+            # maps - e.g. because that row was deactivated rather than
+            # given a new value. Deactivating a row should restore its
+            # original fixed behavior, not silently zero out its score.
+            condition = condition_labels.get(status, _DEFAULT_CONDITION.get(status, "Poor"))
+            score     = scores.get(condition, _DEFAULT_SCORE.get(condition, 0.0))
 
             weighted_sum  += score  * weight
             total_weight  += weight
