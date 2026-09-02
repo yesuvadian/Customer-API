@@ -426,6 +426,7 @@ class WorkflowRoutingService:
         comment: Optional[str] = None,
         assigned_user_id: Optional[UUID] = None,
         assigned_role_id: Optional[UUID] = None,
+        overwrite_schedule_ids: Optional[list[str]] = None,
     ) -> TrWfInstance:
         """
         Execute an action on the current stage of a workflow instance.
@@ -653,6 +654,7 @@ class WorkflowRoutingService:
                     "comment": comment,
                     "is_terminal": is_terminal,
                     "to_status_code": to_status_code,
+                    "overwrite_schedule_ids": overwrite_schedule_ids,
                 },
             )
 
@@ -735,7 +737,10 @@ class WorkflowRoutingService:
                     self.db.flush()
                     try:
                         from services.workflow_dispatch_service import WorkflowDispatchService
-                        WorkflowDispatchService(self.db).dispatch(testing_request, rec, performed_by_id)
+                        WorkflowDispatchService(self.db).dispatch(
+                            testing_request, rec, performed_by_id,
+                            overwrite_schedule_ids=overwrite_schedule_ids,
+                        )
                     except Exception as _de:
                         log.warning("Dispatch after terminal action failed (non-fatal): %s", _de)
                         testing_request.status = _TRS.closed

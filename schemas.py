@@ -1580,6 +1580,11 @@ class ApprovalAction(BaseModel):
     schedule_start_date: Optional[str] = None   # ISO 8601 UTC
     schedule_end_date:   Optional[str] = None   # ISO 8601 UTC (optional)
     schedule_frequency:  Optional[str] = None   # "monthly"|"quarterly"|"yearly"|…
+    # Ids of existing schedules (from GET /approvals/{id}/schedule-conflicts)
+    # the approver explicitly chose to overwrite. A schedule not in this list
+    # is left untouched; selecting more than one for the same test type
+    # merges them into the first.
+    overwrite_schedule_ids: Optional[List[str]] = None
 
 class SubmitTestResultsBody(BaseModel):
     replacement_products: Optional[list] = None  # [{item_id, item_name, category, quantity}, ...]
@@ -1592,6 +1597,11 @@ class SubmitTestResultsBody(BaseModel):
     schedule_start_date: Optional[str] = None   # YYYY-MM-DD — from wizard schedule picker
     schedule_end_date: Optional[str] = None     # YYYY-MM-DD — from wizard schedule picker
     test_types: Optional[list] = None           # [{id, name}] — recommended follow-up test types
+    # Ids of existing schedules (from GET /testing/{id}/schedule-conflicts)
+    # the caller explicitly chose to overwrite. A schedule not in this list
+    # is left untouched; selecting more than one for the same test type
+    # merges them into the first.
+    overwrite_schedule_ids: Optional[List[str]] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
