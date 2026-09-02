@@ -1191,6 +1191,11 @@ class TestingRequestResponse(BaseModel):
     wf_status_color: Optional[str] = None
     wf_stage_name:   Optional[str] = None
     wf_stage_roles:  Optional[list] = None
+    # action_code of the transition that closed the workflow (e.g. "reject",
+    # "cancel") — the ground-truth signal for terminal disposition, since
+    # wf_status_name is just an org-configured label that can be reused
+    # across different actions.
+    wf_terminal_action_code: Optional[str] = None
 
     # ─────────────────────────────────────────────
     # TR Workflow current stage flags

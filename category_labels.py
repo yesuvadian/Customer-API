@@ -97,6 +97,28 @@ class RequestCategoryColors(LabelPairRegistry):
     TAQC_INSPECTION = LabelPair("taqc_inspection", "#40C4FF")
 
 
+# ── Test-evaluation status labels and colors ──────────────────────────────────
+
+class TestEvaluationStatusLabels(LabelPairRegistry):
+    """Human-readable label per test-evaluation overall status — the
+    NORMAL/ALERT/CRITICAL vocabulary services/evaluation_service.py's
+    evaluate() computes onto TestResult.evaluation_result['overall']."""
+    NORMAL   = LabelPair("NORMAL",   "Normal")
+    ALERT    = LabelPair("ALERT",    "Alert")
+    CRITICAL = LabelPair("CRITICAL", "Critical")
+
+
+class TestEvaluationStatusColors(LabelPairRegistry):
+    """Canonical hex color per test-evaluation overall status. Sourced from
+    analytics_dashboard_page.dart's _StatusBadge palette — other frontend
+    files (e.g. base_role_dashboard.dart's flagged-equipment badge) had
+    independently invented a different CRITICAL/ALERT pair with no NORMAL
+    color at all; this is now the single source those should read from."""
+    NORMAL   = LabelPair("NORMAL",   "#16A34A")
+    ALERT    = LabelPair("ALERT",    "#D97706")
+    CRITICAL = LabelPair("CRITICAL", "#DC2626")
+
+
 # ── Billing status labels, colors, and icons ──────────────────────────────────
 
 class BillingStatusLabels(LabelPairRegistry):
@@ -141,3 +163,19 @@ class BillingOrderStatusColors(LabelPairRegistry):
     PAID      = LabelPair("paid",      "#16A34A")   # green-600
     FAILED    = LabelPair("failed",    "#DC2626")   # red-600
     CANCELLED = LabelPair("cancelled", "#94A3B8")   # slate-400
+
+
+# ── TR workflow outcome colors ────────────────────────────────────────────────
+
+class TrWfOutcomeColors(LabelPairRegistry):
+    """Canonical hex color per terminal/non-terminal TR workflow OUTCOME —
+    rejected, cancelled, or returned (sent back a stage without closing).
+    Sourced from wf_timeline_sheet.dart's flowchart palette (the original
+    place these three were ever colored) and tr_kanban_board.dart's matching
+    Rejected/Cancelled columns — this is now the single source those, and
+    every other view (e.g. the Overview Dashboard's Rejected/Cancelled
+    card), should read the color from, rather than each deciding it
+    independently in Flutter."""
+    REJECTED  = LabelPair("rejected",  "#EF5350")
+    CANCELLED = LabelPair("cancelled", "#FB8C00")
+    RETURNED  = LabelPair("returned",  "#7C3AED")
