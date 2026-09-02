@@ -228,6 +228,32 @@ def get_pending_result_approvals(
     return [_enrich(req) for req in requests]
 
 
+@router.get("/{request_id}/schedule-conflicts")
+def check_result_schedule_conflicts(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Read-only pre-check for the Test Result Review screen: reports any
+    existing schedule(s) for this request's latest recommendation's
+    equipment + test type(s), so the reviewer can be warned before
+    approving overwrites nothing they didn't intend to.
+    """
+    from services.approval_service import ApprovalService
+
+    rec = (
+        db.query(Recommendation)
+        .filter(Recommendation.testing_request_id == request_id)
+        .order_by(Recommendation.cts.desc())
+        .first()
+    )
+    if not rec:
+        return {"conflicts": []}
+
+    return ApprovalService(db).check_schedule_conflicts(rec.id)
+
+
 @router.put("/{request_id}/approve_results")
 def approve_test_results(
     request_id: UUID,
@@ -279,6 +305,7 @@ def approve_test_results(
         recommendation_id=rec.id,
         approver_id=current_user.id,
         notes=body.get("comment"),
+        overwrite_schedule_ids=body.get("overwrite_schedule_ids"),
     )
 
     # Refresh the TR to pick up the new status set by dispatch, then merge with
@@ -493,6 +520,7 @@ def submit_test_results(
             request_id,
             tester_id=current_user.id,
             replacement_products=repl_prods or None,
+            overwrite_schedule_ids=body.overwrite_schedule_ids,
         )
 
     # ── TR WF engine: advance l4_test_execution → l3_review_result ──────────────
@@ -502,7 +530,10 @@ def submit_test_results(
         try:
             from services.testing_request_workflow_service import TestingRequestWorkflowService
             wf_svc = TestingRequestWorkflowService(db)
-            _wf_advance_ok, _wf_advance_msg = wf_svc.tr_wf_advance(req, current_user, action_code="complete")
+            _wf_advance_ok, _wf_advance_msg = wf_svc.tr_wf_advance(
+                req, current_user, action_code="complete",
+                overwrite_schedule_ids=body.overwrite_schedule_ids,
+            )
             if _wf_advance_ok:
                 db.commit()
                 db.refresh(req)

@@ -163,7 +163,22 @@ def approve_recommendation(
         schedule_start_date=data.schedule_start_date,
         schedule_end_date=data.schedule_end_date,
         schedule_frequency=data.schedule_frequency,
+        overwrite_schedule_ids=data.overwrite_schedule_ids,
     )
+
+
+@router.get("/{recommendation_id}/schedule-conflicts")
+def check_schedule_conflicts(
+    recommendation_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Read-only pre-check for the approval screen: reports any existing
+    schedule(s) for this recommendation's equipment + test type(s), so the
+    approver can be warned before approving overwrites nothing they didn't
+    intend to.
+    """
+    return ApprovalService(db).check_schedule_conflicts(recommendation_id)
 
 
 @router.get("/tr-wf/pending")
