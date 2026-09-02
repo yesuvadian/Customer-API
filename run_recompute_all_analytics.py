@@ -56,7 +56,7 @@ def run_recompute_all():
                 template_data = template_cache[cache_key]
                 if template_data:
                     tr.evaluation_result = EvaluationService.evaluate_test_data(
-                        template_data, tr.test_data or {}
+                        template_data, tr.test_data or {}, db
                     )
                     db.flush()
 

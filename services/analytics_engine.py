@@ -32,6 +32,7 @@ from typing import Optional
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+import config
 from models import (
     Equipment,
     EquipmentAnalytics,
@@ -51,11 +52,32 @@ NORMAL   = "NORMAL"
 ALERT    = "ALERT"
 CRITICAL = "CRITICAL"
 
-_CONDITION = {NORMAL: "Good", ALERT: "Fair", CRITICAL: "Poor"}
-_SCORE     = {"Good": 100.0, "Fair": 50.0, "Poor": -100.0}  # negative so critical fields actively drag the score down
-_RANK      = {NORMAL: 0, ALERT: 1, CRITICAL: 2}
+# Safety fallback only, same role as _DEFAULT_RISK_BANDS below — the
+# admin-configurable source of truth is TestStatusCondition (KPTCL spec
+# §12.1's "EHS computation logic"; see _load_condition_labels).
+_DEFAULT_CONDITION = {NORMAL: "Good", ALERT: "Fair", CRITICAL: "Poor"}
+# Safety fallback only, same role as _DEFAULT_RISK_BANDS below — the
+# admin-configurable source of truth is ParameterConditionScore (KPTCL
+# spec §12.1's "EHS computation logic", the input side of it: see
+# _load_condition_scores).
+_DEFAULT_SCORE = {"Good": 100.0, "Fair": 50.0, "Poor": -100.0}  # negative so critical fields actively drag the score down
 
-_RISK_BANDS = [
+# _RANK (was {NORMAL: 0, ALERT: 1, CRITICAL: 2}) is removed, not migrated
+# to a table: grep confirms nothing in this file ever read it — dead code.
+# The real "worst status wins" ordinal used throughout the app is
+# services/evaluation_service.py's own _STATUS_RANK, a separate constant
+# with 5 real call sites there. That one is left hardcoded on purpose: it
+# is not a business threshold an admin would tune, it is the definition of
+# the fixed NORMAL/ALERT/CRITICAL vocabulary itself (CRITICAL cannot stop
+# being worse than ALERT without the labels no longer meaning what they
+# say) — the same reason NORMAL/ALERT/CRITICAL's own spelling isn't a
+# config row either.
+
+# Safety fallback only — used when the DB lookup below has nothing to
+# return (table not yet seeded, or no `db` session was passed in). The
+# admin-configurable source of truth is EquipmentHealthBandThreshold
+# (KPTCL spec §12.1); see _load_risk_bands.
+_DEFAULT_RISK_BANDS = [
     (80, "Low"),
     (50, "Medium"),
     (25, "High"),
@@ -63,7 +85,98 @@ _RISK_BANDS = [
 ]
 
 
-def _risk_from_score(score: Optional[float], critical_findings: list | None = None) -> str:
+def _load_risk_bands(db: Optional[Session]) -> list[tuple[float, str]]:
+    """Admin-configured (threshold, label) pairs, highest threshold first —
+    same ordering _DEFAULT_RISK_BANDS always had, just no longer hardcoded.
+    Falls back to _DEFAULT_RISK_BANDS if no db session was given or the
+    table has no active rows yet, so a not-yet-seeded environment behaves
+    exactly as before rather than breaking.
+    """
+    if db is None:
+        return _DEFAULT_RISK_BANDS
+    from models import EquipmentHealthBandThreshold
+    rows = (
+        db.query(EquipmentHealthBandThreshold)
+        .filter(EquipmentHealthBandThreshold.is_active.is_(True))
+        .order_by(EquipmentHealthBandThreshold.threshold.desc())
+        .all()
+    )
+    if not rows:
+        return _DEFAULT_RISK_BANDS
+    return [(float(r.threshold), r.label) for r in rows]
+
+
+def _load_condition_labels(db: Optional[Session]) -> dict[str, str]:
+    """Admin-configured {status: condition_label} map. Falls back to
+    _DEFAULT_CONDITION if no db session was given or the table has no
+    active rows yet, same reasoning as _load_risk_bands.
+    """
+    if db is None:
+        return _DEFAULT_CONDITION
+    from models import TestStatusCondition
+    rows = (
+        db.query(TestStatusCondition)
+        .filter(TestStatusCondition.is_active.is_(True))
+        .all()
+    )
+    if not rows:
+        return _DEFAULT_CONDITION
+    return {r.status: r.condition_label for r in rows}
+
+
+def _load_condition_scores(db: Optional[Session]) -> dict[str, float]:
+    """Admin-configured {condition: point_value} map. Falls back to
+    _DEFAULT_SCORE if no db session was given or the table has no active
+    rows yet, same reasoning as _load_risk_bands.
+    """
+    if db is None:
+        return _DEFAULT_SCORE
+    from models import ParameterConditionScore
+    rows = (
+        db.query(ParameterConditionScore)
+        .filter(ParameterConditionScore.is_active.is_(True))
+        .all()
+    )
+    if not rows:
+        return _DEFAULT_SCORE
+    return {r.condition: float(r.score) for r in rows}
+
+
+_DEFAULT_BAND_RANK_WORDS: dict[str, int] = {
+    "good": 0, "normal": 0, "pass": 0, "ok": 0, "excellent": 0,
+    "fair": 1, "alert": 1, "warning": 1, "monitor": 1,
+    "poor": 2, "critical": 2, "abnormal": 2, "fail": 2, "not ok": 2,
+}
+
+
+def _load_band_rank_words(db: Optional[Session]) -> dict[str, int]:
+    """Admin-configured {phrase: rank} map (ConditionBandRankWord) used to
+    rank an arbitrary free-text band label (e.g. "Good", "Fair", "Not OK")
+    by severity. Falls back to _DEFAULT_BAND_RANK_WORDS if no db session
+    was given or the table has no active rows yet, same reasoning as
+    _load_risk_bands. Shared by routers/analytics.py's _band_rank (breach
+    forecasting) and services/evaluation_service.py's _cond_rank
+    (test-evaluation-time band ranking) — was two independently hardcoded,
+    already-drifted copies of the same word list before this.
+    """
+    if db is None:
+        return _DEFAULT_BAND_RANK_WORDS
+    from models import ConditionBandRankWord
+    rows = (
+        db.query(ConditionBandRankWord)
+        .filter(ConditionBandRankWord.is_active.is_(True))
+        .all()
+    )
+    if not rows:
+        return _DEFAULT_BAND_RANK_WORDS
+    return {r.phrase.lower(): r.rank for r in rows}
+
+
+def _risk_from_score(
+    score: Optional[float],
+    critical_findings: list | None = None,
+    db: Optional[Session] = None,
+) -> str:
     # If any finding has CRITICAL status, the equipment risk is at least Critical,
     # regardless of its composite health score.
     if critical_findings and any(
@@ -73,13 +186,18 @@ def _risk_from_score(score: Optional[float], critical_findings: list | None = No
         return "Critical"
     if score is None:
         return "Unknown"
-    for threshold, label in _RISK_BANDS:
+    for threshold, label in _load_risk_bands(db):
         if score >= threshold:
             return label
     return "Critical"
 
 
 def _condition_from_score(score: Optional[float]) -> str:
+    # Good/Fair/Poor is a separate, coarser 3-tier summary of the same
+    # score — not the spec's 4-tier EHS band (Low/Medium/High/Critical,
+    # the thing §12.1 asks to be configurable) and not wired to
+    # EquipmentHealthBandThreshold. Left as-is; revisit only if the spec's
+    # configurability requirement is ever read to cover this label too.
     if score is None:
         return "Unknown"
     if score >= 80:
@@ -128,11 +246,24 @@ class ParameterAnalyzer:
     """
 
     # Minimum readings needed for trend calculation
-    MIN_TREND_POINTS = 1
+    MIN_TREND_POINTS = config.ANALYTICS_MIN_TREND_POINTS
     # Slope considered "stable" if |slope * 365| < this fraction of the value range
-    STABLE_FRACTION  = 0.05
+    STABLE_FRACTION  = config.ANALYTICS_STABLE_FRACTION
     # Z-score threshold for anomaly
-    ANOMALY_Z        = 3.0
+    ANOMALY_Z        = config.ANALYTICS_ANOMALY_Z
+    # Minimum goodness-of-fit before a slope's DIRECTION is trusted at all.
+    # Confirmed live: Acidity readings bouncing noisily between 0.004 and
+    # 0.017 mg KOH/g across 10 real tests over 6 years (r_squared=0.0837 —
+    # the line explains 8% of the variance) still came out confidently
+    # labeled "Increasing", because trend classification only ever compared
+    # the slope's annualized MAGNITUDE against STABLE_FRACTION and never
+    # looked at how well the line actually fits. This is a property of the
+    # shared ParameterAnalyzer.analyse() every parameter goes through
+    # (table-row and flat-field alike, every test template), not a
+    # per-template special case, so gating on it here fixes it everywhere
+    # at once rather than needing a separate patch per test type. Tunable
+    # via config.py/ANALYTICS_MIN_TREND_R_SQUARED without a code deploy.
+    MIN_TREND_R_SQUARED = config.ANALYTICS_MIN_TREND_R_SQUARED
 
     @staticmethod
     def analyse(
@@ -222,10 +353,13 @@ class ParameterAnalyzer:
             else:
                 result["trend"] = "Stable"
 
-            if slope != 0:
-                ParameterAnalyzer._forecast_breach(
-                    values[-1], dates[-1], slope, evaluation, result
-                )
+            # No breach forecast off just 2 points: a 2-point line fits
+            # "perfectly" by construction with no way to check it (that's
+            # exactly why r_squared is left None above), which is even less
+            # reliable than a real regression that fails the r² gate below —
+            # forecasting a crossing date from it would be worse than the
+            # low-r² case this fix targets, not better just because r² can't
+            # be computed to catch it.
             return result
 
         # Build x-axis as elapsed days from first observation
@@ -249,15 +383,28 @@ class ParameterAnalyzer:
         # Trend classification
         val_range = max(values) - min(values) if len(values) > 1 else abs(values[0])
         stable_threshold = (val_range or abs(values[-1]) or 1) * ParameterAnalyzer.STABLE_FRACTION
-        if annual_change > stable_threshold:
+        fit_is_reliable = r_sq >= ParameterAnalyzer.MIN_TREND_R_SQUARED
+        if not fit_is_reliable:
+            # The line doesn't explain enough of the actual variance to
+            # trust a direction from it, regardless of how large the
+            # slope's annualized magnitude looks — see MIN_TREND_R_SQUARED's
+            # docstring. trend_slope/annual_change/trend_r_squared above are
+            # still the real, honest numbers (a low r² is itself useful
+            # information), just not promoted into a confident direction.
+            result["trend"] = "Stable"
+        elif annual_change > stable_threshold:
             result["trend"] = "Increasing"
         elif annual_change < -stable_threshold:
             result["trend"] = "Decreasing"
         else:
             result["trend"] = "Stable"
 
-        # Breach forecast — only if slope is non-zero and we have thresholds
-        if slope != 0:
+        # Breach forecast — only if slope is non-zero, we have thresholds,
+        # AND the fit is reliable enough to trust a direction from at all
+        # (see fit_is_reliable above) — forecasting a crossing date off a
+        # slope that barely fits the data would be actively misleading, not
+        # just an unconfirmed trend label.
+        if slope != 0 and fit_is_reliable:
             ParameterAnalyzer._forecast_breach(
                 values[-1], dates[-1], slope, evaluation, result
             )
@@ -379,6 +526,8 @@ class HealthScorer:
         template_data: dict,
         evaluation_result: dict,
         test_data: dict | None = None,
+        condition_labels: dict[str, str] | None = None,
+        scores: dict[str, float] | None = None,
     ) -> tuple[float, list[dict]]:
         """
         Returns (health_score 0–100, critical_findings list).
@@ -387,7 +536,13 @@ class HealthScorer:
         which has {overall, fields: [{key, label, status, ...}]}.
         test_data is the raw submitted form data — when provided, table fields
         are re-evaluated fresh so that row_label/breach_limit are available.
+        condition_labels/scores: admin-configured maps from
+        _load_condition_labels(db)/_load_condition_scores(db) — callers with
+        a db session should pass both through rather than relying on the
+        _DEFAULT_CONDITION/_DEFAULT_SCORE fallback this defaults to.
         """
+        condition_labels = condition_labels if condition_labels is not None else _DEFAULT_CONDITION
+        scores = scores if scores is not None else _DEFAULT_SCORE
         if not evaluation_result:
             return None, []
 
@@ -447,8 +602,8 @@ class HealthScorer:
                 or {}
             )
             weight    = float(ev.get("weight", 1.0))
-            condition = _CONDITION.get(status, "Poor")
-            score     = _SCORE.get(condition, 0.0)
+            condition = condition_labels.get(status, "Poor")
+            score     = scores.get(condition, 0.0)
 
             weighted_sum  += score  * weight
             total_weight  += weight
@@ -642,9 +797,17 @@ class AnalyticsEngine:
             template_data=template_data,
         )
 
+        # Admin-configured §12.1 lookups, resolved once per test and reused
+        # for every field/row below (score_test, and the two per-row/per-
+        # cell condition+score computations further down this method) —
+        # not re-queried per field.
+        condition_labels = _load_condition_labels(self.db)
+        condition_scores = _load_condition_scores(self.db)
+
         # Score the test
         health_score, critical_findings = HealthScorer.score_test(
-            template_data, evaluation_result, test_data=test_data
+            template_data, evaluation_result, test_data=test_data,
+            condition_labels=condition_labels, scores=condition_scores,
         )
 
         # Fallback for calibration templates (DATE_ADD rule) where evaluation_result
@@ -762,8 +925,8 @@ class AnalyticsEngine:
 
                     field_ev  = ev_fields_map.get(field_key)
                     status    = field_ev.get("status") if field_ev else None
-                    condition = _CONDITION.get(status, "Poor") if status else None
-                    score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
+                    condition = condition_labels.get(status, "Poor") if status else None
+                    score     = max(0.0, condition_scores.get(condition, 50.0)) if condition else None
 
 
                     history  = history_map.get(field_key, [])
@@ -904,8 +1067,8 @@ class AnalyticsEngine:
                             status    = next((r.get("status") for r in reversed(row_matches) if r.get("status")), None)
                             row_breach_limit = next((r.get("breach_limit") for r in reversed(row_matches) if r.get("breach_limit") is not None), None)
                             row_remedial_text = next((r.get("remedial_action_text") for r in reversed(row_matches) if r.get("remedial_action_text")), None)
-                            condition = _CONDITION.get(status, "Poor") if status else None
-                            score     = max(0.0, _SCORE.get(condition, 50.0)) if condition else None
+                            condition = condition_labels.get(status, "Poor") if status else None
+                            score     = max(0.0, condition_scores.get(condition, 50.0)) if condition else None
 
                             # Unit: prefer column-level, fall back to per-row unit
                             effective_unit = col_unit or row_unit
@@ -1403,7 +1566,7 @@ class AnalyticsEngine:
         ta.testing_request_id= testing_request_id
         ta.template_key      = template_key
         ta.health_score      = health_score
-        ta.risk_level        = _risk_from_score(health_score, critical_findings)
+        ta.risk_level        = _risk_from_score(health_score, critical_findings, self.db)
         ta.condition_summary = _condition_from_score(health_score)
         ta.critical_findings = critical_findings
         ta.parameter_count   = parameter_count
@@ -1445,7 +1608,7 @@ class AnalyticsEngine:
         ea.organization_id     = organization_id
         ea.department_id       = department_id
         ea.health_score        = health_score
-        ea.risk_level          = _risk_from_score(health_score, critical_findings)
+        ea.risk_level          = _risk_from_score(health_score, critical_findings, self.db)
         ea.condition_summary   = _condition_from_score(health_score)
         ea.test_type_scores    = test_type_scores
         ea.critical_findings   = critical_findings
@@ -1481,7 +1644,7 @@ class AnalyticsEngine:
         ha.organization_id      = organization_id
         ha.level_type           = level_type
         ha.health_score         = health_score
-        ha.risk_level           = _risk_from_score(health_score)
+        ha.risk_level           = _risk_from_score(health_score, db=self.db)
         ha.equipment_count      = equipment_count
         ha.equipment_critical   = risk_counts.get("Critical", 0)
         ha.equipment_high       = risk_counts.get("High", 0)

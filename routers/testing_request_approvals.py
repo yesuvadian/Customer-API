@@ -907,6 +907,7 @@ def tr_wf_get_pending_queue(
     instances = [inst for inst in instances if _caller_sees_instance(inst)]
 
     routing_svc = WorkflowRoutingService(db)
+    from services.tr_workflow_routing_service import stage_mapped_roles
     result = []
     for inst in instances:
         req = (
@@ -925,6 +926,55 @@ def tr_wf_get_pending_queue(
             continue
 
         actions = routing_svc.get_available_actions(req, caller_role_ids, caller_user_id=current_user.id)
+
+        cur_stage = (
+            db.query(TrWfStage).filter(TrWfStage.id == inst.current_stage_id).first()
+            if inst.current_stage_id else None
+        )
+
+        # Who actually acts on the CURRENT stage for THIS request — must
+        # follow the exact same rule-scoping the approval queue itself uses
+        # to decide who sees the ticket (_caller_sees_instance above), not
+        # the legacy resolved_tester_role_id: that field is only ever set
+        # from the old rule-global override, so it stays stuck on whichever
+        # role a legacy/default rule points to even when the stage's own
+        # "Rules" tab (per-stage rule -> role mapping) has since narrowed
+        # this specific request down to a single different role.
+        current_stage_role_names: list[str] = []
+        if cur_stage:
+            mapped_role_ids = stage_mapped_roles(
+                db, org_id, cur_stage.id,
+                request_type=req.request_type,
+                equipment_type_id=req.equipment_type_id,
+                test_type_id=req.test_type_id,
+            )
+            if mapped_role_ids:
+                _mapped = {str(rid) for rid in mapped_role_ids}
+                current_stage_role_names = [
+                    (r.role.name if r.role else r.system_token)
+                    for r in cur_stage.roles
+                    if r.role_id and str(r.role_id) in _mapped
+                ]
+            if not current_stage_role_names:
+                # No rule matched (or matched rule had no roles resolved on
+                # this stage) — stage stays open to whichever of its own
+                # roles can actually act here.
+                current_stage_role_names = [
+                    (r.role.name if r.role else r.system_token)
+                    for r in cur_stage.roles
+                    if r.can_approve or r.can_assign or r.can_act_as_tester
+                ]
+
+        # Does the caller hold a can_approve role on the CURRENT stage?
+        # Used (together with stage_is_result_stage below) to gate whether
+        # the schedule-overwrite prompt is even offered — an explicit
+        # authorization rule, separate from whether an action is
+        # technically terminal.
+        caller_can_approve_here = db.query(TrWfStageRole).filter(
+            TrWfStageRole.stage_id == inst.current_stage_id,
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_approve.is_(True),
+        ).first() is not None
 
         eq = req.equipment
         result.append({
@@ -958,9 +1008,9 @@ def tr_wf_get_pending_queue(
             "current_status_code": inst.current_status_code,
             "current_stage_id": str(inst.current_stage_id) if inst.current_stage_id else None,
             **({
-                "stage_code": _cur_stage.code,
-                "stage_show_recommendation": _cur_stage.show_recommendation,
-                "stage_is_result_stage": _cur_stage.is_result_stage,
+                "stage_code": cur_stage.code,
+                "stage_show_recommendation": cur_stage.show_recommendation,
+                "stage_is_result_stage": cur_stage.is_result_stage,
                 # Derived, not the stage flag: approve should hit the routing
                 # endpoint when this stage has its own scoped rules (deeper
                 # bifurcation) or the request hasn't done its first routing
@@ -970,17 +1020,23 @@ def tr_wf_get_pending_queue(
                     or db.query(TrWfRoutingRuleModel).filter(
                         TrWfRoutingRuleModel.org_id == org_id,
                         TrWfRoutingRuleModel.is_active.is_(True),
-                        TrWfRoutingRuleModel.source_stage_id == _cur_stage.id,
+                        TrWfRoutingRuleModel.source_stage_id == cur_stage.id,
                     ).first() is not None
                 ),
-                "stage_can_act_as_tester": any(r.can_act_as_tester for r in _cur_stage.roles),
-            } if (_cur_stage := db.query(TrWfStage).filter(TrWfStage.id == inst.current_stage_id).first()) else {
+                "stage_can_act_as_tester": any(r.can_act_as_tester for r in cur_stage.roles),
+                # Who actually acts on the CURRENT stage for THIS request,
+                # respecting the stage's own Rules-tab mapping — see
+                # current_stage_role_names computation above.
+                "current_stage_approver_role_names": current_stage_role_names,
+            } if cur_stage else {
                 "stage_code": None,
                 "stage_show_recommendation": False,
                 "stage_is_result_stage": False,
                 "stage_use_l2_route": False,
                 "stage_can_act_as_tester": False,
+                "current_stage_approver_role_names": [],
             }),
+            "caller_can_approve_here": caller_can_approve_here,
             "wf_instance_id": str(inst.id),
             "resolved_tester_role_id": str(inst.resolved_tester_role_id) if inst.resolved_tester_role_id else None,
             "resolved_tester_role_name": inst.resolved_tester_role.name if inst.resolved_tester_role else None,
@@ -1095,12 +1151,20 @@ def tr_wf_advance_stage(
     action_code: str,
     role_id: Optional[UUID] = None,
     comment: Optional[str] = None,
+    overwrite_schedule_ids: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Generic stage advance for the configurable workflow engine.
     Used by L3 reviewer (approve/reject recommendation) and any future stage actions.
+
+    overwrite_schedule_ids: comma-separated ids of existing schedules (from
+    GET /testing/{request_id}/schedule-conflicts) the reviewer explicitly
+    chose to overwrite, sent only when this transition is terminal and
+    auto-dispatches a pending recommendation. A schedule not in this list is
+    left untouched; selecting more than one for the same test type merges
+    them into the first.
     """
     req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
     if not req:
@@ -1108,8 +1172,16 @@ def tr_wf_advance_stage(
     if not req.wf_instance_id:
         raise HTTPException(status_code=422, detail="Request is not on the configurable workflow path")
 
+    _overwrite_ids = (
+        [s for s in overwrite_schedule_ids.split(",") if s]
+        if overwrite_schedule_ids else None
+    )
+
     svc = TestingRequestWorkflowService(db)
-    success, message = svc.tr_wf_advance(req, current_user, action_code, role_id, comment)
+    success, message = svc.tr_wf_advance(
+        req, current_user, action_code, role_id, comment,
+        overwrite_schedule_ids=_overwrite_ids,
+    )
     if not success:
         raise HTTPException(status_code=422, detail=message)
 
@@ -1132,6 +1204,9 @@ def tr_wf_get_audit_log(
 ):
     """Return the full audit trail plus pending future stages for the request's workflow instance."""
     from models import TrWfAuditLog, TrWfStage, TrWfInstance, User as UserModel
+    from services.tr_workflow_routing_service import stage_mapped_roles
+
+    req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
 
     logs = (
         db.query(TrWfAuditLog)
@@ -1194,6 +1269,44 @@ def tr_wf_get_audit_log(
                 .order_by(TrWfStage.sequence)
                 .all()
             )
-            pending_stages = [{"name": s.name, "order_index": s.sequence} for s in future]
+
+            # Who acts on each FUTURE stage too, shown up front rather than
+            # only once a stage becomes current — same rule-scoping as
+            # current_stage_approver_role_names in the pending-queue
+            # endpoint above, just evaluated for every stage still ahead.
+            def _stage_role_names(stage) -> list:
+                if not req:
+                    return []
+                mapped_role_ids = stage_mapped_roles(
+                    db, req.organization_id, stage.id,
+                    request_type=req.request_type,
+                    equipment_type_id=req.equipment_type_id,
+                    test_type_id=req.test_type_id,
+                )
+                if mapped_role_ids:
+                    _mapped = {str(rid) for rid in mapped_role_ids}
+                    names = [
+                        (r.role.name if r.role else r.system_token)
+                        for r in stage.roles
+                        if r.role_id and str(r.role_id) in _mapped
+                    ]
+                    if names:
+                        return names
+                # No rule matched (or it resolved to no role on this stage)
+                # — stage stays open to whichever of its own roles can act.
+                return [
+                    (r.role.name if r.role else r.system_token)
+                    for r in stage.roles
+                    if r.can_approve or r.can_assign or r.can_act_as_tester
+                ]
+
+            pending_stages = [
+                {
+                    "name": s.name,
+                    "order_index": s.sequence,
+                    "role_names": _stage_role_names(s),
+                }
+                for s in future
+            ]
 
     return {"entries": entries, "pending_stages": pending_stages}

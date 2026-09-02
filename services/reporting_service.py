@@ -20,7 +20,7 @@ from __future__ import annotations
 import io
 import os
 import re
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Optional
 from uuid import UUID
 
@@ -222,6 +222,7 @@ class ReportingService:
             "compliance_status_report":       self._q_compliance_status,
             "tester_performance_report":          self._q_tester_performance,
             "monthly_kpi_report":                 self._q_monthly_kpi,
+            "dga_trend_report":                   self._q_dga_trend_report,
         }
         fn = registry.get(query_key)
         if fn:
@@ -761,6 +762,124 @@ class ReportingService:
             ORDER  BY month DESC
         """)
         return self._exec(sql)
+
+    def _q_dga_trend_report(self, p: dict) -> list[dict]:
+        """DGA gas readings per transformer over the trailing N months, with
+        month-over-month generation rate (ppm/month) and Duval Triangle
+        fault-type classification per KPTCL spec Part II §3 / §12.x — a
+        Python function, not a sql_template, because the readings live
+        inside TestResult.test_data's dga_results JSON array (one row per
+        gas per test), not flat columns a single SQL statement can
+        conveniently pivot and diff against the equipment's own prior
+        reading in one pass.
+
+        See services/duval_triangle.py's module docstring for this
+        classification's validation status — every row here carries that
+        same "AI Advisory, not yet RT&R&D-validated" caveat via the
+        duval_advisory column.
+        """
+        from models import TestResult, TestingRequest, Equipment, CategoryMaster, OrgDepartment
+        from services.duval_triangle import classify_duval_triangle
+
+        months = int(_p(p, "months", 12))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+        q = (
+            self.db.query(TestResult, TestingRequest, Equipment)
+            .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
+            .join(Equipment, Equipment.id == TestingRequest.equipment_id)
+            .filter(TestResult.template_key == "transformer_dga")
+            .filter(TestResult.tested_at >= cutoff)
+        )
+        if self.org_id:
+            q = q.filter(TestResult.organization_id == self.org_id)
+        rows = q.order_by(TestResult.tested_at.asc()).all()
+
+        eq_type_names = {c.id: c.name for c in self.db.query(CategoryMaster).all()}
+        dept_names = {d.id: d.name for d in self.db.query(OrgDepartment).all()}
+
+        # Key gases the Duval Triangle and generation-rate tracking use.
+        # value_bottom mirrors the transformer_dga template's own THRESHOLD
+        # rule (test_templates.py), which reads value_bottom as the
+        # authoritative reading for per-gas Normal/Alert/Critical status —
+        # kept consistent here rather than picking a different column.
+        KEY_GASES = {"Methane": "ch4", "Ethylene": "c2h4", "Acetylene": "c2h2"}
+
+        def _gas_values(test_data: dict) -> dict:
+            out = {}
+            for row in (test_data or {}).get("dga_results", []) or []:
+                gas = row.get("gas")
+                if gas in KEY_GASES:
+                    val = row.get("value_bottom")
+                    out[KEY_GASES[gas]] = float(val) if val is not None else None
+            return out
+
+        # Sort per-equipment so consecutive readings can be diffed for a
+        # ppm/month generation rate and an acceleration flag (this test's
+        # rate vs. that same equipment's own previous rate) — both
+        # impossible to compute from a single row in isolation.
+        by_equipment: dict = {}
+        for tr_result, tr_req, eq in rows:
+            by_equipment.setdefault(eq.id, []).append((tr_result, tr_req, eq))
+
+        out_rows = []
+        for eq_id, eq_rows in by_equipment.items():
+            prev_gas_values = None
+            prev_tested_at = None
+            prev_rates = {}
+            for tr_result, tr_req, eq in eq_rows:
+                gas_values = _gas_values(tr_result.test_data)
+                duval = classify_duval_triangle(
+                    gas_values.get("ch4") or 0,
+                    gas_values.get("c2h4") or 0,
+                    gas_values.get("c2h2") or 0,
+                )
+
+                rates = {}
+                accelerating_gases = []
+                if prev_gas_values is not None and prev_tested_at and tr_result.tested_at:
+                    days = (tr_result.tested_at - prev_tested_at).days or 1
+                    for key in ("ch4", "c2h4", "c2h2"):
+                        cur = gas_values.get(key)
+                        prev = prev_gas_values.get(key)
+                        if cur is None or prev is None:
+                            continue
+                        rate = (cur - prev) / days * 30.0  # ppm/month
+                        rates[key] = round(rate, 2)
+                        prior_rate = prev_rates.get(key)
+                        # Acceleration = generation rate itself increasing
+                        # test-over-test, independent of whether any single
+                        # concentration has crossed an absolute threshold
+                        # yet — the spec's own framing for this flag.
+                        if prior_rate is not None and rate > 0 and rate > prior_rate * 1.25:
+                            accelerating_gases.append(key)
+
+                out_rows.append({
+                    "equipment_ueic": eq.ueic,
+                    "equipment_type": eq_type_names.get(eq.equipment_type_id),
+                    "department":     dept_names.get(eq.department_id),
+                    "tested_at":      tr_result.tested_at.isoformat() if tr_result.tested_at else None,
+                    "ch4_ppm":        gas_values.get("ch4"),
+                    "c2h4_ppm":       gas_values.get("c2h4"),
+                    "c2h2_ppm":       gas_values.get("c2h2"),
+                    "ch4_rate_ppm_per_month":  rates.get("ch4"),
+                    "c2h4_rate_ppm_per_month": rates.get("c2h4"),
+                    "c2h2_rate_ppm_per_month": rates.get("c2h2"),
+                    "accelerating_gases": ", ".join(accelerating_gases) if accelerating_gases else None,
+                    "duval_zone":     duval["zone"],
+                    "duval_meaning":  duval["meaning"],
+                    "duval_pct_ch4":  duval["pct_ch4"],
+                    "duval_pct_c2h4": duval["pct_c2h4"],
+                    "duval_pct_c2h2": duval["pct_c2h2"],
+                    "duval_advisory": duval["advisory"],
+                })
+
+                prev_gas_values = gas_values
+                prev_tested_at = tr_result.tested_at
+                prev_rates = rates
+
+        out_rows.sort(key=lambda r: r["tested_at"] or "", reverse=True)
+        return out_rows
 
     # ── Executor ───────────────────────────────────────────────────────────
 

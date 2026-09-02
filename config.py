@@ -199,3 +199,37 @@ APP_ENV="production"
 DEBUG=False
 
 INTERNAL_SERVICE_SECRET=os.getenv("INTERNAL_SERVICE_SECRET", "super_vendor_secret_123")
+
+# ======================================================
+# Predictive analytics / trend engine (services/analytics_engine.py,
+# routers/analytics.py) — tunable without a code deploy, same convention
+# as every other numeric knob in this file.
+# ======================================================
+# Minimum readings needed before ParameterAnalyzer.analyse() attempts a
+# trend at all (fewer than this returns "Insufficient_Data").
+ANALYTICS_MIN_TREND_POINTS = int(os.getenv("ANALYTICS_MIN_TREND_POINTS", 1))
+# A slope is classified "Stable" (not Increasing/Decreasing) if its
+# annualized magnitude is under this fraction of the observed value range.
+ANALYTICS_STABLE_FRACTION = float(os.getenv("ANALYTICS_STABLE_FRACTION", 0.05))
+# Z-score threshold for flagging a reading as an anomaly.
+ANALYTICS_ANOMALY_Z = float(os.getenv("ANALYTICS_ANOMALY_Z", 3.0))
+# Minimum regression r² before a trend's DIRECTION (and any breach
+# forecast built from its slope) is trusted at all — a poor fit falls
+# back to "Stable" regardless of how large the slope looks. See
+# ParameterAnalyzer.MIN_TREND_R_SQUARED's docstring for how this was
+# found (Acidity readings with r²=0.08 were still labeled "Increasing").
+ANALYTICS_MIN_TREND_R_SQUARED = float(os.getenv("ANALYTICS_MIN_TREND_R_SQUARED", 0.5))
+# Deterioration Watch List (routers/analytics.py): minimum ParameterAnalytics
+# history_count before a parameter with no ParameterThresholdBand config at
+# all is trusted enough to surface there (a 2-3 point trend fits ~perfectly
+# by construction regardless of whether the movement is real or noise).
+ANALYTICS_MIN_WATCH_HISTORY = int(os.getenv("ANALYTICS_MIN_WATCH_HISTORY", 4))
+# Deterioration Watch List overdue-review escalation (main.py's daily
+# scheduled job): days an advisory can sit unreviewed before the system
+# auto-escalates on its own. NOT wired through NotificationScheduleRule —
+# that engine only evaluates TestingRequest.due_date-shaped triggers, and a
+# Deterioration Watch advisory (a ParameterAnalytics row, not a
+# TestingRequest) has no due_date to compare against, so these live as
+# their own tunable rather than a rule row in that table.
+ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS", 7))
+ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS", 15))

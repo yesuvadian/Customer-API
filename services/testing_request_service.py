@@ -1471,6 +1471,12 @@ class TestingRequestService:
                 "equipment_type_name": m.name,
                 "enable_cumulative": bool(tpl_data.get("enable_cumulative", False)) or has_cumulative,
                 "enable_calibration": bool(tpl_data.get("enable_calibration", False)) or has_date_add,
+                # Lets a caller pre-select the matching chip from a
+                # ParameterAnalytics.template_key it already has (e.g. the
+                # Deterioration Watch List's "Request Early Retest" action) —
+                # without this the caller has no way to know which test-type
+                # row corresponds to which analytics template.
+                "template_key": tpl.template_key if tpl else None,
             })
         return result
 

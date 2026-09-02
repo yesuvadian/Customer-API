@@ -1611,6 +1611,14 @@ def seed_modules(session):
  "description": "9-stage Manufacturing QAP workflow for 110kV/66kV Power Transformers per KPTCL QAP circular.",
  "path": "precommission-workflows",
  "group_name": "Field Operations"},
+# ✅ DPR APPROVAL WORKFLOW MODULE
+{"name": "DPR Projects",
+ "description": "Detailed Project Report (DPR) approval workflow — 5-stage capital works / major "
+                "maintenance proposal: Initiation, Cost Estimation, Technical Review, "
+                "Authority Approval, Execution Tracking. Stage-role RBAC driven via "
+                "DPR_APPROVAL RepairWorkflowDefinition.",
+ "path": "dpr_projects",
+ "group_name": "Field Operations"},
 # ✅ SURVEILLANCE DASHBOARD MODULE
 {"name": "Surveillance Dashboard",
  "description": "Surveillance analytics dashboard — organization-wide surveillance metrics including "
@@ -5645,6 +5653,18 @@ def seed_report_definitions(session):
             "group_name": "Equipment Lifecycle",
             "notification_event": None,
         },
+        {
+            "name": "DGA Trend Report",
+            "description": "Transformer-wise DGA gas readings over the trailing months with ppm/month "
+                           "generation rate, acceleration flagging, and Duval Triangle fault-type "
+                           "classification (AI Advisory — pending KPTCL RT & R&D validation of the "
+                           "exact zone boundaries).",
+            "query_key": "dga_trend_report",
+            "output_format": "excel",
+            "frequency": "on_demand",
+            "group_name": "Equipment Lifecycle",
+            "notification_event": None,
+        },
         # ── Failure Register group ────────────────────────────────────────────────
         {
             "name": "Equipment Failure Annual Report",
@@ -6302,6 +6322,33 @@ WHERE  1=1
 GROUP  BY e.id, e.ueic, cm.name, e.voltage_class, e.manufacturer,
           e.status, d.name, e.commissioned_date
 ORDER  BY e.ueic
+"""),
+
+        dict(
+            key="dga_trend_report",
+            label="DGA Trend Report",
+            group_name="Equipment Lifecycle",
+            description="Transformer-wise DGA gas readings with ppm/month generation rate, "
+                        "acceleration flagging, and Duval Triangle fault-type classification "
+                        "(AI Advisory, pending KPTCL RT & R&D validation).",
+            parameters_schema={"months": "int"},
+            sort_order=40,
+            org_alias="",
+            # No functional SQL here on purpose: this report's real
+            # implementation is ReportingService._q_dga_trend_report (a
+            # Python method, registered ahead of this row in _run_query's
+            # dispatch dict, so it always wins) — the gas readings live
+            # inside TestResult.test_data's dga_results JSON array, and the
+            # ppm/month rate needs each equipment's PRIOR reading diffed
+            # against its current one, which a single parameterised SQL
+            # statement can't do as directly or as safely as the Python
+            # version. This row exists purely so the report still appears
+            # correctly labelled in the definitions picker; if the Python
+            # method is ever removed, running this key would need a real
+            # sql_template written in first, not silently start returning
+            # nothing.
+            sql_template="""
+SELECT NULL::text AS note WHERE FALSE
 """),
 
         # ══════════════════════════════════════════════════════════════════════
@@ -9596,6 +9643,33 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
             default_roles=["CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
+        # ── Predictive Analytics ─────────────────────────────────────────────
+        dict(
+            event_type="deterioration_watch_escalated",
+            label="Deterioration Watch Escalated",
+            group_name="Predictive Analytics",
+            description=(
+                "Fired when an officer escalates a Deterioration Watch List advisory "
+                "(KPTCL spec §12.2/§14.3) to repair review."
+            ),
+            context_vars=["equipment", "parameter_label", "trend", "days_to_breach",
+                          "escalated_by", "note"],
+            default_roles=["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
+        ),
+        dict(
+            event_type="deterioration_watch_overdue_review",
+            label="Deterioration Watch — Overdue Review",
+            group_name="Predictive Analytics",
+            description=(
+                "Fired automatically (not by an officer) when a Deterioration Watch List "
+                "advisory has sat unreviewed past the SLA — same T+7/T+15 escalation "
+                "pattern §5/§8 already use for overdue tests and result review, applied "
+                "here for the first time."
+            ),
+            context_vars=["equipment", "parameter_label", "trend", "days_to_breach",
+                          "days_pending"],
+            default_roles=["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
+        ),
         # ── Threshold Alerts ──────────────────────────────────────────────────
         dict(
             event_type="eval_critical",
@@ -10843,6 +10917,67 @@ def _seed_notification_templates(session) -> int:
             "Systemic problem detected on {{equipment.manufacturer}} {{equipment.type}}:"
             " {{problem_description}}. {{affected_count}} unit(s) affected.",
             ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+    )
+
+    # ── Predictive Analytics ────────────────────────────────────────────────
+    _tmpl("deterioration_watch_escalated",
+        _e(
+            "[ESCALATED] {{equipment}} — {{parameter_label}} Trend Advisory",
+            "<h3 style='color:darkorange'>Deterioration Watch Advisory Escalated</h3>"
+            "<p>An officer has escalated a pre-breach trend advisory to repair review "
+            "(KPTCL spec §12.2/§14.3).</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Parameter</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{parameter_label}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Trend</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{trend}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days to Breach</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_to_breach}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Escalated By</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{escalated_by}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Note</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{note}}</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS to review the equipment's Deterioration Watch entry and "
+            "initiate a Failure Registry / Repair Workflow entry if warranted.</p>",
+            ["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] ESCALATED: {{equipment}} — {{parameter_label}} trend advisory."
+            " By {{escalated_by}}. Login SEACMS.",
+            ["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
+        ),
+        _i(
+            "Escalated — {{equipment}} {{parameter_label}}",
+            "{{parameter_label}} trend advisory for {{equipment}} escalated to repair review"
+            " by {{escalated_by}}.",
+            ["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
+        ),
+    )
+
+    _tmpl("deterioration_watch_overdue_review",
+        _e(
+            "[OVERDUE REVIEW] {{equipment}} — {{parameter_label}} ({{days_pending}}d unreviewed)",
+            "<h3 style='color:darkorange'>Deterioration Watch Advisory — Overdue Review</h3>"
+            "<p>This trend advisory has sat unreviewed for {{days_pending}} days — no officer "
+            "has recorded a disposition on it yet.</p>"
+            "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Equipment</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{equipment}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Parameter</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{parameter_label}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Trend</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{trend}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days to Breach</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_to_breach}}</td></tr>"
+            "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Days Pending Review</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{days_pending}}</td></tr>"
+            "</table>"
+            "<p>Log in to SEACMS's Deterioration Watch panel to review it.</p>",
+            ["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
+        ),
+        _s(
+            "[KPTCL-SEACMS] OVERDUE REVIEW: {{equipment}} — {{parameter_label}}, {{days_pending}}d"
+            " unreviewed. Login SEACMS.",
+            ["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
+        ),
+        _i(
+            "Overdue review — {{equipment}} {{parameter_label}}",
+            "{{parameter_label}} advisory for {{equipment}} has sat unreviewed for"
+            " {{days_pending}} days.",
+            ["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
         ),
     )
 
