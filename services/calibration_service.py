@@ -132,6 +132,143 @@ def date_add(calibration_date_str: str, validity_months: int) -> date:
     return cal_date + relativedelta(months=validity_months)
 
 
+def compute_interval_advisories(db: Session, org_id) -> list[dict]:
+    """
+    KPTCL spec §14.6: "AI calibration interval optimisation advisories."
+    An AI Advisory only — per the spec's own blanket rule (§12 intro) that
+    every AI-generated output is decision-support, reviewed by a qualified
+    officer, and never auto-applied. Nothing here writes to
+    EquipmentCalibrationConfig or any schedule; it only returns suggestions.
+
+    Cohort = (test_type_id, manufacturer, model_number) — NOT
+    TestResult.template_key, which is always the generic literal
+    "calibration" for every calibration TestResult regardless of whether
+    it's a relay or a meter (see this file's own module docstring); the
+    real test-type distinction lives on TestingRequest.test_type_id. Never
+    mixed across calibration test types (a relay's history is meaningless
+    next to a meter's) or across different makes/models within the same
+    test type (a specific model's real reliability would get diluted into
+    the cohort average) — matches the same cohort idea §12.3's Make/Model
+    Performance Report already uses elsewhere in this app.
+
+    Heuristic (all thresholds in config.py, admin-tunable without a code
+    deploy — same convention as every other analytics knob this session):
+    a cohort with >= CALIBRATION_INTERVAL_MIN_CYCLES calibration results
+    and a fail rate <= CALIBRATION_INTERVAL_EXTEND_FAIL_RATE_PCT is advised
+    to EXTEND its validity period; a fail rate >=
+    CALIBRATION_INTERVAL_SHORTEN_FAIL_RATE_PCT is advised to SHORTEN it.
+    Anything in between, or too few cycles to trust at all, gets no
+    advisory — same materiality discipline as the Deterioration Watch
+    List's MIN_WATCH_HISTORY guard (a handful of data points proves
+    nothing either way).
+    """
+    import config as _config
+
+    min_cycles     = _config.CALIBRATION_INTERVAL_MIN_CYCLES
+    extend_at_pct  = _config.CALIBRATION_INTERVAL_EXTEND_FAIL_RATE_PCT
+    shorten_at_pct = _config.CALIBRATION_INTERVAL_SHORTEN_FAIL_RATE_PCT
+    extend_months  = _config.CALIBRATION_INTERVAL_EXTEND_MONTHS
+    shorten_months = _config.CALIBRATION_INTERVAL_SHORTEN_MONTHS
+    max_months     = _config.CALIBRATION_INTERVAL_MAX_MONTHS
+    min_months     = _config.CALIBRATION_INTERVAL_MIN_MONTHS
+
+    rows = (
+        db.query(
+            TestingRequest.test_type_id,
+            CategoryDetails.name.label("test_type_name"),
+            Equipment.manufacturer,
+            Equipment.model_number,
+            TestResult.test_data,
+            TestResult.tested_at,
+        )
+        .join(TestResult, TestResult.testing_request_id == TestingRequest.id)
+        .join(Equipment, Equipment.id == TestingRequest.equipment_id)
+        .outerjoin(CategoryDetails, CategoryDetails.id == TestingRequest.test_type_id)
+        .filter(
+            TestingRequest.organization_id == org_id,
+            TestingRequest.is_calibration.is_(True),
+        )
+        .all()
+    )
+
+    cohorts: dict = {}
+    for test_type_id, test_type_name, manufacturer, model_number, test_data, tested_at in rows:
+        if not manufacturer or not model_number:
+            continue  # can't form a real cohort without knowing the model
+        key = (test_type_id, manufacturer, model_number)
+        entry = cohorts.setdefault(key, {
+            "test_type_name": test_type_name or "Calibration",
+            "manufacturer": manufacturer,
+            "model_number": model_number,
+            "cycles": [],
+        })
+        data = test_data or {}
+        result = (data.get("recommendation_type") or data.get("overall_result") or "").strip().lower()
+        validity = data.get("validity_months")
+        entry["cycles"].append({
+            "is_fail": result == "fail",
+            "validity_months": validity,
+            "tested_at": tested_at,
+        })
+
+    advisories: list[dict] = []
+    for (test_type_id, manufacturer, model_number), entry in cohorts.items():
+        cycles = entry["cycles"]
+        sample_size = len(cycles)
+        if sample_size < min_cycles:
+            continue
+
+        fail_count = sum(1 for c in cycles if c["is_fail"])
+        fail_rate_pct = round(fail_count / sample_size * 100, 1)
+
+        # "Current" validity = the most common value actually in use for
+        # this cohort (not just the latest cycle's — a standardised
+        # interval per make/model is the realistic operational picture,
+        # and taking the latest alone would be thrown off by one outlier
+        # certificate with a typo'd validity_months).
+        validities = [c["validity_months"] for c in cycles if c["validity_months"]]
+        if not validities:
+            continue
+        current_validity = max(set(validities), key=validities.count)
+
+        direction = None
+        suggested_validity = current_validity
+        if fail_rate_pct <= extend_at_pct:
+            suggested_validity = min(current_validity + extend_months, max_months)
+            if suggested_validity > current_validity:
+                direction = "extend"
+        elif fail_rate_pct >= shorten_at_pct:
+            suggested_validity = max(current_validity - shorten_months, min_months)
+            if suggested_validity < current_validity:
+                direction = "shorten"
+
+        if direction is None:
+            continue  # no meaningful change to advise
+
+        advisories.append({
+            "test_type_id": test_type_id,
+            "test_type_name": entry["test_type_name"],
+            "manufacturer": manufacturer,
+            "model_number": model_number,
+            "sample_size": sample_size,
+            "fail_count": fail_count,
+            "fail_rate_pct": fail_rate_pct,
+            "current_validity_months": current_validity,
+            "suggested_validity_months": suggested_validity,
+            "direction": direction,
+            "rationale": (
+                f"{fail_count} fail(s) in the last {sample_size} calibration cycles "
+                f"({fail_rate_pct}%) — consider {'extending' if direction == 'extend' else 'shortening'} "
+                f"the validity period from {current_validity} to {suggested_validity} months."
+            ),
+        })
+
+    # Worst-first: the most concerning (shorten) advisories surface before
+    # the "you could relax this" ones.
+    advisories.sort(key=lambda a: (a["direction"] != "shorten", -a["fail_rate_pct"]))
+    return advisories
+
+
 # ─── Service ─────────────────────────────────────────────────────────────────
 
 class CalibrationService:

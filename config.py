@@ -233,3 +233,22 @@ ANALYTICS_MIN_WATCH_HISTORY = int(os.getenv("ANALYTICS_MIN_WATCH_HISTORY", 4))
 # their own tunable rather than a rule row in that table.
 ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS", 7))
 ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS", 15))
+
+# AI calibration-interval optimisation advisories (KPTCL spec §14.6,
+# services/calibration_service.py's compute_interval_advisories) — an
+# AI Advisory only, per the spec's own blanket rule that every AI output
+# is decision-support reviewed by an officer, never auto-applied to the
+# actual schedule. Cohort = (template_key, manufacturer, model_number):
+# never mixed across calibration test types or across different relay/
+# meter designs, and never advises off too small a sample.
+CALIBRATION_INTERVAL_MIN_CYCLES = int(os.getenv("CALIBRATION_INTERVAL_MIN_CYCLES", 5))
+# Fail rate (%) at or below which an all-clear cohort is advised to
+# EXTEND its validity period.
+CALIBRATION_INTERVAL_EXTEND_FAIL_RATE_PCT = float(os.getenv("CALIBRATION_INTERVAL_EXTEND_FAIL_RATE_PCT", 0.0))
+# Fail rate (%) at or above which a cohort is advised to SHORTEN its
+# validity period.
+CALIBRATION_INTERVAL_SHORTEN_FAIL_RATE_PCT = float(os.getenv("CALIBRATION_INTERVAL_SHORTEN_FAIL_RATE_PCT", 20.0))
+CALIBRATION_INTERVAL_EXTEND_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_EXTEND_MONTHS", 6))
+CALIBRATION_INTERVAL_SHORTEN_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_SHORTEN_MONTHS", 6))
+CALIBRATION_INTERVAL_MAX_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_MAX_MONTHS", 60))
+CALIBRATION_INTERVAL_MIN_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_MIN_MONTHS", 6))
