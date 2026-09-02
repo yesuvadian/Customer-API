@@ -757,6 +757,25 @@ class EquipmentService:
         counts["total"] = sum(counts.values())
         return counts
 
+    @staticmethod
+    def _mtbf_days_from_dates(dates: list) -> Optional[float]:
+        """
+        Mean Time Between Failures, in days, from a sorted-or-not list of
+        failure-event dates. A real interval needs >= 2 events (1 date has
+        no gap to measure), so with fewer this returns None — not 0, not a
+        manufactured number off a sample too small to mean anything.
+
+        Single source for this formula: previously computed independently
+        in both compute_failure_stats (per-unit) and
+        compute_failure_cohort_stats (per-unit-within-cohort) — identical
+        logic, copy-pasted, now called from both instead.
+        """
+        if len(dates) < 2:
+            return None
+        ordered = sorted(dates)
+        span_days = (ordered[-1] - ordered[0]).total_seconds() / 86400.0
+        return span_days / (len(ordered) - 1)
+
     @classmethod
     def compute_failure_stats(cls, db: Session, equipment_id: UUID) -> dict:
         """
@@ -819,10 +838,8 @@ class EquipmentService:
                 event_dates.append(event_date)
 
         event_dates.sort()
-        mtbf_days = None
-        if len(event_dates) >= 2:
-            span_days = (event_dates[-1] - event_dates[0]).total_seconds() / 86400.0
-            mtbf_days = round(span_days / (len(event_dates) - 1), 1)
+        mtbf_raw = cls._mtbf_days_from_dates(event_dates)
+        mtbf_days = round(mtbf_raw, 1) if mtbf_raw is not None else None
 
         return {
             "cumulative_failure_count": len(event_dates),
@@ -949,9 +966,9 @@ class EquipmentService:
                 events = sorted(events_by_unit.get(unit_id, []), key=lambda e: e[0])
                 dates = [e[0] for e in events]
                 failure_count += len(events)
-                if len(dates) >= 2:
-                    span_days = (dates[-1] - dates[0]).total_seconds() / 86400.0
-                    unit_mtbfs.append(span_days / (len(dates) - 1))
+                unit_mtbf = cls._mtbf_days_from_dates(dates)
+                if unit_mtbf is not None:
+                    unit_mtbfs.append(unit_mtbf)
                 for event_date, is_fr, is_crit in events:
                     if is_fr:
                         fr_count += 1
