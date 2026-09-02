@@ -775,15 +775,10 @@ def replace_stage_roles(
         )
 
     # ---------------------------------------------------------
-    # Lock role modification when workflow is ACTIVE
+    # Stage roles may be added/modified even while the workflow
+    # has active requests in progress — only stage deletion is
+    # locked in that case (see delete_stage below).
     # ---------------------------------------------------------
-    active_count = _get_active_repair_workflow_count(workflow, db)
-
-    if active_count > 0:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot modify transitions while active requests are in progress.",
-        )
 
     # ---------------------------------------------------------
     # Replace existing roles
@@ -911,7 +906,7 @@ def upsert_stage_transitions(
     if active_count > 0:
         raise HTTPException(
             status_code=409,
-            detail="Cannot modify stage roles while active requests are in progress.",
+            detail="Cannot modify stage transitions while active requests are in progress.",
         )
 
     # ---------------------------------------------------------
@@ -957,9 +952,15 @@ def upsert_stage_transitions(
 @router.get("/available-roles", response_model=List[RoleOption])
 def available_roles(
     db: Session = Depends(get_db),
-    _: User = Depends(require_super_admin),
+    current_user: User = Depends(require_super_admin),
 ):
-    roles = db.query(OrgRole).filter_by(is_active=True).order_by(OrgRole.name).all()
+    # Scope to the admin's own organization — OrgRole names are only
+    # unique per-org (e.g. "AEE-R&D" exists once per org), so an
+    # unfiltered query returns duplicate-looking rows from every org.
+    query = db.query(OrgRole).filter_by(is_active=True)
+    if current_user.organization_id is not None:
+        query = query.filter(OrgRole.organization_id == current_user.organization_id)
+    roles = query.order_by(OrgRole.name).all()
     return [RoleOption(id=r.id, name=r.name) for r in roles]
 
 
