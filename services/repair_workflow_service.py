@@ -612,9 +612,21 @@ class RepairWorkflowService:
 
         instance = self._get_instance(workflow_id, stage_id)
 
-        if instance.status not in ("assigned", "in_progress"):
+        # Which statuses are submittable is config-driven per stage (see
+        # RepairStageDefinition.edit_statuses), the same column
+        # get_available_transitions() reads to compute can_submit. Some
+        # workflow types (e.g. DPR) broaden this to include "pending"/
+        # "not_started" for self-service stages that skip an explicit
+        # Assign step - this check must stay in sync with that, or
+        # can_submit can report True while the actual submit action still
+        # rejects it.
+        stage_def = self.db.query(RepairStageDefinition).filter(
+            RepairStageDefinition.id == stage_id
+        ).first()
+        edit_statuses = stage_def.edit_statuses if stage_def and stage_def.edit_statuses else ["assigned", "in_progress"]
+        if instance.status not in edit_statuses:
             raise ValueError(
-                f"Stage must be in 'assigned' state to submit (currently '{instance.status}')."
+                f"Stage must be in one of {edit_statuses} to submit (currently '{instance.status}')."
             )
 
         # Submitter must be the assigned user OR have can_edit for this stage

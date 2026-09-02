@@ -173,12 +173,15 @@ _TEMPLATES = {
                             },
                         ],
                     },
-                    # No table-level SUM formula exists yet in the rule engine
-                    # (only PRODUCT/SUM(a,b)/RATIO/AVERAGE-of-two, and the
-                    # table-column AVERAGE — no "sum a column" op). Total is
-                    # entered manually for now; wire up a table-summary/SUM
-                    # formula later to auto-total "amount" instead.
-                    {"key": "total_estimated_cost", "label": "Total Estimated Cost", "type": "number", "unit": "₹", "required": True},
+                    {
+                        "key": "total_estimated_cost", "label": "Total Estimated Cost", "type": "calculated",
+                        "read_only": True, "unit": "₹", "required": True,
+                        "rule": {"type": "TABLE_SUM", "config": {
+                            "table": "cost_breakdown",
+                            "column": "amount",
+                            "precision": 2,
+                        }},
+                    },
                 ],
             },
         ],
@@ -314,6 +317,30 @@ def seed_dpr_stages(db) -> int:
     code_map = {}
     inserted = 0
 
+    # DPR stages are role-gated, not individual-gated - there's no
+    # meaningful "coordinator hands this off to a specific person" step
+    # the way BREAKDOWN/repair workflows have, so a stage should be
+    # EDITABLE by anyone holding the right role the moment it becomes
+    # current, without first requiring a separate Assign action.
+    # RepairStageDefinition's raw column default for edit_statuses
+    # (["assigned","in_progress"]) assumes that hand-off model and would
+    # leave a freshly-created "pending" stage read-only for its own
+    # edit-role holder - override it to include the stage's own resting
+    # states too.
+    #
+    # approve_statuses is NOT broadened the same way - approving only
+    # ever makes sense after the editor has actually submitted (an
+    # earlier version of this fix mistakenly widened it to match
+    # edit_statuses, which let the approve role see Approve/Reject on a
+    # still-"pending" stage nobody had submitted yet; the button was
+    # clickable but the backend correctly rejected the action server-side
+    # with "Stage must be in 'submitted' state to approve"). Leave it at
+    # the standard single-value default so Approve/Reject only appear
+    # once there's actually something to approve.
+    _dpr_assign_statuses = ["pending", "not_started"]
+    _dpr_edit_statuses = ["pending", "not_started", "assigned", "in_progress"]
+    _dpr_approve_statuses = ["submitted"]
+
     for s in STAGES:
         existing = db.query(RepairStageDefinition).filter_by(
             workflow_definition_id=wf_def.id, code=s["code"]
@@ -322,6 +349,9 @@ def seed_dpr_stages(db) -> int:
             existing.name = s["name"]
             existing.sequence = s["sequence"]
             existing.default_duration_days = s["default_duration_days"]
+            existing.assign_statuses = _dpr_assign_statuses
+            existing.edit_statuses = _dpr_edit_statuses
+            existing.approve_statuses = _dpr_approve_statuses
             stage_map[s["name"]] = existing.id
             code_map[s["code"]] = existing.id
             continue
@@ -335,6 +365,9 @@ def seed_dpr_stages(db) -> int:
             is_active=True,
             is_mandatory=True,
             default_duration_days=s["default_duration_days"],
+            assign_statuses=_dpr_assign_statuses,
+            edit_statuses=_dpr_edit_statuses,
+            approve_statuses=_dpr_approve_statuses,
         )
         db.add(stage)
         db.flush()
