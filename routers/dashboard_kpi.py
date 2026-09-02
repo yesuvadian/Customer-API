@@ -29,6 +29,7 @@ from auth_utils import get_current_user
 from database import get_db
 from models import User
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
+from category_labels import TrWfOutcomeColors
 
 router = APIRouter(
     prefix="/dashboard",
@@ -758,14 +759,47 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     # (or more than three) would silently be miscounted as "still open" by
     # the fixed tuple; is_terminal is the actual per-status flag the
     # workflow config itself sets, so it generalizes to any of them.
-    terminal_status_codes = list({
-        row[0] for row in db.query(TrWfStatus.status_code)
+    terminal_status_rows = (
+        db.query(TrWfStatus.status_code, TrWfStatus.status_name)
         .join(TrWfDefinition, TrWfDefinition.id == TrWfStatus.wf_definition_id)
         .filter(
             TrWfDefinition.org_id == svc.org_id,
             TrWfStatus.is_terminal.is_(True),
         ).all()
-    })
+    )
+    terminal_status_codes = list({row[0] for row in terminal_status_rows})
+    # Rejected vs Cancelled — deliberately NOT read off current_status_code/
+    # its status_name, even though that's what "closed" itself is derived
+    # from above. Confirmed live: TR-KP-2026-0013 was rejected via the L2
+    # Approval & Route stage's "reject" action (its own workflow timeline
+    # shows a red "Rejected" terminal card), yet current_status_code
+    # denormalized onto the request as "wf_cancelled" instead of
+    # "wf_rejected" — tr_workflow_routing_service.py's terminal-status
+    # resolution can fall back to "last TrWfStatus by sequence for this
+    # definition" when a transition's own terminal_status_id doesn't
+    # resolve, which silently picks whichever terminal status happens to
+    # sort last, not the one that actually fired. routers/testing_requests.py
+    # hit this same bug already (see its wf_terminal_action_code comment)
+    # and tr_kanban_board.dart's own Rejected/Cancelled split works around
+    # it the same way used here: the LAST TrWfAuditLog row for a request's
+    # workflow instance (is_terminal=True — one such row per instance) is
+    # the actual button that closed it, so its action_code is ground truth.
+    from models import TrWfAuditLog as _TrWfAuditLog
+    terminal_audit_rows = (
+        db.query(_TrWfAuditLog.testing_request_id, _TrWfAuditLog.action_code)
+        .join(TestingRequest, TestingRequest.id == _TrWfAuditLog.testing_request_id)
+        .filter(
+            TestingRequest.organization_id == svc.org_id,
+            _TrWfAuditLog.is_terminal.is_(True),
+        ).all()
+    )
+    rejected_request_ids = {
+        rid for rid, code in terminal_audit_rows if 'reject' in (code or '').lower()
+    }
+    cancelled_request_ids = {
+        rid for rid, code in terminal_audit_rows if 'cancel' in (code or '').lower()
+    }
+    rejected_cancelled_request_ids = rejected_request_ids | cancelled_request_ids
 
     # Which SPECIFIC stages (within the two categories above) the CALLING
     # viewer's own role(s) actually hold can_approve/can_assign on.
@@ -907,6 +941,15 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             TestingRequest.status == 'closed',
             TestingRequest.current_status_code.in_(terminal_status_codes),
         )
+        # Subset of _closed_expr whose terminal audit-log action was
+        # specifically a rejection/cancellation, not a normal completion —
+        # sourced from rejected_cancelled_request_ids (audit-log ground
+        # truth, see comment above), not current_status_code. Legacy
+        # status=='closed' rows never land here (no wf_instance to have
+        # fired a terminal audit log at all), so only tr_wf-tracked requests
+        # can match.
+        _rejected_cancelled_expr = TestingRequest.id.in_(
+            rejected_cancelled_request_ids)
         # Same "still open" definition as open_count (~_closed_expr), not a
         # hardcoded legacy-status allowlist — that list ('submitted',
         # 'pending_approval', 'assigned', 'scheduled') silently missed real
@@ -927,10 +970,21 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         ).scalar() or 0
         # mts is the best available proxy for "when it closed" — there's no
         # separate closed_at/completed_at column on TestingRequest.
+        # Excludes rejected/cancelled — those get their own card (below)
+        # instead of being folded into "Closed This Week", which is meant to
+        # read as genuine completions.
         closed_this_week_count = db.query(func.count(TestingRequest.id)).filter(
             *tr_filters,
             _closed_expr,
+            ~_rejected_cancelled_expr,
             TestingRequest.mts >= _now() - timedelta(days=7),
+        ).scalar() or 0
+        # All-time, not windowed to this week — same convention as
+        # open_count above (a rejected/cancelled ticket from months ago is
+        # still worth surfacing here, not just ones from the last 7 days).
+        rejected_cancelled_count = db.query(func.count(TestingRequest.id)).filter(
+            *tr_filters,
+            _rejected_cancelled_expr,
         ).scalar() or 0
         # Scoped to the CALLING viewer's own can_approve/can_assign
         # stage_ids (see viewer_approve_only_stage_ids/
@@ -1045,10 +1099,145 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "pending_review_count": pending_review_count,
             "open_count": open_count,
             "closed_this_week_count": closed_this_week_count,
+            "rejected_cancelled_count": rejected_cancelled_count,
             "compliance_pct": compliance_pct,
             "dqi_pct": dqi_pct,
             "dqi_ready_count": dqi_ready,
             "dqi_total_count": dqi_total,
+        }
+
+    def _calibration_summary(dept_ids_for_scope):
+        """Zone-wide relay/ETV calibration KPIs (KPTCL spec §14.6's CEE
+        RT & R&D Wing Dashboard) — compliance, T+0/T+7/T+15
+        overdue-escalation buckets, and 30/60-day expiring-soon counts.
+        Scoped once at the top level (not per rollup-table row, unlike
+        _scope_counts) since these are whole-zone KPIs in the spec, not a
+        per-substation breakdown — the old dashboard_role_kpi.py /cee-rt-rd
+        endpoint (still live, unrelated to this consolidated dashboard) had
+        a narrower version of this same idea (compliance/fail_count/one
+        30-day expiring bucket only, no T+0/7/15 split).
+        """
+        from sqlalchemy import or_ as _or_cal
+
+        cal_filters = [TestingRequest.organization_id == svc.org_id,
+                        TestingRequest.is_calibration.is_(True)]
+        if dept_ids_for_scope:
+            cal_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+
+        # Same closed-expression shape as _scope_counts' own _closed_expr —
+        # not reused directly since that's local to _scope_counts' own
+        # closure, not reachable from here.
+        cal_closed_expr = _or_cal(
+            TestingRequest.status == 'closed',
+            TestingRequest.current_status_code.in_(terminal_status_codes),
+        )
+
+        now = _now()
+        ninety_days = now - timedelta(days=90)
+        cal_due_90 = db.query(func.count(TestingRequest.id)).filter(
+            *cal_filters, TestingRequest.due_date.between(ninety_days, now),
+        ).scalar() or 0
+        cal_on_time_90 = db.query(func.count(TestingRequest.id)).filter(
+            *cal_filters, TestingRequest.due_date.between(ninety_days, now), cal_closed_expr,
+        ).scalar() or 0
+        cal_compliance_pct = int((cal_on_time_90 / cal_due_90) * 100) if cal_due_90 > 0 else 100
+
+        # T+0 / T+7 / T+15 — currently-open calibration requests bucketed by
+        # how many days overdue they are, matching the spec's own
+        # escalation-tier naming (an org's real escalation cadence — e.g.
+        # notify at 0 days, escalate to next authority at 7, again at 15 —
+        # isn't itself stored anywhere; this buckets by elapsed time, the
+        # same information those escalation rules would act on).
+        overdue_cal_rows = db.query(TestingRequest.due_date).filter(
+            *cal_filters, ~cal_closed_expr, TestingRequest.due_date < now,
+        ).all()
+        cal_t0 = cal_t7 = cal_t15 = 0
+        for (due_date,) in overdue_cal_rows:
+            days_over = (now - due_date).days
+            if days_over >= 15:
+                cal_t15 += 1
+            elif days_over >= 7:
+                cal_t7 += 1
+            else:
+                cal_t0 += 1
+
+        # The real pass/fail signal lives on the certificate's own TestResult
+        # (test_data.recommendation_type, or test_data.overall_result as a
+        # fallback — same priority order calibration_service.py's own
+        # _get_latest_reading() already uses), NOT TestingRequest.status.
+        # Confirmed live: calibration_hooks.py's _record_certificate_as_
+        # test_result() hardcodes the TestResult.overall_result COLUMN to
+        # "pass" unconditionally at creation — only test_data carries the
+        # real value — and status=='rejected' reflects whether the workflow
+        # itself was rejected (e.g. a malformed certificate upload), not
+        # whether the calibration the certificate describes actually
+        # passed. An officer can approve/verify a certificate that itself
+        # says "Fail" or "Conditional" — workflow status stays 'completed',
+        # not 'rejected' — so counting by status alone silently missed
+        # those.
+        from models import TestResult
+        _cal_result = func.lower(func.coalesce(
+            TestResult.test_data["recommendation_type"].astext,
+            TestResult.test_data["overall_result"].astext,
+        ))
+        cal_fail_count = db.query(func.count(func.distinct(TestingRequest.id))).join(
+            TestResult, TestResult.testing_request_id == TestingRequest.id,
+        ).filter(*cal_filters, _cal_result == 'fail').scalar() or 0
+
+        cal_expiring_30 = db.query(func.count(TestingRequest.id)).filter(
+            *cal_filters, ~cal_closed_expr,
+            TestingRequest.due_date.between(now, now + timedelta(days=30)),
+        ).scalar() or 0
+        cal_expiring_60 = db.query(func.count(TestingRequest.id)).filter(
+            *cal_filters, ~cal_closed_expr,
+            TestingRequest.due_date.between(now, now + timedelta(days=60)),
+        ).scalar() or 0
+
+        # 12-month FAIL-rate trend — "Calibration failure trend" (§14.6),
+        # previously only ever a current-snapshot count with no history.
+        # mts is the best available proxy for "when it closed/failed" —
+        # same convention _scope_counts' closed_this_week_count already
+        # uses, there's no dedicated closed_at/completed_at column.
+        trend_cutoff = now - timedelta(days=365)
+        month_col = func.date_trunc('month', TestingRequest.mts)
+        trend_rows = db.query(
+            month_col.label('month'), _cal_result, func.count(func.distinct(TestingRequest.id)),
+        ).join(
+            TestResult, TestResult.testing_request_id == TestingRequest.id,
+        ).filter(
+            *cal_filters, TestingRequest.mts >= trend_cutoff,
+            TestingRequest.status.in_(['closed', 'rejected']),
+        ).group_by('month', _cal_result).all()
+        by_month: dict = {}
+        for month, cal_result, count in trend_rows:
+            key = month.strftime('%Y-%m') if month else 'unknown'
+            entry = by_month.setdefault(key, {'total': 0, 'fail': 0})
+            entry['total'] += count
+            if cal_result == 'fail':
+                entry['fail'] += count
+        fail_rate_trend = [
+            {
+                "month": key,
+                "total": v['total'],
+                "fail": v['fail'],
+                "fail_rate_pct": round(v['fail'] / v['total'] * 100, 1) if v['total'] > 0 else 0,
+            }
+            for key, v in sorted(by_month.items())
+        ]
+
+        return {
+            # Lets the frontend tell "no calibration activity at all in this
+            # scope" apart from "100% compliant" — both leave compliance_pct
+            # at 100, only one of them is worth showing a tile for.
+            "due_90d": cal_due_90,
+            "compliance_pct": cal_compliance_pct,
+            "fail_count": cal_fail_count,
+            "overdue_t0": cal_t0,
+            "overdue_t7": cal_t7,
+            "overdue_t15": cal_t15,
+            "expiring_30d": cal_expiring_30,
+            "expiring_60d": cal_expiring_60,
+            "fail_rate_trend": fail_rate_trend,
         }
 
     # Pending-approval TestingRequests in the given scope, most-recently-
@@ -1145,6 +1334,125 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                 TrWfInstance.current_stage_id.in_(complete_stage_ids),
             ).scalar() or 0
 
+    from sqlalchemy import or_ as _or_tl
+
+    def _ticket_lists(dept_ids_for_scope, limit=10):
+        """This-week / open / closed-this-week / rejected-cancelled ticket
+        rows, scoped exactly like _scope_counts' matching counts above —
+        shared by both the leaf and branch shapes so a branch-scope KPI
+        tile (e.g. "Rejected / Cancelled: 4" on a multi-substation zone)
+        can actually expand into its own tickets, not just show a number.
+        Previously this list-building only ran inside the leaf branch
+        below, so any role whose own department has children (a branch
+        view) got real counts on every tile but an empty, un-clickable
+        list behind every one of them — confirmed live: AEE-R&D-level
+        roles sitting on a branch department saw this; a role scoped to a
+        single leaf station didn't, purely because of which shape their
+        own department happened to resolve to, not a permissions
+        difference between the two.
+        """
+        tl_filter = (TestingRequest.department_id.in_(dept_ids_for_scope)
+                     if dept_ids_for_scope else TestingRequest.organization_id == svc.org_id)
+        tl_closed_expr = _or_tl(
+            TestingRequest.status == 'closed',
+            TestingRequest.current_status_code.in_(terminal_status_codes),
+        )
+        tl_rejected_cancelled_expr = TestingRequest.id.in_(rejected_cancelled_request_ids)
+
+        this_week_cutoff = _now() + timedelta(days=7)
+        this_week_rows = (
+            db.query(TestingRequest)
+            .filter(
+                TestingRequest.organization_id == svc.org_id,
+                TestingRequest.department_id.in_(dept_ids_for_scope) if dept_ids_for_scope else True,
+                TestingRequest.due_date.isnot(None),
+                TestingRequest.due_date < this_week_cutoff,
+                ~tl_closed_expr,
+            )
+            .order_by(TestingRequest.due_date.asc())
+            .limit(limit)
+            .all()
+        )
+        this_week = []
+        for r in this_week_rows:
+            ueic = r.equipment.ueic if r.equipment else (
+                r.equipment_type.name if r.equipment_type else "Unknown equipment")
+            this_week.append({
+                "equipment_label": ueic,
+                "equipment_id": str(r.equipment_id) if r.equipment_id else None,
+                "request_id": str(r.id),
+                "request_number": r.request_number,
+                "test_type": r.test_type.name if r.test_type else None,
+                "due_date": r.due_date.isoformat() if r.due_date else None,
+                "overdue": _make_tz(r.due_date) < _now() if r.due_date else False,
+            })
+
+        def _rows(query_rows):
+            out = []
+            for r in query_rows:
+                ueic = r.equipment.ueic if r.equipment else (
+                    r.equipment_type.name if r.equipment_type else "Unknown equipment")
+                # Which of the two outcomes THIS specific request actually
+                # hit — rejected_cancelled_rows mixes both, so the badge
+                # shown per-row must say which one, not a blanket combined
+                # label. None for every other ticket list (open/closed),
+                # where the distinction doesn't apply.
+                outcome = None
+                outcome_color = None
+                if r.id in rejected_request_ids:
+                    outcome = "REJECTED"
+                    outcome_color = TrWfOutcomeColors.get("rejected")
+                elif r.id in cancelled_request_ids:
+                    outcome = "CANCELLED"
+                    outcome_color = TrWfOutcomeColors.get("cancelled")
+                out.append({
+                    "equipment_label": ueic,
+                    "equipment_id": str(r.equipment_id) if r.equipment_id else None,
+                    "request_id": str(r.id),
+                    "request_number": r.request_number,
+                    "test_type": r.test_type.name if r.test_type else None,
+                    "due_date": r.due_date.isoformat() if r.due_date else None,
+                    "outcome": outcome,
+                    # Canonical color for that outcome (category_labels.py's
+                    # TrWfOutcomeColors), served here so the frontend badge
+                    # doesn't hardcode it separately.
+                    "outcome_color": outcome_color,
+                })
+            return out
+
+        open_rows = (
+            db.query(TestingRequest)
+            .filter(tl_filter, ~tl_closed_expr)
+            .order_by(TestingRequest.mts.desc())
+            .limit(limit)
+            .all()
+        )
+        # Excludes rejected/cancelled — those get their own card/list
+        # (rejected_cancelled_tickets below) rather than counting toward
+        # "Closed This Week", which is meant to read as genuine completions.
+        closed_this_week_rows = (
+            db.query(TestingRequest)
+            .filter(tl_filter, tl_closed_expr, ~tl_rejected_cancelled_expr,
+                    TestingRequest.mts >= _now() - timedelta(days=7))
+            .order_by(TestingRequest.mts.desc())
+            .limit(limit)
+            .all()
+        )
+        rejected_cancelled_rows = (
+            db.query(TestingRequest)
+            .filter(tl_filter, tl_rejected_cancelled_expr)
+            .order_by(TestingRequest.mts.desc())
+            .limit(limit)
+            .all()
+        )
+
+        return {
+            "this_week": this_week,
+            "open_tickets": _rows(open_rows),
+            "closed_this_week_tickets": _rows(closed_this_week_rows),
+            "rejected_cancelled_tickets": _rows(rejected_cancelled_rows),
+        }
+
     if not children:
         # Same TestResult evaluation query flagged_equipment() (dashboard_service.py)
         # already uses org-wide — reimplemented dept-scoped here since that
@@ -1186,52 +1494,17 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                 "request_number": req.request_number,
             })
 
-        # Same closed-expression definition as _scope_counts' closed_this_week_count
-        # (legacy .status=='closed' OR tr_wf terminal current_status_code,
-        # via terminal_status_codes) — kept in exact sync with that count
-        # rather than re-derived differently.
-        from sqlalchemy import or_ as _or_leaf
-        leaf_tr_filter = (TestingRequest.department_id.in_(svc.dept_ids)
-                          if svc.dept_ids else TestingRequest.organization_id == svc.org_id)
-        leaf_closed_expr = _or_leaf(
+        # Shared with the branch shape below — see _ticket_lists' docstring.
+        ticket_lists = _ticket_lists(svc.dept_ids)
+
+        # Same closed-expression definition as _scope_counts'/_ticket_lists'
+        # closed_this_week_count (legacy .status=='closed' OR tr_wf terminal
+        # current_status_code, via terminal_status_codes) — only needed here
+        # for the DQI overdue-equipment check below.
+        leaf_closed_expr = _or_tl(
             TestingRequest.status == 'closed',
             TestingRequest.current_status_code.in_(terminal_status_codes),
         )
-
-        this_week_cutoff = _now() + timedelta(days=7)
-        this_week_rows = (
-            db.query(TestingRequest)
-            .filter(
-                TestingRequest.organization_id == svc.org_id,
-                TestingRequest.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
-                TestingRequest.due_date.isnot(None),
-                TestingRequest.due_date < this_week_cutoff,
-                # Same "still open" definition as overdue_count/open_count
-                # (~leaf_closed_expr), not a hardcoded legacy-status
-                # allowlist — that list missed real active states like
-                # 'pending_assignment' (confirmed live: TR-KP-2026-0650, due
-                # 2026-08-20 and still at L3 Tester Assignment, was excluded
-                # from this panel while genuinely overdue and counted in the
-                # Overdue Tests tile right above it).
-                ~leaf_closed_expr,
-            )
-            .order_by(TestingRequest.due_date.asc())
-            .limit(10)
-            .all()
-        )
-        this_week = []
-        for r in this_week_rows:
-            ueic = r.equipment.ueic if r.equipment else (
-                r.equipment_type.name if r.equipment_type else "Unknown equipment")
-            this_week.append({
-                "equipment_label": ueic,
-                "equipment_id": str(r.equipment_id) if r.equipment_id else None,
-                "request_id": str(r.id),
-                "request_number": r.request_number,
-                "test_type": r.test_type.name if r.test_type else None,
-                "due_date": r.due_date.isoformat() if r.due_date else None,
-                "overdue": _make_tz(r.due_date) < _now() if r.due_date else False,
-            })
 
         # Total equipment at this one station — the mockup's 4th leaf KPI
         # tile is "Equipment", not "Awaiting Approval" (an individual tester
@@ -1295,44 +1568,11 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                         "issues": issues,
                     })
 
-        def _ticket_rows(query_rows):
-            out = []
-            for r in query_rows:
-                ueic = r.equipment.ueic if r.equipment else (
-                    r.equipment_type.name if r.equipment_type else "Unknown equipment")
-                out.append({
-                    "equipment_label": ueic,
-                    "equipment_id": str(r.equipment_id) if r.equipment_id else None,
-                    "request_id": str(r.id),
-                    "request_number": r.request_number,
-                    "test_type": r.test_type.name if r.test_type else None,
-                    "due_date": r.due_date.isoformat() if r.due_date else None,
-                })
-            return out
-
-        open_rows = (
-            db.query(TestingRequest)
-            .filter(leaf_tr_filter, ~leaf_closed_expr)
-            .order_by(TestingRequest.mts.desc())
-            .limit(10)
-            .all()
-        )
-        closed_this_week_rows = (
-            db.query(TestingRequest)
-            .filter(leaf_tr_filter, leaf_closed_expr, TestingRequest.mts >= _now() - timedelta(days=7))
-            .order_by(TestingRequest.mts.desc())
-            .limit(10)
-            .all()
-        )
-
         return {
             "shape": "leaf",
             "scope_name": scope_name,
             "scope_level": scope_level,
             "flagged_equipment": flagged,
-            "this_week": this_week,
-            "open_tickets": _ticket_rows(open_rows),
-            "closed_this_week_tickets": _ticket_rows(closed_this_week_rows),
             "equipment_count": equipment_count,
             "dqi_issues": dqi_issues,
             "can_test": can_test,
@@ -1341,6 +1581,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "can_assign_requests": can_assign_requests,
             "can_review": can_review,
             "weekly_trend": _weekly_trend(svc.dept_ids),
+            "calibration": _calibration_summary(svc.dept_ids),
+            **ticket_lists,
             **_scope_counts(svc.dept_ids),
         }
 
@@ -1393,7 +1635,12 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         "can_approve_requests": can_approve_requests,
         "can_review": can_review,
         "weekly_trend": _weekly_trend(svc.dept_ids),
+        "calibration": _calibration_summary(svc.dept_ids),
         "rows": rows,
+        # Full-subtree ticket lists behind the summary counts above — see
+        # _ticket_lists' docstring for why a branch shape needs these too,
+        # not just a leaf.
+        **_ticket_lists(svc.dept_ids),
     }
 
 
@@ -1413,7 +1660,26 @@ def get_overview_dashboard(
     current_user: User = Depends(get_current_user),
 ):
     svc = _svc(db, current_user, org_id, dept_id)
-    return _build_department_rollup(db, svc, current_user=current_user)
+    result = _build_department_rollup(db, svc, current_user=current_user)
+    # Full department-subtree id list this rollup's own KPI counts were
+    # computed over (svc.dept_ids) — NOT just the single scope id already in
+    # _dept_id. The CM Kanban Board button needs this: confirmed live, a
+    # branch-scoped user (e.g. AEE_MAINTENANCE assigned to "Bagalkot", which
+    # has 29 child substations) has ZERO TestingRequests filed directly
+    # against that branch department id itself — every real request sits
+    # under one of its children. testing_requests.py's list endpoint uses
+    # its department_ids filter AS GIVEN with no subtree expansion (by
+    # design, for callers that already know their exact set), so passing
+    # only the single _dept_id there silently showed 0 tickets for every
+    # branch-scoped role, while an org admin (no department filter applied
+    # at all) saw everything. This exposes the already-resolved subtree list
+    # so the Kanban board can pass the same scope this page's own counts use.
+    result['_dept_ids'] = (
+        [str(d) for d in svc.dept_ids] if svc.dept_ids
+        else [str(svc.dept_id)] if svc.dept_id
+        else None
+    )
+    return result
 
 
 @router.get("/see")

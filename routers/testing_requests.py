@@ -10,7 +10,7 @@ from models import RepairWorkflow, TrWfInstance, EquipmentAnalytics
 from auth_utils import get_current_user
 from database import get_db
 from models import User
-from category_labels import RequestCategoryLabels, RequestCategoryColors
+from category_labels import RequestCategoryLabels, RequestCategoryColors, TestEvaluationStatusColors
 from schemas import (
     TestingRequestCreate,
     TestingRequestUpdate,
@@ -249,9 +249,10 @@ def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None =
     req.wf_status_color = None
     req.wf_stage_name   = None
     req.wf_stage_roles  = []
+    req.wf_terminal_action_code = None
     try:
         if req.wf_instance_id:
-            from models import TrWfStage, TrWfStatus as _TrWfStatus
+            from models import TrWfStage, TrWfStatus as _TrWfStatus, TrWfAuditLog as _TrWfAuditLog
             _inst2 = (
                 req._sa_instance_state.session
                 .query(TrWfInstance)
@@ -260,6 +261,23 @@ def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None =
             )
             if _inst2:
                 if _inst2.status in ("completed", "terminated", "cancelled"):
+
+                    # The status *label* (wf_status_name) is whatever the
+                    # org configured on the transition's terminal status —
+                    # two different actions (e.g. Reject and Cancel) can be
+                    # wired to the same label. The action_code on the last
+                    # audit log entry is the actual ground truth of which
+                    # button ended the workflow, so use that (not the label)
+                    # to tell Rejected/Cancelled apart on the Kanban board.
+                    _last_log = (
+                        req._sa_instance_state.session
+                        .query(_TrWfAuditLog)
+                        .filter(_TrWfAuditLog.wf_instance_id == _inst2.id)
+                        .order_by(_TrWfAuditLog.created_at.desc())
+                        .first()
+                    )
+                    if _last_log:
+                        req.wf_terminal_action_code = _last_log.action_code
 
                     if req.current_status_code:
                         _st = (
@@ -674,6 +692,26 @@ def list_request_categories():
             "description": description,
         }
         for value, label, icon, description in _entries
+    ]
+
+
+@router.get("/test-evaluation-statuses")
+def list_test_evaluation_statuses():
+    """Return the NORMAL/ALERT/CRITICAL test-evaluation statuses with their
+    canonical colors, for Flutter screens that render a test's
+    evaluation_result['overall'] as a colored badge/banner — the single
+    source those screens should read from instead of each independently
+    hardcoding its own red/orange/green (test_result_form.dart's
+    post-submission banner and ee_tlss_dashboard_page.dart's alert feed
+    previously disagreed on the exact shades used)."""
+    _entries = [
+        ("NORMAL",   "Normal"),
+        ("ALERT",    "Alert"),
+        ("CRITICAL", "Critical"),
+    ]
+    return [
+        {"value": value, "label": label, "color": TestEvaluationStatusColors.get(value)}
+        for value, label in _entries
     ]
 
 
