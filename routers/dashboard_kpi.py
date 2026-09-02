@@ -1497,6 +1497,22 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             **_scope_counts(svc.dept_ids),
         }
 
+    def _failure_cohort_summary():
+        # Per make/model reliability (§2) — org-wide like the calibration
+        # interval advisories above, and for the same reason: a cohort is
+        # (equipment type, manufacturer, model_number), which spans
+        # departments by nature, so scoping it to one branch would starve
+        # most cohorts below FAILURE_COHORT_MIN_UNITS for no real reason.
+        from services.equipment_service import EquipmentService
+        try:
+            return EquipmentService.compute_failure_cohort_stats(db, svc.org_id)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "failure cohort reliability computation failed", exc_info=True
+            )
+            return []
+
     rows = []
     for child in children:
         subtree_ids = get_dept_subtree_ids(db, child.id)
@@ -1547,6 +1563,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         "can_review": can_review,
         "weekly_trend": _weekly_trend(svc.dept_ids),
         "calibration": _calibration_summary(svc.dept_ids),
+        "failure_reliability": _failure_cohort_summary(),
         "rows": rows,
     }
 

@@ -2750,6 +2750,26 @@ def get_equipment_history(
     }
 
 
+@router.get("/{equipment_id}/failure-stats")
+def get_equipment_failure_stats(
+    equipment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Cumulative failure count + MTBF for one equipment unit (KPTCL spec §2).
+    Lightweight and cheap by design — meant to be called on-demand when the
+    equipment actions menu is opened, not eagerly for every row in a list.
+    """
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+    equipment = EquipmentService.get_equipment(db, equipment_id)
+    if not equipment or equipment.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    stats = EquipmentService.compute_failure_stats(db, equipment_id)
+    return {"equipment_id": str(equipment_id), **stats}
+
+
 @router.get("/{equipment_id}/location-hierarchy")
 def get_equipment_location_hierarchy(
     equipment_id: UUID,

@@ -252,3 +252,26 @@ CALIBRATION_INTERVAL_EXTEND_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_EXTEND_
 CALIBRATION_INTERVAL_SHORTEN_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_SHORTEN_MONTHS", 6))
 CALIBRATION_INTERVAL_MAX_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_MAX_MONTHS", 60))
 CALIBRATION_INTERVAL_MIN_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_MIN_MONTHS", 6))
+
+# Equipment failure cohort reliability (KPTCL spec §2: "cumulative failure
+# count, failure rate, and mean time between failures (MTBF) ... per
+# make/model cohort"). Cohort = (equipment_type, manufacturer,
+# model_number) — the existing "Equipment Failure Performance Analysis"
+# report groups by voltage_class/age_band instead of model_number, which is
+# right for that report's own comparative purpose but not a literal
+# make/model cohort, so this is computed separately.
+# Minimum units a (type, make, model) cohort needs before its failure rate
+# is surfaced — a 1-2 unit "cohort" isn't a real reliability signal yet.
+FAILURE_COHORT_MIN_UNITS = int(os.getenv("FAILURE_COHORT_MIN_UNITS", 3))
+# How many of the worst cohorts (by failure rate) to surface on the
+# Overall Dashboard panel.
+FAILURE_COHORT_DASHBOARD_LIMIT = int(os.getenv("FAILURE_COHORT_DASHBOARD_LIMIT", 8))
+# Per-cohort yearly failure trend, shown as a line chart alongside the
+# failure-rate ranking. Real failure history here is sparse and spans
+# decades (checked: as far back as 2001), not something a 12-month window
+# would show meaningfully, so this buckets by year, not month, over a
+# longer lookback.
+FAILURE_COHORT_TREND_YEARS = int(os.getenv("FAILURE_COHORT_TREND_YEARS", 10))
+# Trend lines are capped to the worst N cohorts (by failure rate) so the
+# chart stays readable instead of an 8-color tangle.
+FAILURE_COHORT_TREND_MAX_SERIES = int(os.getenv("FAILURE_COHORT_TREND_MAX_SERIES", 5))
