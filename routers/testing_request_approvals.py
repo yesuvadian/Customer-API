@@ -926,6 +926,17 @@ def tr_wf_get_pending_queue(
 
         actions = routing_svc.get_available_actions(req, caller_role_ids, caller_user_id=current_user.id)
 
+        # Does the caller hold a can_approve role on the CURRENT stage?
+        # Used (together with stage_is_result_stage below) to gate whether
+        # the schedule-overwrite prompt is even offered — an explicit
+        # authorization rule, separate from whether an action is
+        # technically terminal.
+        caller_can_approve_here = db.query(TrWfStageRole).filter(
+            TrWfStageRole.stage_id == inst.current_stage_id,
+            TrWfStageRole.role_id.in_(caller_role_ids),
+            TrWfStageRole.can_approve.is_(True),
+        ).first() is not None
+
         eq = req.equipment
         result.append({
             "request_id": str(req.id),
@@ -981,6 +992,7 @@ def tr_wf_get_pending_queue(
                 "stage_use_l2_route": False,
                 "stage_can_act_as_tester": False,
             }),
+            "caller_can_approve_here": caller_can_approve_here,
             "wf_instance_id": str(inst.id),
             "resolved_tester_role_id": str(inst.resolved_tester_role_id) if inst.resolved_tester_role_id else None,
             "resolved_tester_role_name": inst.resolved_tester_role.name if inst.resolved_tester_role else None,

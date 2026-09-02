@@ -920,6 +920,21 @@ class WorkflowRoutingService:
                     if to_stage.status:
                         to_status_code = to_stage.status.status_code
 
+            # Same terminal check advance_stage() actually uses at commit
+            # time: no to_stage_id, or a to_stage with zero assignable
+            # roles, both mean this action closes/dispatches the request
+            # rather than moving it to another stage. Computed live from
+            # the current routing config, so it stays correct as stages
+            # are added or removed — never hardcode a specific stage name.
+            is_terminal = True
+            if t.to_stage_id and to_stage:
+                active_roles = (
+                    self.db.query(func.count(TrWfStageRole.id))
+                    .filter(TrWfStageRole.stage_id == to_stage.id)
+                    .scalar()
+                )
+                is_terminal = active_roles == 0
+
             # Prefer the transition's custom label; fall back to the action-code map.
             display_label = (
                 t.label.strip()
@@ -934,5 +949,6 @@ class WorkflowRoutingService:
                 "to_stage_id": t.to_stage_id,
                 "to_stage_name": to_stage_name,
                 "to_status_code": to_status_code,
+                "is_terminal": is_terminal,
             })
         return result
