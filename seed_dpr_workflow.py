@@ -7,17 +7,23 @@ already use: RepairWorkflowDefinition + RepairStageDefinition + RepairStageRole 
 RepairStageTransition + RepairStageTemplate (-> OrgTestTemplate). Nothing new in
 the workflow engine itself — only new stage/template/role/transition DATA.
 
-Call order:
+Call order (all four run automatically, in order, via `python seed_dpr_workflow.py`
+— see __main__ below; call the functions directly instead if you need a single
+org re-seeded without touching the rest):
+  0. seed_dpr_module(db)                    — org-agnostic; the "DPR Projects"
+     sidebar Module row itself. Duplicated from (and kept in sync with) the
+     same entry in seed.py's modules_data — see that function's docstring for
+     why it isn't imported instead. Safe even if seed.py already created it.
   1. seed_dpr_stages(db)                    — org-agnostic; run once during full seed
   2. seed_dpr_role_mappings(db, org_id)     — org-specific; run per organization
      (RepairStageRole — stage-level edit/approve gates on the workflow itself)
   3. seed_dpr_role_permissions(db, org_id)  — org-specific; run per organization
      (OrgRolePermission — sidebar visibility + module-level CRUD grant for the
-     "DPR Projects" Module row seeded by seed.py's seed_modules(). This is a
-     DIFFERENT table from step 2's RepairStageRole: OrgRolePermission controls
-     whether a role sees "DPR Projects" in the sidebar at all and what it can
-     do at the module level; RepairStageRole controls which *stage* within an
-     already-open DPR project a role can act on. Both are needed.)
+     "DPR Projects" Module row from step 0. This is a DIFFERENT table from
+     step 2's RepairStageRole: OrgRolePermission controls whether a role sees
+     "DPR Projects" in the sidebar at all and what it can do at the module
+     level; RepairStageRole controls which *stage* within an already-open DPR
+     project a role can act on. Both are needed.)
 
 Lifecycle (§11):
   INITIATION           → (approve) → COST_ESTIMATION
@@ -469,7 +475,66 @@ def seed_dpr_role_mappings(db, organization_id) -> int:
     return upserted
 
 
-DPR_MODULE_NAME = "DPR Projects"  # seeded by seed.py's seed_modules() — see seed.py: "DPR Projects" module entry
+DPR_MODULE_NAME = "DPR Projects"
+
+# Kept in sync with (and duplicated from) the "DPR Projects" entry in
+# seed.py's modules_data list by hand — not imported from seed.py, since
+# that module runs 14k+ lines of unrelated seed logic at import time and
+# pulling it in just for one dict would be the wrong coupling. Both sides
+# upsert by `name`, so running the full seed.py after this (or vice versa)
+# just refreshes the same row in place - never creates a duplicate.
+DPR_MODULE = {
+    "name": DPR_MODULE_NAME,
+    "description": (
+        "Detailed Project Report (DPR) approval workflow — 5-stage capital works / major "
+        "maintenance proposal: Initiation, Cost Estimation, Technical Review, "
+        "Authority Approval, Execution Tracking. Stage-role RBAC driven via "
+        "DPR_APPROVAL RepairWorkflowDefinition."
+    ),
+    "path": "dpr_projects",
+    "group_name": "Field Operations",
+}
+
+
+def seed_dpr_module(db) -> bool:
+    """
+    Idempotently insert/update the "DPR Projects" Module row itself (the
+    sidebar entry seed_dpr_role_permissions grants access to). Org-agnostic,
+    like seed_dpr_stages - the Module table isn't org-scoped.
+
+    Makes seed_dpr_workflow.py self-sufficient: previously this row had to
+    already exist via a prior seed.py / seed_modules_only.py run, or
+    seed_dpr_role_permissions would silently [WARN]-skip every org. Safe to
+    run even if seed.py's seed_modules() already created it - same
+    upsert-by-name behavior, just this one row instead of the full list.
+
+    Returns True if a new row was inserted, False if an existing one was
+    just refreshed.
+    """
+    from models import Module
+
+    existing = db.query(Module).filter_by(name=DPR_MODULE["name"]).first()
+    if existing:
+        existing.description = DPR_MODULE["description"]
+        existing.path = DPR_MODULE["path"]
+        existing.group_name = DPR_MODULE["group_name"]
+        existing.is_active = True
+        db.commit()
+        print(f"[OK] DPR module {DPR_MODULE_NAME!r} already present — refreshed")
+        return False
+
+    module = Module(
+        name=DPR_MODULE["name"],
+        description=DPR_MODULE["description"],
+        path=DPR_MODULE["path"],
+        group_name=DPR_MODULE["group_name"],
+        is_active=True,
+        is_menu=True,
+    )
+    db.add(module)
+    db.commit()
+    print(f"[OK] DPR module {DPR_MODULE_NAME!r} created")
+    return True
 
 
 def seed_dpr_role_permissions(db, organization_id) -> int:
@@ -482,8 +547,9 @@ def seed_dpr_role_permissions(db, organization_id) -> int:
       - any role that ever "approve"s a stage -> can_view + can_approve + can_assign
       (a role appearing in both gets the union of both grants)
 
-    Must be called after seed_dpr_stages AND after seed.py's seed_modules()
-    has created the "DPR Projects" Module row. Unknown role names are skipped
+    Must be called after seed_dpr_stages AND after the "DPR Projects" Module
+    row exists — either seed_dpr_module(db) (this file, run automatically by
+    __main__) or seed.py's seed_modules(). Unknown role names are skipped
     with [WARN], same as seed_dpr_role_mappings — safe to run speculatively.
 
     NOTE: this is a DIFFERENT table from seed_dpr_role_mappings' RepairStageRole
@@ -493,7 +559,7 @@ def seed_dpr_role_permissions(db, organization_id) -> int:
 
     module = db.query(Module).filter_by(name=DPR_MODULE_NAME, is_active=True).first()
     if not module:
-        print(f"[WARN] Module {DPR_MODULE_NAME!r} not found — run seed.py's seed_modules() first")
+        print(f"[WARN] Module {DPR_MODULE_NAME!r} not found — run seed_dpr_module(db) first")
         return 0
 
     # Derive the union of grants per role from ROLE_MAP.
@@ -557,9 +623,28 @@ def seed_dpr_role_permissions(db, organization_id) -> int:
 
 if __name__ == "__main__":
     from database import SessionLocal
+    from models import Organization
 
     db = SessionLocal()
     try:
+        # Step 0 — org-agnostic: the "DPR Projects" sidebar Module row itself,
+        # so step 3 below has something to grant access to even on a DB where
+        # seed.py's full seed_modules() hasn't run.
+        seed_dpr_module(db)
+
+        # Step 1 — org-agnostic: workflow def, stages, transitions, templates.
         seed_dpr_stages(db)
+
+        # Steps 2 & 3 — org-specific: run for every active org. Both
+        # functions skip unknown role names with a [WARN] rather than
+        # erroring, so it's safe to run speculatively across orgs that
+        # don't have ROLE_MAP's role names at all (see each function's
+        # docstring) — matches the pattern fix_dpr_workflow_assign_
+        # permissions.py already used for this same loop.
+        orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        print(f"[OK] Seeding DPR role mappings/permissions for {len(orgs)} active orgs")
+        for org in orgs:
+            seed_dpr_role_mappings(db, org.id)
+            seed_dpr_role_permissions(db, org.id)
     finally:
         db.close()
