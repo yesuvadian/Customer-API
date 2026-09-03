@@ -7826,7 +7826,17 @@ def seed_direct_submission_templates(session) -> int:
                                      "Protection Misoperation", "Other"]},
                         {"key": "failure_category",    "label": "Failure Category",      "type": "dropdown", "required": True,
                          "options": ["Electrical", "Mechanical", "Oil", "Protection", "Thermal", "Other"]},
+                        # KPTCL spec §2: "...capturing failure date, failure mode,
+                        # failure symptoms, probable cause, equipment status at
+                        # failure, and affected substation/bay details."
+                        # Substation/bay is already covered transitively (the
+                        # equipment record itself carries bay_number + department);
+                        # these two were the genuinely missing capture fields.
+                        {"key": "equipment_status_at_failure", "label": "Equipment Status at Failure", "type": "dropdown", "required": True,
+                         "options": ["In Service (Energized)", "Out of Service", "Under Maintenance",
+                                     "Under Testing / Commissioning", "Standby / Reserve", "Other"]},
                         {"key": "failure_description", "label": "Description of Failure","type": "textarea", "required": True},
+                        {"key": "failure_symptoms",    "label": "Failure Symptoms",      "type": "textarea", "required": True},
                         {"key": "root_cause_analysis", "label": "Root Cause Analysis",   "type": "textarea", "required": False},
                     ],
                 },
