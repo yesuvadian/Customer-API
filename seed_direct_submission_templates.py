@@ -61,6 +61,20 @@ TEMPLATES = {
                 "title": "Failure Information",
                 "fields": [
                     {"key": "failure_date",        "label": "Date of Failure",       "type": "date",     "required": True},
+                    # KPTCL spec §2: "classification of failure type — Unexpected
+                    # Breakdown, Forced Outage, Degradation Failure, Partial
+                    # Discharge, Insulation Failure, Mechanical Failure, Protection
+                    # Misoperation, and any other failure type defined by the
+                    # utility." A distinct axis from failure_category below (that
+                    # one is which subsystem — Electrical/Oil/Protection/etc — this
+                    # is the nature of the failure event itself). "any other ...
+                    # defined by the utility" is already satisfied by this being a
+                    # normal dropdown field — an admin can add more options via
+                    # Template Designer without a code change.
+                    {"key": "failure_type",        "label": "Failure Type",          "type": "dropdown", "required": True,
+                     "options": ["Unexpected Breakdown", "Forced Outage", "Degradation Failure",
+                                 "Partial Discharge", "Insulation Failure", "Mechanical Failure",
+                                 "Protection Misoperation", "Other"]},
                     {"key": "failure_category",    "label": "Failure Category",      "type": "dropdown", "required": True,
                      "options": ["Electrical", "Mechanical", "Oil", "Protection", "Thermal", "Other"]},
                     {"key": "failure_description", "label": "Description of Failure","type": "textarea", "required": True},
