@@ -134,26 +134,18 @@ class EquipmentService:
     def _get_department_subtree_ids(
         cls, db: Session, department_id: UUID
     ) -> List[UUID]:
-        """Return all descendant department IDs including the root itself."""
-        sql = text("""
-            WITH RECURSIVE dept_tree AS (
-                SELECT id
-                FROM org_departments
-                WHERE id = :root_id
-                  AND is_active = true
+        """Return all descendant department IDs including the root itself.
 
-                UNION ALL
-
-                SELECT d.id
-                FROM org_departments d
-                INNER JOIN dept_tree dt ON d.parent_department_id = dt.id
-                WHERE d.is_active = true
-            )
-            SELECT id FROM dept_tree
-        """)
-        rows = db.execute(sql, {"root_id": str(department_id)}).fetchall()
+        Delegates to the shared utils.common_service.get_dept_subtree_ids
+        (previously the same recursive CTE copy-pasted here independently)
+        and keeps this method's own UUID-object normalization on top, since
+        the 4 call sites in routers/equipment.py rely on real UUID objects
+        rather than whatever raw type the driver happens to return.
+        """
+        from utils.common_service import get_dept_subtree_ids
+        rows = get_dept_subtree_ids(db, department_id)
         return [
-            r[0] if isinstance(r[0], UUID) else UUID(str(r[0]))
+            r if isinstance(r, UUID) else UUID(str(r))
             for r in rows
         ]
 
@@ -756,3 +748,258 @@ class EquipmentService:
             counts[s.value] = c
         counts["total"] = sum(counts.values())
         return counts
+
+    @staticmethod
+    def _mtbf_days_from_dates(dates: list) -> Optional[float]:
+        """
+        Mean Time Between Failures, in days, from a sorted-or-not list of
+        failure-event dates. A real interval needs >= 2 events (1 date has
+        no gap to measure), so with fewer this returns None — not 0, not a
+        manufactured number off a sample too small to mean anything.
+
+        Single source for this formula: previously computed independently
+        in both compute_failure_stats (per-unit) and
+        compute_failure_cohort_stats (per-unit-within-cohort) — identical
+        logic, copy-pasted, now called from both instead.
+        """
+        if len(dates) < 2:
+            return None
+        ordered = sorted(dates)
+        span_days = (ordered[-1] - ordered[0]).total_seconds() / 86400.0
+        return span_days / (len(ordered) - 1)
+
+    @classmethod
+    def compute_failure_stats(cls, db: Session, equipment_id: UUID) -> dict:
+        """
+        Per-unit cumulative failure count + MTBF (KPTCL spec §2: "maintain
+        cumulative failure count, failure rate, and mean time between
+        failures (MTBF) per equipment unit").
+
+        A failure event is the same definition already used by the seeded
+        "Equipment Performance Report" / "Equipment Failure Performance
+        Analysis" reports (seed.py): a TestingRequest whose
+        request_category is 'failure_registry', OR any of its TestResults
+        carrying evaluation_result->>'overall' == 'CRITICAL'. Event date is
+        COALESCE(completed_at, requested_date, cts), matching those same
+        reports.
+
+        MTBF is the mean gap, in days, between consecutive failure-event
+        dates — a real interval needs at least 2 events, so with 0 or 1
+        failures mtbf_days is None (not 0, not "N/A" hidden as a number)
+        rather than a manufactured statistic off a sample too small to mean
+        anything.
+        """
+        from models import TestingRequest, TestResult
+
+        rows = (
+            db.query(TestingRequest.id, TestingRequest.completed_at,
+                      TestingRequest.requested_date, TestingRequest.cts,
+                      TestingRequest.request_category)
+            .filter(TestingRequest.equipment_id == equipment_id)
+            .all()
+        )
+        if not rows:
+            return {
+                "cumulative_failure_count": 0,
+                "mtbf_days": None,
+                "first_failure_date": None,
+                "last_failure_date": None,
+            }
+
+        tr_ids = [r.id for r in rows]
+        critical_tr_ids = {
+            tid for (tid,) in (
+                db.query(TestResult.testing_request_id)
+                .filter(TestResult.testing_request_id.in_(tr_ids))
+                .filter(TestResult.evaluation_result["overall"].astext == "CRITICAL")
+                .distinct()
+                .all()
+            )
+        }
+
+        event_dates = []
+        for r in rows:
+            is_failure = (
+                (r.request_category is not None and r.request_category.value == "failure_registry")
+                or r.id in critical_tr_ids
+            )
+            if not is_failure:
+                continue
+            event_date = r.completed_at or r.requested_date or r.cts
+            if event_date is not None:
+                event_dates.append(event_date)
+
+        event_dates.sort()
+        mtbf_raw = cls._mtbf_days_from_dates(event_dates)
+        mtbf_days = round(mtbf_raw, 1) if mtbf_raw is not None else None
+
+        return {
+            "cumulative_failure_count": len(event_dates),
+            "mtbf_days": mtbf_days,
+            "first_failure_date": event_dates[0].isoformat() if event_dates else None,
+            "last_failure_date": event_dates[-1].isoformat() if event_dates else None,
+        }
+
+    @classmethod
+    def compute_failure_cohort_stats(cls, db: Session, organization_id: UUID) -> list:
+        """
+        Fleet-wide failure count / failure rate / MTBF per make/model cohort
+        (KPTCL spec §2: "... per make/model cohort").
+
+        Cohort key is (equipment_type, manufacturer, model_number) when
+        model_number is recorded — a literal make/model reading, finer than
+        the existing "Equipment Failure Performance Analysis" report's own
+        voltage_class/age_band grouping. In the real fleet, model_number is
+        rarely captured for field equipment (CT/PT/Power Transformers) even
+        though manufacturer almost always is, so a unit with no
+        model_number falls back to a coarser (equipment_type, manufacturer)
+        cohort instead of being dropped — model_number is None for exactly
+        those, and every model_precision=False row is a "make-only" cohort
+        for that reason, not a data error.
+
+        cohort MTBF = the mean of each cohort MEMBER's own per-unit MTBF,
+        averaged only over members with >= 2 failure events of their own
+        (same materiality rule as compute_failure_stats). This is
+        deliberately NOT one pooled failure timeline across every unit in
+        the cohort — units installed years apart would otherwise produce
+        artificially short gaps between unrelated units' failures. A cohort
+        with too few units (FAILURE_COHORT_MIN_UNITS) is skipped entirely —
+        a 1-2 unit "cohort" isn't a real reliability signal yet.
+        """
+        import config as _config
+        from models import TestingRequest, TestResult, CategoryMaster
+
+        min_units = _config.FAILURE_COHORT_MIN_UNITS
+        limit     = _config.FAILURE_COHORT_DASHBOARD_LIMIT
+
+        equip_rows = (
+            db.query(Equipment.id, Equipment.manufacturer, Equipment.model_number,
+                      CategoryMaster.name.label("equipment_type"))
+            .outerjoin(CategoryMaster, CategoryMaster.id == Equipment.equipment_type_id)
+            .filter(Equipment.organization_id == organization_id,
+                    Equipment.status != EquipmentStatus.retired,
+                    Equipment.manufacturer.isnot(None))
+            .all()
+        )
+        if not equip_rows:
+            return []
+
+        cohorts: dict = {}
+        equip_to_cohort: dict = {}
+        for eq_id, manufacturer, model_number, equipment_type in equip_rows:
+            # None model_number groups every such unit of this type/make
+            # into one coarser cohort (dict keys with a None component
+            # still compare/hash consistently) rather than being excluded.
+            key = (equipment_type, manufacturer, model_number)
+            entry = cohorts.setdefault(key, {
+                "equipment_type": equipment_type or "Unknown",
+                "manufacturer": manufacturer,
+                "model_number": model_number,
+                "model_precision": model_number is not None,
+                "unit_ids": set(),
+            })
+            entry["unit_ids"].add(eq_id)
+            equip_to_cohort[eq_id] = key
+
+        eq_ids = list(equip_to_cohort.keys())
+        tr_rows = (
+            db.query(TestingRequest.id, TestingRequest.equipment_id,
+                      TestingRequest.completed_at, TestingRequest.requested_date,
+                      TestingRequest.cts, TestingRequest.request_category)
+            .filter(TestingRequest.equipment_id.in_(eq_ids))
+            .all()
+        )
+        tr_ids = [r.id for r in tr_rows]
+        critical_tr_ids = set()
+        if tr_ids:
+            critical_tr_ids = {
+                tid for (tid,) in (
+                    db.query(TestResult.testing_request_id)
+                    .filter(TestResult.testing_request_id.in_(tr_ids))
+                    .filter(TestResult.evaluation_result["overall"].astext == "CRITICAL")
+                    .distinct()
+                    .all()
+                )
+            }
+
+        # equipment_id -> list of (event_date, is_failure_registry, is_critical_result)
+        # source flags kept per-event (not just a bare date) so cohorts can
+        # report how much of their failure_count is manually-filed Failure
+        # Registry entries vs. a routine test simply coming back CRITICAL —
+        # a real distinction management should see, not just a raw total.
+        events_by_unit: dict = {}
+        for r in tr_rows:
+            is_fr = r.request_category is not None and r.request_category.value == "failure_registry"
+            is_crit = r.id in critical_tr_ids
+            if not (is_fr or is_crit):
+                continue
+            event_date = r.completed_at or r.requested_date or r.cts
+            if event_date is None:
+                continue
+            events_by_unit.setdefault(r.equipment_id, []).append((event_date, is_fr, is_crit))
+
+        # Yearly failure trend per cohort — real failure history here spans
+        # decades (checked against this fleet: as far back as 2001), so a
+        # 12-month window (the calibration trend's convention) would show
+        # almost nothing. Years are zero-filled across the whole window so
+        # a line chart doesn't skip gaps between sparse years.
+        trend_years = _config.FAILURE_COHORT_TREND_YEARS
+        current_year = datetime.now(timezone.utc).year
+        trend_start_year = current_year - trend_years + 1
+        trend_year_range = list(range(trend_start_year, current_year + 1))
+
+        for key, entry in cohorts.items():
+            failure_count = 0
+            fr_count = 0
+            critical_only_count = 0
+            unit_mtbfs = []
+            yearly_counts = {y: 0 for y in trend_year_range}
+            for unit_id in entry["unit_ids"]:
+                events = sorted(events_by_unit.get(unit_id, []), key=lambda e: e[0])
+                dates = [e[0] for e in events]
+                failure_count += len(events)
+                unit_mtbf = cls._mtbf_days_from_dates(dates)
+                if unit_mtbf is not None:
+                    unit_mtbfs.append(unit_mtbf)
+                for event_date, is_fr, is_crit in events:
+                    if is_fr:
+                        fr_count += 1
+                    elif is_crit:
+                        critical_only_count += 1
+                    if event_date.year in yearly_counts:
+                        yearly_counts[event_date.year] += 1
+            entry["failure_count"] = failure_count
+            # fr_count + critical_only_count == failure_count always — every
+            # event is either a manually-filed Failure Registry entry (fr_count,
+            # which also covers the rare case where a CRITICAL result *also*
+            # had an FR filed) or a CRITICAL test result with no FR filed
+            # (critical_only_count). No double-counting either way.
+            entry["fr_count"] = fr_count
+            entry["critical_only_count"] = critical_only_count
+            entry["unit_count"] = len(entry["unit_ids"])
+            entry["mtbf_days"] = round(sum(unit_mtbfs) / len(unit_mtbfs), 1) if unit_mtbfs else None
+            entry["yearly_trend"] = [
+                {"year": y, "failure_count": yearly_counts[y]} for y in trend_year_range
+            ]
+            del entry["unit_ids"]
+
+        results = [
+            {
+                **entry,
+                "failure_rate_per_unit": round(entry["failure_count"] / entry["unit_count"], 3),
+            }
+            for entry in cohorts.values()
+            if entry["unit_count"] >= min_units
+        ]
+        results.sort(key=lambda e: e["failure_rate_per_unit"], reverse=True)
+        results = results[:limit]
+
+        # Trend lines are capped to the worst N cohorts so the chart stays
+        # readable — everything still gets a rate/MTBF row in the table,
+        # just not a line on the trend chart.
+        trend_max_series = _config.FAILURE_COHORT_TREND_MAX_SERIES
+        for i, entry in enumerate(results):
+            if i >= trend_max_series:
+                entry["yearly_trend"] = None
+
+        return results

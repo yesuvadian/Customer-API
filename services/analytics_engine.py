@@ -48,6 +48,14 @@ from models import (
 logger = logging.getLogger(__name__)
 
 # ── Status / condition constants ───────────────────────────────────────────────
+# Single source for the fixed NORMAL/ALERT/CRITICAL vocabulary — previously
+# also independently redeclared in services/evaluation_service.py (identical
+# strings, so never actually able to drift, but no reason to say it twice).
+# evaluation_service.py now imports these three from here; this module can't
+# import back from evaluation_service.py at module level without creating a
+# circular import (evaluation_service.py already does `from
+# services.analytics_engine import ...` — the dependency only works in this
+# direction), which is why the constants live here and not there.
 NORMAL   = "NORMAL"
 ALERT    = "ALERT"
 CRITICAL = "CRITICAL"

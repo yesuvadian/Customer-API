@@ -11,24 +11,7 @@ from models import Recommendation, User
 from schemas import ApprovalAction, RecommendationResponse
 from services.approval_service import ApprovalService
 from services.report_service import ReportService
-from sqlalchemy import text as sa_text
-
-
-def _get_dept_subtree_ids(db: Session, dept_id) -> list:
-    """Return dept_id + all active descendant department IDs (recursive CTE)."""
-    sql = sa_text("""
-        WITH RECURSIVE dept_tree AS (
-            SELECT id FROM org_departments
-            WHERE id = :root_id AND is_active = true
-            UNION ALL
-            SELECT d.id FROM org_departments d
-            INNER JOIN dept_tree dt ON d.parent_department_id = dt.id
-            WHERE d.is_active = true
-        )
-        SELECT id FROM dept_tree
-    """)
-    rows = db.execute(sql, {"root_id": str(dept_id)}).fetchall()
-    return [r[0] for r in rows]
+from utils.common_service import get_dept_subtree_ids as _get_dept_subtree_ids
 
 
 def _caller_dept_ids(db: Session, user) -> list:

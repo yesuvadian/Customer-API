@@ -55,16 +55,23 @@ from models import (
 )
 
 # ── frequency → calendar delta ────────────────────────────────────────────────
-_FREQ_DELTA = {
-    ScheduleFrequency.daily:       relativedelta(days=1),
-    ScheduleFrequency.weekly:      relativedelta(weeks=1),
-    ScheduleFrequency.biweekly:    relativedelta(weeks=2),
-    ScheduleFrequency.monthly:     relativedelta(months=1),
-    ScheduleFrequency.quarterly:   relativedelta(months=3),
-    ScheduleFrequency.semi_annual: relativedelta(months=6),
-    ScheduleFrequency.yearly:      relativedelta(years=1),
-    ScheduleFrequency.triennial:   relativedelta(years=3),
-}
+# Derived from services.test_request_schedule_service._advance_date (the
+# established single source — services/workflow_dispatch_service.py already
+# imports that function directly) rather than a third independently
+# hand-maintained copy of the same enum-to-interval mapping.
+# relativedelta(new, old) reconstructs a proper calendar-aware relativedelta
+# from the two dates _advance_date produces, not a raw day-count — confirmed
+# equivalent to the previous literal dict for every ScheduleFrequency member.
+def _build_freq_delta() -> dict:
+    from services.test_request_schedule_service import _advance_date
+    epoch = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    return {
+        freq: relativedelta(_advance_date(epoch, freq), epoch)
+        for freq in ScheduleFrequency
+    }
+
+
+_FREQ_DELTA = _build_freq_delta()
 
 # ── roles allowed to create / edit templates ──────────────────────────────────
 _WRITE_ROLES = {"Admin", "SuperAdmin", "Reviewing Officer", "System Administrator"}

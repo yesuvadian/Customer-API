@@ -108,6 +108,17 @@ CLOSED_STATUSES = (
     TestingRequestStatus.rejected,
     TestingRequestStatus.outcome_active,   # approved + downstream ticket created
     TestingRequestStatus.commissioned,     # equipment commissioned (TAQC terminal)
+    # completed/closed added — confirmed missing here: 653 of the org's
+    # real TestingRequest rows are status=closed (the vast majority of all
+    # real data) and none of them were being counted as closed by this
+    # tuple, since none of their current_status_code values matched
+    # TR_WF_CLOSED_STATUS_CODES either. The enum's own comment calls
+    # `closed` a "terminal state" — this was a real undercounting bug, not
+    # an intentional narrower definition. Matches
+    # services/testing_request_service.py's own closed-status set, which
+    # already correctly included both.
+    TestingRequestStatus.completed,
+    TestingRequestStatus.closed,
 )
 
 # tr_wf terminal status codes that count as "closed" for analytics.
@@ -1171,27 +1182,19 @@ class DashboardService:
           }
         """
         from models import TestRequestSchedule, ScheduleFrequency
-        from dateutil.relativedelta import relativedelta
+        # Single source for frequency → next-date advancement — previously
+        # its own independent copy of the same enum-to-interval mapping
+        # already duplicated in services/test_register_service.py and
+        # services/test_request_schedule_service.py (the latter is the
+        # established shared one; services/workflow_dispatch_service.py
+        # already imports it directly).
+        from services.test_request_schedule_service import _advance_date
 
         now = _now()
         target_year = year or now.year
 
         jan_1 = datetime(target_year, 1, 1, tzinfo=timezone.utc)
         dec_31 = datetime(target_year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
-
-        # Frequency → approximate delta for projection
-        def _delta(freq: ScheduleFrequency):
-            mapping = {
-                ScheduleFrequency.daily:       timedelta(days=1),
-                ScheduleFrequency.weekly:      timedelta(weeks=1),
-                ScheduleFrequency.biweekly:    timedelta(weeks=2),
-                ScheduleFrequency.monthly:     relativedelta(months=1),
-                ScheduleFrequency.quarterly:   relativedelta(months=3),
-                ScheduleFrequency.semi_annual: relativedelta(months=6),
-                ScheduleFrequency.yearly:      relativedelta(years=1),
-                ScheduleFrequency.triennial:   relativedelta(years=3),
-            }
-            return mapping.get(freq, relativedelta(years=1))
 
         q = self.db.query(TestRequestSchedule).filter(
             TestRequestSchedule.is_active.is_(True),
@@ -1207,7 +1210,6 @@ class DashboardService:
 
         for sched in schedules:
             cat = sched.request_category.value if sched.request_category else "test"
-            delta = _delta(sched.frequency)
 
             # Start projecting from next_run_date (or start_date if in future)
             run_date = _make_tz(sched.next_run_date)
@@ -1221,7 +1223,7 @@ class DashboardService:
                 if run_date >= jan_1:
                     m = run_date.month
                     buckets[m][cat] = buckets[m].get(cat, 0) + 1
-                run_date = run_date + delta
+                run_date = _advance_date(run_date, sched.frequency)
                 itr += 1
 
         # Also include already-scheduled TestingRequest records (status='scheduled')
