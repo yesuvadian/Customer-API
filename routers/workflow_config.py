@@ -907,7 +907,7 @@ def upsert_stage_transitions(
     if active_count > 0:
         raise HTTPException(
             status_code=409,
-            detail="Cannot modify stage roles while active requests are in progress.",
+            detail="Cannot modify stage transitions while active requests are in progress.",
         )
 
     # ---------------------------------------------------------
@@ -957,14 +957,16 @@ def available_roles(
 ):
     # Scoped to the caller's own organization — this previously queried
     # OrgRole with no org filter at all, so the "Add Roles" picker offered
-    # every role from every organization in the system, not just the one
-    # whose workflow is being configured.
-    roles = (
-        db.query(OrgRole)
-        .filter_by(is_active=True, organization_id=current_user.organization_id)
-        .order_by(OrgRole.name)
-        .all()
-    )
+    # every role from every organization in the system (OrgRole names are
+    # only unique per-org, e.g. "AEE-R&D" exists once per org, so the
+    # unfiltered list also read as confusing duplicates). Falls back to
+    # unfiltered only for a true platform-level caller with no org of
+    # their own (organization_id is None) — filtering on that would just
+    # match zero rows instead of showing anything.
+    query = db.query(OrgRole).filter_by(is_active=True)
+    if current_user.organization_id is not None:
+        query = query.filter(OrgRole.organization_id == current_user.organization_id)
+    roles = query.order_by(OrgRole.name).all()
     return [RoleOption(id=r.id, name=r.name) for r in roles]
 
 
