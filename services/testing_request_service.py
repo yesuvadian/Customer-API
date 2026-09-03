@@ -372,12 +372,7 @@ class TestingRequestService:
                 elif statuses:
                     query = query.filter(_status_conditions(statuses))
         if is_closed is not None:
-            _LEGACY_CLOSED_STATUSES = [
-                TestingRequestStatus.approved,
-                TestingRequestStatus.completed,
-                TestingRequestStatus.closed,
-                TestingRequestStatus.rejected,
-            ]
+            from services.dashboard_service import CLOSED_STATUSES as _LEGACY_CLOSED_STATUSES
             wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
                 TrWfInstance.status.in_(["completed", "terminated"])
             ).scalar_subquery()
@@ -1219,12 +1214,7 @@ class TestingRequestService:
             # so open_count + closed_count could fall short of request_count
             # and undercount "Open" on the zone carousel relative to the
             # /breakdown tiles (which use this same complement logic).
-            _LEGACY_CLOSED_STATUSES = [
-                TestingRequestStatus.approved,
-                TestingRequestStatus.completed,
-                TestingRequestStatus.closed,
-                TestingRequestStatus.rejected,
-            ]
+            from services.dashboard_service import CLOSED_STATUSES as _LEGACY_CLOSED_STATUSES
             wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
                 TrWfInstance.status.in_(["completed", "terminated"])
             ).scalar_subquery()
@@ -1638,12 +1628,8 @@ class TestingRequestService:
         from collections import defaultdict
 
         today = datetime.now(timezone.utc)
-        _CLOSED_STATUSES = {
-            TestingRequestStatus.closed,
-            TestingRequestStatus.completed,
-            TestingRequestStatus.approved,
-            TestingRequestStatus.rejected,
-        }
+        from services.dashboard_service import CLOSED_STATUSES as _CLOSED_STATUSES_TUPLE
+        _CLOSED_STATUSES = set(_CLOSED_STATUSES_TUPLE)
 
         query = (
             self.db.query(TestingRequest)

@@ -1225,6 +1225,23 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             for key, v in sorted(by_month.items())
         ]
 
+        # AI calibration-interval optimisation advisories (§14.6) — org-wide,
+        # not re-scoped to dept_ids_for_scope: a cohort is (test type, make,
+        # model), which spans departments by nature, and narrowing it to one
+        # department would usually starve every cohort below
+        # CALIBRATION_INTERVAL_MIN_CYCLES for no real reason (the same relay
+        # model calibrated across several substations is still one real
+        # reliability signal).
+        from services.calibration_service import compute_interval_advisories
+        try:
+            interval_advisories = compute_interval_advisories(db, svc.org_id)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "calibration interval advisory computation failed", exc_info=True
+            )
+            interval_advisories = []
+
         return {
             # Lets the frontend tell "no calibration activity at all in this
             # scope" apart from "100% compliant" — both leave compliance_pct
@@ -1238,6 +1255,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "expiring_30d": cal_expiring_30,
             "expiring_60d": cal_expiring_60,
             "fail_rate_trend": fail_rate_trend,
+            "interval_advisories": interval_advisories,
         }
 
     # Pending-approval TestingRequests in the given scope, most-recently-
@@ -1586,6 +1604,22 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             **_scope_counts(svc.dept_ids),
         }
 
+    def _failure_cohort_summary():
+        # Per make/model reliability (§2) — org-wide like the calibration
+        # interval advisories above, and for the same reason: a cohort is
+        # (equipment type, manufacturer, model_number), which spans
+        # departments by nature, so scoping it to one branch would starve
+        # most cohorts below FAILURE_COHORT_MIN_UNITS for no real reason.
+        from services.equipment_service import EquipmentService
+        try:
+            return EquipmentService.compute_failure_cohort_stats(db, svc.org_id)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "failure cohort reliability computation failed", exc_info=True
+            )
+            return []
+
     rows = []
     for child in children:
         subtree_ids = get_dept_subtree_ids(db, child.id)
@@ -1636,6 +1670,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         "can_review": can_review,
         "weekly_trend": _weekly_trend(svc.dept_ids),
         "calibration": _calibration_summary(svc.dept_ids),
+        "failure_reliability": _failure_cohort_summary(),
         "rows": rows,
         # Full-subtree ticket lists behind the summary counts above — see
         # _ticket_lists' docstring for why a branch shape needs these too,
