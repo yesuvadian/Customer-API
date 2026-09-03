@@ -762,28 +762,24 @@ def replace_stage_roles(
     # ---------------------------------------------------------
     # Get parent workflow
     # ---------------------------------------------------------
-    workflow = (
-        db.query(RepairWorkflowDefinition)
+    workflow_exists = (
+        db.query(RepairWorkflowDefinition.id)
         .filter_by(id=stage.workflow_definition_id)
         .first()
+        is not None
     )
 
-    if not workflow:
+    if not workflow_exists:
         raise HTTPException(
             status_code=404,
             detail="Workflow not found.",
         )
 
-    # ---------------------------------------------------------
-    # Lock role modification when workflow is ACTIVE
-    # ---------------------------------------------------------
-    active_count = _get_active_repair_workflow_count(workflow, db)
-
-    if active_count > 0:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot modify transitions while active requests are in progress.",
-        )
+    # Role assignment is deliberately NOT locked by active-instance count
+    # (unlike add/delete/reorder stage and edit transitions, all still
+    # gated on _get_active_repair_workflow_count) — it only changes WHO is
+    # authorized to act on a stage, not the workflow's shape, so it can't
+    # corrupt an in-progress instance the way a structural edit could.
 
     # ---------------------------------------------------------
     # Replace existing roles
@@ -957,9 +953,18 @@ def upsert_stage_transitions(
 @router.get("/available-roles", response_model=List[RoleOption])
 def available_roles(
     db: Session = Depends(get_db),
-    _: User = Depends(require_super_admin),
+    current_user: User = Depends(require_super_admin),
 ):
-    roles = db.query(OrgRole).filter_by(is_active=True).order_by(OrgRole.name).all()
+    # Scoped to the caller's own organization — this previously queried
+    # OrgRole with no org filter at all, so the "Add Roles" picker offered
+    # every role from every organization in the system, not just the one
+    # whose workflow is being configured.
+    roles = (
+        db.query(OrgRole)
+        .filter_by(is_active=True, organization_id=current_user.organization_id)
+        .order_by(OrgRole.name)
+        .all()
+    )
     return [RoleOption(id=r.id, name=r.name) for r in roles]
 
 
