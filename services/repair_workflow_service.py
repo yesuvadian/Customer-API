@@ -21,7 +21,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, text as sa_text
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from models import (
@@ -117,15 +117,13 @@ class RepairWorkflowService:
             raise ValueError("You do not have approval permission for this stage.")
 
     def _check_is_org_admin(self, user_id: UUID) -> None:
-        role_ids = self._user_org_role_ids(user_id)
-        if not role_ids:
-            return
-        admin_role = (
-            self.db.query(OrgRole)
-            .filter(OrgRole.id.in_(role_ids), OrgRole.is_org_admin.is_(True))
-            .first()
-        )
-        if not admin_role:
+        # Delegates to the single shared org-admin check (auth_utils.
+        # has_org_admin_role) rather than its own query — the previous
+        # version here didn't filter OrgRole.is_active, and (separately)
+        # returned "allowed" for a user with zero org roles at all rather
+        # than rejecting; both are closed by delegating.
+        from auth_utils import has_org_admin_role
+        if not has_org_admin_role(user_id, self.db):
             raise ValueError("Only org-admin users can perform this configuration action.")
 
     def _check_can_assign_stage(self, user_id: UUID, stage_id: UUID) -> None:
@@ -1248,18 +1246,8 @@ class RepairWorkflowService:
         return result
 
     def _get_dept_subtree_ids(self, dept_id) -> list:
-        rows = self.db.execute(sa_text("""
-            WITH RECURSIVE dept_tree AS (
-                SELECT id FROM org_departments
-                WHERE id = :root_id AND is_active = true
-                UNION ALL
-                SELECT d.id FROM org_departments d
-                INNER JOIN dept_tree dt ON d.parent_department_id = dt.id
-                WHERE d.is_active = true
-            )
-            SELECT id FROM dept_tree
-        """), {"root_id": str(dept_id)}).fetchall()
-        return [r[0] for r in rows]
+        from utils.common_service import get_dept_subtree_ids
+        return get_dept_subtree_ids(self.db, dept_id)
 
     def _caller_dept_ids(self, user) -> list:
         dept_ids_raw = (

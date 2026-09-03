@@ -134,26 +134,18 @@ class EquipmentService:
     def _get_department_subtree_ids(
         cls, db: Session, department_id: UUID
     ) -> List[UUID]:
-        """Return all descendant department IDs including the root itself."""
-        sql = text("""
-            WITH RECURSIVE dept_tree AS (
-                SELECT id
-                FROM org_departments
-                WHERE id = :root_id
-                  AND is_active = true
+        """Return all descendant department IDs including the root itself.
 
-                UNION ALL
-
-                SELECT d.id
-                FROM org_departments d
-                INNER JOIN dept_tree dt ON d.parent_department_id = dt.id
-                WHERE d.is_active = true
-            )
-            SELECT id FROM dept_tree
-        """)
-        rows = db.execute(sql, {"root_id": str(department_id)}).fetchall()
+        Delegates to the shared utils.common_service.get_dept_subtree_ids
+        (previously the same recursive CTE copy-pasted here independently)
+        and keeps this method's own UUID-object normalization on top, since
+        the 4 call sites in routers/equipment.py rely on real UUID objects
+        rather than whatever raw type the driver happens to return.
+        """
+        from utils.common_service import get_dept_subtree_ids
+        rows = get_dept_subtree_ids(db, department_id)
         return [
-            r[0] if isinstance(r[0], UUID) else UUID(str(r[0]))
+            r if isinstance(r, UUID) else UUID(str(r))
             for r in rows
         ]
 

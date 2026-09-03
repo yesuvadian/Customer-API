@@ -9,7 +9,7 @@ from uuid import UUID
 from typing import Optional
 
 from database import get_db
-from auth_utils import get_current_user, check_active_billing
+from auth_utils import get_current_user, check_active_billing, has_org_admin_role
 from models import User, OrgUserRole, OrgRole, Organization
 
 
@@ -43,17 +43,7 @@ async def require_org_admin(
     Must first verify org membership via require_org_member.
     """
     # Check if user has any org admin role
-    has_admin_role = db.query(OrgUserRole)\
-        .join(OrgRole)\
-        .filter(
-            OrgUserRole.user_id == current_user.id,
-            OrgRole.is_org_admin == True,
-            OrgUserRole.is_active == True,
-            OrgRole.is_active == True
-        )\
-        .first()
-
-    if not has_admin_role:
+    if not has_org_admin_role(current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Organization admin privileges required"
@@ -73,17 +63,7 @@ async def require_dept_admin(
     Also allows org admins to manage any department.
     """
     # Check if user is org admin (can manage any department)
-    is_org_admin = db.query(OrgUserRole)\
-        .join(OrgRole)\
-        .filter(
-            OrgUserRole.user_id == current_user.id,
-            OrgRole.is_org_admin == True,
-            OrgUserRole.is_active == True,
-            OrgRole.is_active == True
-        )\
-        .first()
-
-    if is_org_admin:
+    if has_org_admin_role(current_user, db):
         return current_user
 
     # Check if user has dept admin role for this specific department
@@ -206,17 +186,7 @@ def require_module_permission(module_id: int, permission_type: str):
         db: Session = Depends(get_db)
     ) -> User:
         # First check if user is org admin (has all permissions)
-        is_org_admin = db.query(OrgUserRole)\
-            .join(OrgRole)\
-            .filter(
-                OrgUserRole.user_id == current_user.id,
-                OrgRole.is_org_admin == True,
-                OrgUserRole.is_active == True,
-                OrgRole.is_active == True
-            )\
-            .first()
-
-        if is_org_admin:
+        if has_org_admin_role(current_user, db):
             return current_user
 
         # Check specific permission

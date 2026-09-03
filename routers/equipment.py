@@ -66,20 +66,9 @@ def _get_equipment_module_id(db: Session) -> int:
 
 def _require_permission(db: Session, user: User, action: str) -> None:
     """Check that *user* has *action* on the Equipment module."""
-    from models import OrgUserRole, OrgRole
+    from auth_utils import has_org_admin_role
 
-    is_org_admin = (
-        db.query(OrgUserRole)
-        .join(OrgRole)
-        .filter(
-            OrgUserRole.user_id == user.id,
-            OrgRole.is_org_admin == True,
-            OrgUserRole.is_active == True,
-            OrgRole.is_active == True,
-        )
-        .first()
-    )
-    if is_org_admin:
+    if has_org_admin_role(user, db):
         return
 
     module_id = _get_equipment_module_id(db)
