@@ -851,7 +851,7 @@ class ReportingService:
                         # test-over-test, independent of whether any single
                         # concentration has crossed an absolute threshold
                         # yet — the spec's own framing for this flag.
-                        if prior_rate is not None and rate > 0 and rate > prior_rate * 1.25:
+                        if prior_rate is not None and prior_rate > 0 and rate > prior_rate * 1.25:
                             accelerating_gases.append(key)
 
                 out_rows.append({
