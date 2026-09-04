@@ -465,7 +465,7 @@ def get_overview(
     # ── Health distribution: condition × life-left bucket ────────────────────
     BUCKETS = ["0–5 yrs", "5–10 yrs", "10–15 yrs", "15–20 yrs", "20–25 yrs", "25+ yrs"]
     CONDITIONS = ["critical", "poor", "fair", "good", "excellent"]
-    dist: dict[str, dict] = {b: {c: 0 for c in CONDITIONS} | {"total": 0} for b in BUCKETS}
+    dist: dict[str, dict] = {b: {c: 0 for c in CONDITIONS} | {"unknown": 0, "total": 0} for b in BUCKETS}
 
     eq_by_id = {e.id: e for e in eq_list}
     for ea in ea_list:
@@ -476,10 +476,16 @@ def get_overview(
         cond = _condition_from_score_and_risk(
             _eff_health(ea.equipment_id, ea), _eff_risk(ea.equipment_id, ea), db
         )
+        # An admin-renamed/custom Condition Band (anything other than the
+        # 5 built-in words) doesn't match CONDITIONS - it used to be
+        # silently dropped from every count including "total". Bucket it
+        # as "unknown" instead so it's still counted and visible, rather
+        # than vanishing (and, on the frontend, being visually mistaken
+        # for "Critical" wherever a chart inferred that bucket by
+        # subtracting the 4 known buckets from a separately-fetched total).
         key = cond.lower()
-        if key in CONDITIONS:
-            dist[bucket][key] += 1
-            dist[bucket]["total"] += 1
+        dist[bucket][key if key in CONDITIONS else "unknown"] += 1
+        dist[bucket]["total"] += 1
 
     health_distribution = [{"bucket": b, **dist[b]} for b in BUCKETS]
 
@@ -1048,7 +1054,7 @@ def get_grouped(
     from collections import defaultdict
     group_scores:    dict[str, list[float]] = defaultdict(list)
     group_conditions:dict[str, dict]        = defaultdict(lambda: {
-        "critical": 0, "poor": 0, "fair": 0, "good": 0, "excellent": 0
+        "critical": 0, "poor": 0, "fair": 0, "good": 0, "excellent": 0, "unknown": 0
     })
     group_life:  dict[str, list[float]] = defaultdict(list)
     group_age:   dict[str, list[float]] = defaultdict(list)
@@ -1065,8 +1071,14 @@ def get_grouped(
         if score is not None:
             group_scores[label].append(score)
             cond = _condition_from_score(score, db).lower()
-            if cond in group_conditions[label]:
-                group_conditions[label][cond] += 1
+            # Same "unknown" handling as /overview's health_distribution -
+            # an admin-renamed Condition Band must not silently disappear
+            # (previously dropped here, then implicitly rendered as
+            # Critical/red on the frontend, which inferred that segment as
+            # "count minus the 4 known buckets" instead of reading an
+            # actual field).
+            key = cond if cond in ("critical", "poor", "fair", "good", "excellent") else "unknown"
+            group_conditions[label][key] += 1
 
         ll  = _life_left(eq.commissioned_date, type_name)
         age = _age_years(eq.commissioned_date)
@@ -1107,6 +1119,7 @@ def get_grouped(
             "fair":          conds.get("fair",     0),
             "good":          conds.get("good",     0),
             "excellent":     conds.get("excellent",0),
+            "unknown":       conds.get("unknown",  0),
             "test_count":    group_tests.get(label, 0),
             "overdue":       ar.get("overdue",  0),
             "near_end":      ar.get("near_end", 0),
