@@ -811,7 +811,10 @@ class ReportingService:
                 gas = row.get("gas")
                 if gas in KEY_GASES:
                     val = row.get("value_bottom")
-                    out[KEY_GASES[gas]] = float(val) if val is not None else None
+                    try:
+                        out[KEY_GASES[gas]] = float(val) if val not in (None, "") else None
+                    except (TypeError, ValueError):
+                        out[KEY_GASES[gas]] = None
             return out
 
         # Sort per-equipment so consecutive readings can be diffed for a
