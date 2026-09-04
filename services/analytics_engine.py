@@ -103,14 +103,19 @@ def _load_risk_bands(db: Optional[Session]) -> list[tuple[float, str]]:
     if db is None:
         return _DEFAULT_RISK_BANDS
     from models import EquipmentHealthBandThreshold
+    # Table not seeded at all vs admin having deliberately disabled every
+    # band are different states: the former should fall back to defaults
+    # (environment not configured yet), the latter must not - an admin who
+    # turns every band off wants nothing classified by band, not to
+    # silently get the hardcoded defaults back.
+    if db.query(EquipmentHealthBandThreshold).first() is None:
+        return _DEFAULT_RISK_BANDS
     rows = (
         db.query(EquipmentHealthBandThreshold)
         .filter(EquipmentHealthBandThreshold.is_active.is_(True))
         .order_by(EquipmentHealthBandThreshold.threshold.desc())
         .all()
     )
-    if not rows:
-        return _DEFAULT_RISK_BANDS
     return [(float(r.threshold), r.label) for r in rows]
 
 
@@ -185,16 +190,26 @@ def _risk_from_score(
     critical_findings: list | None = None,
     db: Optional[Session] = None,
 ) -> str:
-    # If any finding has CRITICAL status, the equipment risk is at least Critical,
-    # regardless of its composite health score.
-    if critical_findings and any(
-        isinstance(f, dict) and f.get("status") == "CRITICAL"
-        for f in critical_findings
+    bands = _load_risk_bands(db)
+    band_labels = {label for _, label in bands}
+    # If any finding has CRITICAL status, the equipment risk is at least
+    # Critical, regardless of its composite health score - but only while
+    # a "Critical" band is actually active. An admin who disables the
+    # Critical band expects it to stop appearing anywhere, including here;
+    # without this guard a single CRITICAL-status finding force-labels the
+    # equipment "Critical" no matter what the (now Critical-less) bands say,
+    # which is why disabling that band appeared to do nothing.
+    if (
+        critical_findings
+        and "Critical" in band_labels
+        and any(
+            isinstance(f, dict) and f.get("status") == "CRITICAL"
+            for f in critical_findings
+        )
     ):
         return "Critical"
     if score is None:
         return "Unknown"
-    bands = _load_risk_bands(db)
     for threshold, label in bands:
         if score >= threshold:
             return label
@@ -204,7 +219,7 @@ def _risk_from_score(
     # it, so deactivating "Critical" actually stops new equipment from
     # being labeled Critical instead of silently keeping the old label via
     # a hardcoded fallback.
-    return bands[-1][1] if bands else "Critical"
+    return bands[-1][1] if bands else "Unknown"
 
 
 def _condition_from_score(score: Optional[float]) -> str:
