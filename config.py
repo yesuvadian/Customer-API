@@ -275,3 +275,13 @@ FAILURE_COHORT_TREND_YEARS = int(os.getenv("FAILURE_COHORT_TREND_YEARS", 10))
 # Trend lines are capped to the worst N cohorts (by failure rate) so the
 # chart stays readable instead of an 8-color tangle.
 FAILURE_COHORT_TREND_MAX_SERIES = int(os.getenv("FAILURE_COHORT_TREND_MAX_SERIES", 5))
+# KPTCL spec §2: "maintain a Design Problem Register to track recurring
+# failures attributed to a particular make, model, or design batch."
+# Deliberately just a dashboard flag, not an automatic register entry —
+# spec's own wording is "flagged by the AEE or EE" (a human decision).
+# A cohort at or above this failure rate is tagged "DESIGN PROBLEM
+# CANDIDATE" on the Failure Reliability panel; same default as the panel's
+# own "red" severity cutoff (overview_dashboard.dart's _failureRateColor),
+# so the tag lands on exactly the rows already shown as red — no new
+# threshold concept, just naming the existing one.
+DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE = float(os.getenv("DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE", 1.0))

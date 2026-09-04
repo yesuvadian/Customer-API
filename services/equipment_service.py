@@ -983,14 +983,22 @@ class EquipmentService:
             ]
             del entry["unit_ids"]
 
-        results = [
-            {
+        design_problem_rate = _config.DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE
+        results = []
+        for entry in cohorts.values():
+            if entry["unit_count"] < min_units:
+                continue
+            rate = round(entry["failure_count"] / entry["unit_count"], 3)
+            results.append({
                 **entry,
-                "failure_rate_per_unit": round(entry["failure_count"] / entry["unit_count"], 3),
-            }
-            for entry in cohorts.values()
-            if entry["unit_count"] >= min_units
-        ]
+                "failure_rate_per_unit": rate,
+                # KPTCL spec §2's Design Problem Register — a dashboard flag,
+                # not an auto-created register entry (spec says flagging is
+                # a human/AEE-EE decision). Same cutoff as the panel's own
+                # "red" severity color, so this tags exactly the rows
+                # already shown as red.
+                "is_design_problem_candidate": rate >= design_problem_rate,
+            })
         results.sort(key=lambda e: e["failure_rate_per_unit"], reverse=True)
         results = results[:limit]
 
