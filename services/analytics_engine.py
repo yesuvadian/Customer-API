@@ -127,13 +127,16 @@ def _load_condition_labels(db: Optional[Session]) -> dict[str, str]:
     if db is None:
         return _DEFAULT_CONDITION
     from models import TestStatusCondition
+    # See _load_risk_bands: table-never-seeded and admin-disabled-everything
+    # must not be conflated, or disabling every row silently resurrects the
+    # hardcoded defaults instead of leaving the map empty.
+    if db.query(TestStatusCondition).first() is None:
+        return _DEFAULT_CONDITION
     rows = (
         db.query(TestStatusCondition)
         .filter(TestStatusCondition.is_active.is_(True))
         .all()
     )
-    if not rows:
-        return _DEFAULT_CONDITION
     return {r.status: r.condition_label for r in rows}
 
 
@@ -145,13 +148,13 @@ def _load_condition_scores(db: Optional[Session]) -> dict[str, float]:
     if db is None:
         return _DEFAULT_SCORE
     from models import ParameterConditionScore
+    if db.query(ParameterConditionScore).first() is None:
+        return _DEFAULT_SCORE
     rows = (
         db.query(ParameterConditionScore)
         .filter(ParameterConditionScore.is_active.is_(True))
         .all()
     )
-    if not rows:
-        return _DEFAULT_SCORE
     return {r.condition: float(r.score) for r in rows}
 
 
@@ -175,13 +178,13 @@ def _load_band_rank_words(db: Optional[Session]) -> dict[str, int]:
     if db is None:
         return _DEFAULT_BAND_RANK_WORDS
     from models import ConditionBandRankWord
+    if db.query(ConditionBandRankWord).first() is None:
+        return _DEFAULT_BAND_RANK_WORDS
     rows = (
         db.query(ConditionBandRankWord)
         .filter(ConditionBandRankWord.is_active.is_(True))
         .all()
     )
-    if not rows:
-        return _DEFAULT_BAND_RANK_WORDS
     return {r.phrase.lower(): r.rank for r in rows}
 
 

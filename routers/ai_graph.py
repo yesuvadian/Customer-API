@@ -278,14 +278,18 @@ def _load_condition_bands(db: Session | None) -> list[tuple[float, str]]:
     if db is None:
         return _DEFAULT_CONDITION_BANDS
     from models import EquipmentConditionBandThreshold
+    # Table-never-seeded vs admin-disabled-everything must not be conflated
+    # (same reasoning as analytics_engine.py's _load_risk_bands) - otherwise
+    # disabling every condition band silently resurrects the hardcoded
+    # defaults instead of leaving the band list empty.
+    if db.query(EquipmentConditionBandThreshold).first() is None:
+        return _DEFAULT_CONDITION_BANDS
     rows = (
         db.query(EquipmentConditionBandThreshold)
         .filter(EquipmentConditionBandThreshold.is_active.is_(True))
         .order_by(EquipmentConditionBandThreshold.threshold.desc())
         .all()
     )
-    if not rows:
-        return _DEFAULT_CONDITION_BANDS
     return [(float(r.threshold), r.label) for r in rows]
 
 
@@ -299,8 +303,11 @@ def _condition_from_score(score: float | None, db: Session | None = None) -> str
     # Score cleared none of the active bands - typically because the
     # lowest-threshold band (normally "Critical") was deactivated. The
     # lowest-threshold *active* band is the catch-all for everything below
-    # it (same reasoning as analytics_engine.py's _risk_from_score).
-    return bands[-1][1] if bands else "Critical"
+    # it (same reasoning as analytics_engine.py's _risk_from_score). No
+    # bands active at all means nothing can be classified - "Unknown", not
+    # a hardcoded "Critical" that would misrepresent an admin's deliberate
+    # choice to disable every band.
+    return bands[-1][1] if bands else "Unknown"
 
 
 def _condition_from_score_and_risk(
