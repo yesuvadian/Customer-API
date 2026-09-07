@@ -841,7 +841,8 @@ class EquipmentService:
         }
 
     @classmethod
-    def compute_failure_cohort_stats(cls, db: Session, organization_id: UUID) -> list:
+    def compute_failure_cohort_stats(cls, db: Session, organization_id: UUID,
+                                      department_ids: Optional[list] = None) -> list:
         """
         Fleet-wide failure count / failure rate / MTBF per make/model cohort
         (KPTCL spec §2: "... per make/model cohort").
@@ -865,6 +866,14 @@ class EquipmentService:
         artificially short gaps between unrelated units' failures. A cohort
         with too few units (FAILURE_COHORT_MIN_UNITS) is skipped entirely —
         a 1-2 unit "cohort" isn't a real reliability signal yet.
+
+        department_ids optionally narrows the equipment population to one
+        department + its descendants (a leaf/branch dashboard scope) instead
+        of the whole organization — still subject to the same
+        FAILURE_COHORT_MIN_UNITS gate, so a department too small to form a
+        real cohort simply returns fewer (or no) rows rather than a
+        misleadingly thin one. Leave it None for the org-wide view (the
+        default every call site used before this parameter existed).
         """
         import config as _config
         from models import TestingRequest, TestResult, CategoryMaster
@@ -872,21 +881,24 @@ class EquipmentService:
         min_units = _config.FAILURE_COHORT_MIN_UNITS
         limit     = _config.FAILURE_COHORT_DASHBOARD_LIMIT
 
-        equip_rows = (
-            db.query(Equipment.id, Equipment.manufacturer, Equipment.model_number,
+        equip_q = (
+            db.query(Equipment.id, Equipment.ueic, Equipment.manufacturer, Equipment.model_number,
                       CategoryMaster.name.label("equipment_type"))
             .outerjoin(CategoryMaster, CategoryMaster.id == Equipment.equipment_type_id)
             .filter(Equipment.organization_id == organization_id,
                     Equipment.status != EquipmentStatus.retired,
                     Equipment.manufacturer.isnot(None))
-            .all()
         )
+        if department_ids:
+            equip_q = equip_q.filter(Equipment.department_id.in_(department_ids))
+        equip_rows = equip_q.all()
         if not equip_rows:
             return []
 
         cohorts: dict = {}
         equip_to_cohort: dict = {}
-        for eq_id, manufacturer, model_number, equipment_type in equip_rows:
+        unit_ueic_by_id: dict = {}
+        for eq_id, ueic, manufacturer, model_number, equipment_type in equip_rows:
             # None model_number groups every such unit of this type/make
             # into one coarser cohort (dict keys with a None component
             # still compare/hash consistently) rather than being excluded.
@@ -900,6 +912,7 @@ class EquipmentService:
             })
             entry["unit_ids"].add(eq_id)
             equip_to_cohort[eq_id] = key
+            unit_ueic_by_id[eq_id] = ueic
 
         eq_ids = list(equip_to_cohort.keys())
         tr_rows = (
@@ -954,10 +967,19 @@ class EquipmentService:
             critical_only_count = 0
             unit_mtbfs = []
             yearly_counts = {y: 0 for y in trend_year_range}
+            # Per-unit breakdown so a make/model cohort's aggregate rate
+            # can be traced back to which actual equipment it's built from —
+            # the cohort-only view (equipment_type/manufacturer/model_number)
+            # answers "how reliable is this make/model fleet-wide" but not
+            # "which specific units are the ones failing," which is what an
+            # officer actually needs to act on (open that unit's history, not
+            # the whole cohort's).
+            entry["equipment"] = []
             for unit_id in entry["unit_ids"]:
                 events = sorted(events_by_unit.get(unit_id, []), key=lambda e: e[0])
                 dates = [e[0] for e in events]
-                failure_count += len(events)
+                unit_failure_count = len(events)
+                failure_count += unit_failure_count
                 unit_mtbf = cls._mtbf_days_from_dates(dates)
                 if unit_mtbf is not None:
                     unit_mtbfs.append(unit_mtbf)
@@ -968,6 +990,15 @@ class EquipmentService:
                         critical_only_count += 1
                     if event_date.year in yearly_counts:
                         yearly_counts[event_date.year] += 1
+                entry["equipment"].append({
+                    "equipment_id": str(unit_id),
+                    "ueic": unit_ueic_by_id.get(unit_id),
+                    "failure_count": unit_failure_count,
+                    "mtbf_days": round(unit_mtbf, 1) if unit_mtbf is not None else None,
+                })
+            # Worst unit first within the cohort, same convention as the
+            # cohort-level worst-first sort below.
+            entry["equipment"].sort(key=lambda u: -u["failure_count"])
             entry["failure_count"] = failure_count
             # fr_count + critical_only_count == failure_count always — every
             # event is either a manually-filed Failure Registry entry (fr_count,
