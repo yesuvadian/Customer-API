@@ -219,6 +219,12 @@ ANALYTICS_ANOMALY_Z = float(os.getenv("ANALYTICS_ANOMALY_Z", 3.0))
 # ParameterAnalyzer.MIN_TREND_R_SQUARED's docstring for how this was
 # found (Acidity readings with r²=0.08 were still labeled "Increasing").
 ANALYTICS_MIN_TREND_R_SQUARED = float(os.getenv("ANALYTICS_MIN_TREND_R_SQUARED", 0.5))
+# Trend regression only fits the most recent N readings (current reading
+# included), not full history — an old bad/outlier reading years back would
+# otherwise permanently drag down r² for every future test on that
+# parameter, with no way to recover except deleting the offending row.
+# A rolling window means new clean readings naturally age old ones out.
+ANALYTICS_TREND_WINDOW = int(os.getenv("ANALYTICS_TREND_WINDOW", 8))
 # Deterioration Watch List (routers/analytics.py): minimum ParameterAnalytics
 # history_count before a parameter with no ParameterThresholdBand config at
 # all is trusted enough to surface there (a 2-3 point trend fits ~perfectly

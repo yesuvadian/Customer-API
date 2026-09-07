@@ -297,6 +297,8 @@ class ParameterAnalyzer:
     # at once rather than needing a separate patch per test type. Tunable
     # via config.py/ANALYTICS_MIN_TREND_R_SQUARED without a code deploy.
     MIN_TREND_R_SQUARED = config.ANALYTICS_MIN_TREND_R_SQUARED
+    # Trend regression window — see config.py/ANALYTICS_TREND_WINDOW docstring.
+    TREND_WINDOW = config.ANALYTICS_TREND_WINDOW
 
     @staticmethod
     def analyse(
@@ -336,6 +338,7 @@ class ParameterAnalyzer:
 
         values = [v for _, v in history]
         dates  = [d for d, _ in history]
+        has_current = current_value is not None and current_date is not None
 
         # Fold the current reading into the series - previously the
         # regression/anomaly-check/breach-forecast below used `history`
@@ -345,7 +348,7 @@ class ParameterAnalyzer:
         # test's own analytics are shown. A parameter that just crashed from
         # a stable trend, for example, would report the old upward trend and
         # no anomaly until the *next* test recomputes it.
-        if current_value is not None and current_date is not None:
+        if has_current:
             values = values + [current_value]
             dates  = dates + [current_date]
 
@@ -357,6 +360,20 @@ class ParameterAnalyzer:
 
         if len(history) < ParameterAnalyzer.MIN_TREND_POINTS:
             return result
+
+        # Trend fit only looks at the most recent TREND_WINDOW readings
+        # (current reading included) — an old bad/outlier value would
+        # otherwise sit in the series forever, permanently dragging down r²
+        # for every future test on this parameter with no way to recover
+        # short of deleting the offending row. Windowing means new clean
+        # readings naturally push old ones out of the fit. history_count in
+        # the result above is still the TRUE lifetime count (unwindowed) —
+        # only the regression inputs below are limited.
+        window = ParameterAnalyzer.TREND_WINDOW
+        if len(values) > window:
+            values = values[-window:]
+            dates  = dates[-window:]
+        history = list(zip(dates[:-1], values[:-1])) if has_current else list(zip(dates, values))
 
         # Exactly one prior reading (now two points total, with the current
         # reading folded in above) can't feed a real OLS goodness-of-fit -

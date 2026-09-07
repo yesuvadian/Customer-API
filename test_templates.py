@@ -6954,6 +6954,7 @@ TEST_TEMPLATES = {
                         "analytics_skip": True,
                         "label": "SFRA Measurements (Amplitude vs Frequency)",
                         "type": "table",
+                        "required": True,
                         "allow_add_rows": True,
                         "allow_delete_rows": True,
                         "columns": [
