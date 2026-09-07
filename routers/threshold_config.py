@@ -41,16 +41,6 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-# status-conditions and condition-scores are fixed vocabularies (see
-# TestStatusCondition/ParameterConditionScore's model docstrings): real test
-# evaluation only ever produces NORMAL/ALERT/CRITICAL and Good/Fair/Poor, so
-# a row keyed on anything else is never looked up and has no effect on
-# scoring. The frontend removed its "Add"/rename UI for these two tables,
-# but that's only a UX guard - enforce it here too so a direct API call
-# can't recreate the same dead-row problem.
-_VALID_STATUSES = {"NORMAL", "ALERT", "CRITICAL"}
-_VALID_CONDITIONS = {"Good", "Fair", "Poor"}
-
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -250,11 +240,6 @@ def create_condition_score(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if payload.condition not in _VALID_CONDITIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"condition must be one of {sorted(_VALID_CONDITIONS)}",
-        )
     if db.query(ParameterConditionScore).filter(
         ParameterConditionScore.condition == payload.condition
     ).first():
@@ -288,11 +273,6 @@ def update_condition_score(
 
     data = payload.model_dump(exclude_unset=True)
     if "condition" in data and data["condition"] != row.condition:
-        if data["condition"] not in _VALID_CONDITIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"condition must be one of {sorted(_VALID_CONDITIONS)}",
-            )
         if db.query(ParameterConditionScore).filter(
             ParameterConditionScore.condition == data["condition"],
             ParameterConditionScore.id != score_id,
@@ -335,11 +315,6 @@ def create_status_condition(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if payload.status not in _VALID_STATUSES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"status must be one of {sorted(_VALID_STATUSES)}",
-        )
     if db.query(TestStatusCondition).filter(
         TestStatusCondition.status == payload.status
     ).first():
@@ -373,11 +348,6 @@ def update_status_condition(
 
     data = payload.model_dump(exclude_unset=True)
     if "status" in data and data["status"] != row.status:
-        if data["status"] not in _VALID_STATUSES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"status must be one of {sorted(_VALID_STATUSES)}",
-            )
         if db.query(TestStatusCondition).filter(
             TestStatusCondition.status == data["status"],
             TestStatusCondition.id != condition_id,
