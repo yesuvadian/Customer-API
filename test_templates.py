@@ -9236,6 +9236,91 @@ TEST_TEMPLATES = {
         ],
     },
 
+    # ════════════════════════════════════════════════════════════════════════════
+    # PARTIAL DISCHARGE MEASUREMENT — another gap flagged directly by the
+    # user. The proposal's CM matrix lists this identically for Power
+    # Transformer, Current Transformer, Potential Transformer/CVT, and
+    # Cables/GIS Substation. The procedure (IEC 60270 conventional / UHF /
+    # acoustic) is the same regardless of which equipment it's run on, and
+    # `equipment_type` on a template is descriptive only - not enforced at
+    # runtime (selection is entirely driven by TEST_TYPE_TO_TEMPLATE +
+    # CategoryDetails, same mechanism "Routine Preventive Maintenance"
+    # already reuses across many equipment types) - so this is ONE shared
+    # template, registered under all four equipment types that are actually
+    # in the platform's registry (Cables/GIS Substation aren't yet).
+    # Disabled by default, same as every other new template this round.
+    # ════════════════════════════════════════════════════════════════════════════
+
+    "partial_discharge_test": {
+        "key": "partial_discharge_test",
+        "name": "Partial Discharge Measurement",
+        "equipment_type": "Power Transformer",
+        "description": "Partial discharge measurement (IEC 60270 conventional / UHF / acoustic) — apparent charge, inception/extinction voltage, and PD pattern classification.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Test Setup",
+                "fields": [
+                    {"key": "test_method",             "label": "Test Method", "type": "dropdown", "required": True,
+                     "options": ["IEC 60270 — Conventional", "UHF", "Acoustic Emission", "Ultrasonic"]},
+                    {"key": "background_noise_pc",     "label": "Background Noise Level", "type": "number", "unit": "pC"},
+                    {"key": "pd_inception_voltage_kv", "label": "PD Inception Voltage (PDIV)", "type": "number", "unit": "kV"},
+                    {"key": "pd_extinction_voltage_kv","label": "PD Extinction Voltage (PDEV)", "type": "number", "unit": "kV"},
+                    {"key": "test_equipment",          "label": "Test Equipment Used", "type": "text"},
+                ],
+            },
+            {
+                "title": "Apparent Charge Readings",
+                "fields": [
+                    {
+                        "key": "pd_readings",
+                        "label": "Apparent Charge by Phase",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "phase",              "label": "Phase",             "type": "dropdown", "options": ["R", "Y", "B"]},
+                            {"key": "applied_voltage_kv", "label": "Applied Voltage",   "type": "number", "unit": "kV"},
+                            {"key": "apparent_charge_pc", "label": "Apparent Charge",   "type": "number", "unit": "pC"},
+                            {"key": "threshold_pc",       "label": "Threshold",         "type": "number", "unit": "pC"},
+                            {"key": "row_result",         "label": "Result",            "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
+                        ],
+                        "default_rows": [{"phase": "R"}, {"phase": "Y"}, {"phase": "B"}],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "pd_pattern", "label": "PD Pattern Classification", "type": "dropdown",
+                        "options": ["No Significant PD", "Corona", "Surface Discharge",
+                                    "Internal Void Discharge", "Floating Potential", "Inconclusive"],
+                    },
+                    {"key": "max_apparent_charge_pc", "label": "Maximum Apparent Charge Observed", "type": "number", "unit": "pC"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
 }
 
 
@@ -9419,6 +9504,9 @@ TEST_TYPE_TO_TEMPLATE = {
 
     # ── Transformer Turns Ratio (disabled) ──
     "Transformer Turns Ratio (TTR)": "transformer_ttr_test",
+
+    # ── Partial Discharge Measurement (disabled, shared across equipment types) ──
+    "Partial Discharge Measurement": "partial_discharge_test",
 
 }
 
