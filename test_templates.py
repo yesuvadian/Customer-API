@@ -2980,8 +2980,8 @@ TEST_TEMPLATES = {
                     "columns": [
                         {"key": "gas",         "label": "Gas",            "type": "readonly"},
                         {"key": "formula",     "label": "Formula",        "type": "readonly"},
-                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number"},
-                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number"},
+                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number", "required": True},
+                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number", "required": True},
                         {
                             "key": "condition",
                             "label": "Status",
