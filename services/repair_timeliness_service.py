@@ -21,7 +21,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from models import (
-    OrgRole,
     OrgUserRole,
     RepairStageAuditLog,
     RepairStageDefinition,
@@ -52,14 +51,14 @@ class RepairTimelinessService:
         return [r[0] for r in rows]
 
     def _is_org_admin(self, user_id: UUID) -> bool:
-        role_ids = self._user_org_role_ids(user_id)
-        if not role_ids:
-            return False
-        return bool(
-            self.db.query(OrgRole)
-            .filter(OrgRole.id.in_(role_ids), OrgRole.is_org_admin.is_(True))
-            .first()
-        )
+        # Delegates to the single shared org-admin check (auth_utils.
+        # has_org_admin_role). The previous version here queried
+        # OrgUserRole/OrgRole directly without filtering either row's
+        # is_active flag — a deactivated org-admin role assignment would
+        # still pass this check, which gates the 403 on
+        # record_delay_attribution below.
+        from auth_utils import has_org_admin_role
+        return has_org_admin_role(user_id, self.db)
 
     def _can_approve_stage(self, user_id: UUID, stage_id: UUID) -> bool:
         role_ids = self._user_org_role_ids(user_id)

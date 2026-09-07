@@ -24,26 +24,9 @@ from schemas import (
 from auth_utils import get_current_user
 from services.testing_request_workflow_service import TestingRequestWorkflowService
 from services.testing_request_pdf_service import TestingRequestPDFService
-from sqlalchemy import text as sa_text
+from utils.common_service import get_dept_subtree_ids as _get_dept_subtree_ids
 
 router = APIRouter(prefix="/testing-requests/approvals", tags=["Testing Request Approvals"])
-
-
-def _get_dept_subtree_ids(db: Session, dept_id) -> list:
-    """Return dept_id + all active descendant department IDs (recursive CTE)."""
-    sql = sa_text("""
-        WITH RECURSIVE dept_tree AS (
-            SELECT id FROM org_departments
-            WHERE id = :root_id AND is_active = true
-            UNION ALL
-            SELECT d.id FROM org_departments d
-            INNER JOIN dept_tree dt ON d.parent_department_id = dt.id
-            WHERE d.is_active = true
-        )
-        SELECT id FROM dept_tree
-    """)
-    rows = db.execute(sql, {"root_id": str(dept_id)}).fetchall()
-    return [r[0] for r in rows]
 
 
 def _caller_dept_ids(db: Session, user) -> list:

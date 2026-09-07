@@ -7,17 +7,23 @@ already use: RepairWorkflowDefinition + RepairStageDefinition + RepairStageRole 
 RepairStageTransition + RepairStageTemplate (-> OrgTestTemplate). Nothing new in
 the workflow engine itself — only new stage/template/role/transition DATA.
 
-Call order:
+Call order (all four run automatically, in order, via `python seed_dpr_workflow.py`
+— see __main__ below; call the functions directly instead if you need a single
+org re-seeded without touching the rest):
+  0. seed_dpr_module(db)                    — org-agnostic; the "DPR Projects"
+     sidebar Module row itself. Duplicated from (and kept in sync with) the
+     same entry in seed.py's modules_data — see that function's docstring for
+     why it isn't imported instead. Safe even if seed.py already created it.
   1. seed_dpr_stages(db)                    — org-agnostic; run once during full seed
   2. seed_dpr_role_mappings(db, org_id)     — org-specific; run per organization
      (RepairStageRole — stage-level edit/approve gates on the workflow itself)
   3. seed_dpr_role_permissions(db, org_id)  — org-specific; run per organization
      (OrgRolePermission — sidebar visibility + module-level CRUD grant for the
-     "DPR Projects" Module row seeded by seed.py's seed_modules(). This is a
-     DIFFERENT table from step 2's RepairStageRole: OrgRolePermission controls
-     whether a role sees "DPR Projects" in the sidebar at all and what it can
-     do at the module level; RepairStageRole controls which *stage* within an
-     already-open DPR project a role can act on. Both are needed.)
+     "DPR Projects" Module row from step 0. This is a DIFFERENT table from
+     step 2's RepairStageRole: OrgRolePermission controls whether a role sees
+     "DPR Projects" in the sidebar at all and what it can do at the module
+     level; RepairStageRole controls which *stage* within an already-open DPR
+     project a role can act on. Both are needed.)
 
 Lifecycle (§11):
   INITIATION           → (approve) → COST_ESTIMATION
@@ -104,12 +110,16 @@ TRANSITIONS = [
 # Unknown role names are skipped with a [WARN], same as
 # seed_precommission_role_mappings() — safe to run speculatively.
 ROLE_MAP = {
-    # stage_code: {"edit": [...roles that can fill the form...], "approve": [...roles that can advance/reject...]}
-    "DPR_INITIATION":         {"edit": ["AEE_MAINTENANCE"], "approve": ["EE_TLSS"]},
-    "DPR_COST_ESTIMATION":    {"edit": ["AEE_MAINTENANCE"], "approve": ["EE_TLSS"]},
-    "DPR_TECHNICAL_REVIEW":   {"edit": ["EE_TLSS"],          "approve": ["CEE_TRANSMISSION_ZONE"]},
-    "DPR_AUTHORITY_APPROVAL": {"edit": [],                    "approve": ["CEE_TRANSMISSION_ZONE"]},  # see tiering note above — highest existing role, re-tag once real approval tiers exist
-    "DPR_EXECUTION_TRACKING": {"edit": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"], "approve": ["EE_TLSS"]},
+    # stage_code: {
+    #   "edit": [...roles that can fill the form...],
+    #   "approve": [...roles that can advance/reject...],
+    #   "assign": [...roles that can assign users to this stage (coordinators)...]
+    # }
+    "DPR_INITIATION":         {"edit": ["AEE_MAINTENANCE"], "approve": ["EE_TLSS"], "assign": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"]},
+    "DPR_COST_ESTIMATION":    {"edit": ["AEE_MAINTENANCE"], "approve": ["EE_TLSS"], "assign": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"]},
+    "DPR_TECHNICAL_REVIEW":   {"edit": ["EE_TLSS"],          "approve": ["CEE_TRANSMISSION_ZONE"], "assign": ["EE_TLSS", "Transformer Repair Coordinator"]},
+    "DPR_AUTHORITY_APPROVAL": {"edit": [],                    "approve": ["CEE_TRANSMISSION_ZONE"], "assign": ["CEE_TRANSMISSION_ZONE"]},  # see tiering note above — highest existing role, re-tag once real approval tiers exist
+    "DPR_EXECUTION_TRACKING": {"edit": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"], "approve": ["EE_TLSS"], "assign": ["AEE_MAINTENANCE", "Transformer Repair Coordinator"]},
 }
 
 # ── Per-stage dynamic-form schemas (OrgTestTemplate.template_data) ─────────
@@ -120,6 +130,7 @@ ROLE_MAP = {
 _TEMPLATES = {
     "dpr_initiation_form": {
         "name": "DPR — Initiation",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Project Justification",
@@ -135,6 +146,7 @@ _TEMPLATES = {
     },
     "dpr_cost_estimation_form": {
         "name": "DPR — Cost Estimation",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Estimation Basis",
@@ -169,18 +181,22 @@ _TEMPLATES = {
                             },
                         ],
                     },
-                    # No table-level SUM formula exists yet in the rule engine
-                    # (only PRODUCT/SUM(a,b)/RATIO/AVERAGE-of-two, and the
-                    # table-column AVERAGE — no "sum a column" op). Total is
-                    # entered manually for now; wire up a table-summary/SUM
-                    # formula later to auto-total "amount" instead.
-                    {"key": "total_estimated_cost", "label": "Total Estimated Cost", "type": "number", "unit": "₹", "required": True},
+                    {
+                        "key": "total_estimated_cost", "label": "Total Estimated Cost", "type": "calculated",
+                        "read_only": True, "unit": "₹", "required": True,
+                        "rule": {"type": "TABLE_SUM", "config": {
+                            "table": "cost_breakdown",
+                            "column": "amount",
+                            "precision": 2,
+                        }},
+                    },
                 ],
             },
         ],
     },
     "dpr_technical_review_form": {
         "name": "DPR — Technical Review",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Feasibility Checklist",
@@ -218,6 +234,7 @@ _TEMPLATES = {
     },
     "dpr_authority_approval_form": {
         "name": "DPR — Authority Approval",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Approval Decision",
@@ -233,6 +250,7 @@ _TEMPLATES = {
     },
     "dpr_execution_tracking_form": {
         "name": "DPR — Execution Tracking",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Progress Update",
@@ -310,6 +328,30 @@ def seed_dpr_stages(db) -> int:
     code_map = {}
     inserted = 0
 
+    # DPR stages are role-gated, not individual-gated - there's no
+    # meaningful "coordinator hands this off to a specific person" step
+    # the way BREAKDOWN/repair workflows have, so a stage should be
+    # EDITABLE by anyone holding the right role the moment it becomes
+    # current, without first requiring a separate Assign action.
+    # RepairStageDefinition's raw column default for edit_statuses
+    # (["assigned","in_progress"]) assumes that hand-off model and would
+    # leave a freshly-created "pending" stage read-only for its own
+    # edit-role holder - override it to include the stage's own resting
+    # states too.
+    #
+    # approve_statuses is NOT broadened the same way - approving only
+    # ever makes sense after the editor has actually submitted (an
+    # earlier version of this fix mistakenly widened it to match
+    # edit_statuses, which let the approve role see Approve/Reject on a
+    # still-"pending" stage nobody had submitted yet; the button was
+    # clickable but the backend correctly rejected the action server-side
+    # with "Stage must be in 'submitted' state to approve"). Leave it at
+    # the standard single-value default so Approve/Reject only appear
+    # once there's actually something to approve.
+    _dpr_assign_statuses = ["pending", "not_started"]
+    _dpr_edit_statuses = ["pending", "not_started", "assigned", "in_progress"]
+    _dpr_approve_statuses = ["submitted"]
+
     for s in STAGES:
         existing = db.query(RepairStageDefinition).filter_by(
             workflow_definition_id=wf_def.id, code=s["code"]
@@ -318,6 +360,9 @@ def seed_dpr_stages(db) -> int:
             existing.name = s["name"]
             existing.sequence = s["sequence"]
             existing.default_duration_days = s["default_duration_days"]
+            existing.assign_statuses = _dpr_assign_statuses
+            existing.edit_statuses = _dpr_edit_statuses
+            existing.approve_statuses = _dpr_approve_statuses
             stage_map[s["name"]] = existing.id
             code_map[s["code"]] = existing.id
             continue
@@ -331,6 +376,9 @@ def seed_dpr_stages(db) -> int:
             is_active=True,
             is_mandatory=True,
             default_duration_days=s["default_duration_days"],
+            assign_statuses=_dpr_assign_statuses,
+            edit_statuses=_dpr_edit_statuses,
+            approve_statuses=_dpr_approve_statuses,
         )
         db.add(stage)
         db.flush()
@@ -408,10 +456,12 @@ def seed_dpr_role_mappings(db, organization_id) -> int:
         if not mapping:
             mapping = RepairStageRole(id=uuid.uuid4(), stage_id=stage.id, role_id=role.id)
             db.add(mapping)
-        mapping.can_edit = can_edit
-        mapping.can_approve = can_approve
-        mapping.can_assign = can_assign
-        upserted += 1
+            upserted += 1
+        # Always update permissions (OR them together if role appears in multiple grant lists)
+        mapping.can_edit = mapping.can_edit or can_edit
+        mapping.can_approve = mapping.can_approve or can_approve
+        mapping.can_assign = mapping.can_assign or can_assign
+        db.flush()  # Force flush after each role to avoid session conflicts
 
     for stage_code, grants in ROLE_MAP.items():
         stage = db.query(RepairStageDefinition).filter_by(code=stage_code).first()
@@ -419,16 +469,77 @@ def seed_dpr_role_mappings(db, organization_id) -> int:
             print(f"[WARN] Stage not found: {stage_code} — run seed_dpr_stages first")
             continue
         for role_name in grants.get("edit", []):
-            _upsert(stage, role_name, can_edit=True, can_approve=False)
+            _upsert(stage, role_name, can_edit=True, can_approve=False, can_assign=False)
         for role_name in grants.get("approve", []):
-            _upsert(stage, role_name, can_edit=False, can_approve=True)
+            _upsert(stage, role_name, can_edit=False, can_approve=True, can_assign=False)
+        for role_name in grants.get("assign", []):
+            _upsert(stage, role_name, can_edit=False, can_approve=False, can_assign=True)
 
     db.commit()
     print(f"[OK] DPR role mappings: {upserted} upserted for org {organization_id}")
     return upserted
 
 
-DPR_MODULE_NAME = "DPR Projects"  # seeded by seed.py's seed_modules() — see seed.py: "DPR Projects" module entry
+DPR_MODULE_NAME = "DPR Projects"
+
+# Kept in sync with (and duplicated from) the "DPR Projects" entry in
+# seed.py's modules_data list by hand — not imported from seed.py, since
+# that module runs 14k+ lines of unrelated seed logic at import time and
+# pulling it in just for one dict would be the wrong coupling. Both sides
+# upsert by `name`, so running the full seed.py after this (or vice versa)
+# just refreshes the same row in place - never creates a duplicate.
+DPR_MODULE = {
+    "name": DPR_MODULE_NAME,
+    "description": (
+        "Detailed Project Report (DPR) approval workflow — 5-stage capital works / major "
+        "maintenance proposal: Initiation, Cost Estimation, Technical Review, "
+        "Authority Approval, Execution Tracking. Stage-role RBAC driven via "
+        "DPR_APPROVAL RepairWorkflowDefinition."
+    ),
+    "path": "dpr_projects",
+    "group_name": "Field Operations",
+}
+
+
+def seed_dpr_module(db) -> bool:
+    """
+    Idempotently insert/update the "DPR Projects" Module row itself (the
+    sidebar entry seed_dpr_role_permissions grants access to). Org-agnostic,
+    like seed_dpr_stages - the Module table isn't org-scoped.
+
+    Makes seed_dpr_workflow.py self-sufficient: previously this row had to
+    already exist via a prior seed.py / seed_modules_only.py run, or
+    seed_dpr_role_permissions would silently [WARN]-skip every org. Safe to
+    run even if seed.py's seed_modules() already created it - same
+    upsert-by-name behavior, just this one row instead of the full list.
+
+    Returns True if a new row was inserted, False if an existing one was
+    just refreshed.
+    """
+    from models import Module
+
+    existing = db.query(Module).filter_by(name=DPR_MODULE["name"]).first()
+    if existing:
+        existing.description = DPR_MODULE["description"]
+        existing.path = DPR_MODULE["path"]
+        existing.group_name = DPR_MODULE["group_name"]
+        existing.is_active = True
+        db.commit()
+        print(f"[OK] DPR module {DPR_MODULE_NAME!r} already present — refreshed")
+        return False
+
+    module = Module(
+        name=DPR_MODULE["name"],
+        description=DPR_MODULE["description"],
+        path=DPR_MODULE["path"],
+        group_name=DPR_MODULE["group_name"],
+        is_active=True,
+        is_menu=True,
+    )
+    db.add(module)
+    db.commit()
+    print(f"[OK] DPR module {DPR_MODULE_NAME!r} created")
+    return True
 
 
 def seed_dpr_role_permissions(db, organization_id) -> int:
@@ -441,8 +552,9 @@ def seed_dpr_role_permissions(db, organization_id) -> int:
       - any role that ever "approve"s a stage -> can_view + can_approve + can_assign
       (a role appearing in both gets the union of both grants)
 
-    Must be called after seed_dpr_stages AND after seed.py's seed_modules()
-    has created the "DPR Projects" Module row. Unknown role names are skipped
+    Must be called after seed_dpr_stages AND after the "DPR Projects" Module
+    row exists — either seed_dpr_module(db) (this file, run automatically by
+    __main__) or seed.py's seed_modules(). Unknown role names are skipped
     with [WARN], same as seed_dpr_role_mappings — safe to run speculatively.
 
     NOTE: this is a DIFFERENT table from seed_dpr_role_mappings' RepairStageRole
@@ -452,7 +564,7 @@ def seed_dpr_role_permissions(db, organization_id) -> int:
 
     module = db.query(Module).filter_by(name=DPR_MODULE_NAME, is_active=True).first()
     if not module:
-        print(f"[WARN] Module {DPR_MODULE_NAME!r} not found — run seed.py's seed_modules() first")
+        print(f"[WARN] Module {DPR_MODULE_NAME!r} not found — run seed_dpr_module(db) first")
         return 0
 
     # Derive the union of grants per role from ROLE_MAP.
@@ -467,6 +579,17 @@ def seed_dpr_role_permissions(db, organization_id) -> int:
             g = grants_by_role.setdefault(role_name, {})
             g["can_view"] = True
             g["can_approve"] = True
+            g["can_assign"] = True
+        # A role that's only a coordinator (assign, not edit/approve) at every
+        # stage it appears in - e.g. "Transformer Repair Coordinator" isn't in
+        # any stage's "approve" list - would otherwise never enter
+        # grants_by_role at all and get zero module access. Doesn't apply
+        # today (every current "assign" role also holds "edit" somewhere),
+        # but keeps this in sync with ROLE_MAP instead of silently gapping if
+        # that stops being true.
+        for role_name in stage_grants.get("assign", []):
+            g = grants_by_role.setdefault(role_name, {})
+            g["can_view"] = True
             g["can_assign"] = True
 
     # System Administrator gets full access regardless of ROLE_MAP — same
@@ -505,9 +628,28 @@ def seed_dpr_role_permissions(db, organization_id) -> int:
 
 if __name__ == "__main__":
     from database import SessionLocal
+    from models import Organization
 
     db = SessionLocal()
     try:
+        # Step 0 — org-agnostic: the "DPR Projects" sidebar Module row itself,
+        # so step 3 below has something to grant access to even on a DB where
+        # seed.py's full seed_modules() hasn't run.
+        seed_dpr_module(db)
+
+        # Step 1 — org-agnostic: workflow def, stages, transitions, templates.
         seed_dpr_stages(db)
+
+        # Steps 2 & 3 — org-specific: run for every active org. Both
+        # functions skip unknown role names with a [WARN] rather than
+        # erroring, so it's safe to run speculatively across orgs that
+        # don't have ROLE_MAP's role names at all (see each function's
+        # docstring) — matches the pattern fix_dpr_workflow_assign_
+        # permissions.py already used for this same loop.
+        orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        print(f"[OK] Seeding DPR role mappings/permissions for {len(orgs)} active orgs")
+        for org in orgs:
+            seed_dpr_role_mappings(db, org.id)
+            seed_dpr_role_permissions(db, org.id)
     finally:
         db.close()

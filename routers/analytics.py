@@ -202,6 +202,26 @@ def _next_worse_boundary(bands: list, current_value: float, slope_per_day: float
     return None, None
 
 
+def _watch_reason(row: ParameterAnalytics, forecast: Optional[dict]) -> str:
+    """Human-readable synthesis of why one parameter is on the
+    Deterioration Watch List (TSMS-236's "reason" field for each item).
+    Composed entirely from fields _real_breach_forecast/ParameterAnalytics
+    already compute — not a new detection signal, just a presentation of
+    the existing one."""
+    direction = "rising" if row.trend == "Increasing" else "falling"
+    label = row.parameter_label or row.parameter_key
+    if not forecast or forecast.get("breach_value") is None:
+        return (f"{label} has a sustained {direction} trend across "
+                f"{row.history_count} reading(s), with no threshold band "
+                f"configured to project a crossing against")
+    if forecast.get("is_overdue_for_retest"):
+        return (f"{label} is {direction} toward {forecast['breach_band']} — "
+                f"the trend implied a crossing before the last retest; "
+                f"retest is overdue")
+    return (f"{label} is {direction} toward {forecast['breach_band']}, "
+            f"projected in {forecast['days_to_breach']} day(s)")
+
+
 def _parse_capacity_mva(raw) -> float | None:
     """Parse values like '100MVA', '167.5MVA', '' into a float, or None."""
     if not raw:
@@ -1931,6 +1951,33 @@ def get_deterioration_watch_list(
         c.id: c.name for c in db.query(CategoryMaster).all()
     }
 
+    # TSMS-236 "owner" — Equipment has no per-asset owner field of its own;
+    # the department's manager (org_departments.manager_id) is the existing
+    # responsible-person concept the rest of the app already uses. Bulk
+    # resolve both hops once for this batch of equipment rather than a
+    # query per row.
+    department_ids = {eq.department_id for eq in equipment_rows if eq.department_id}
+    departments_by_id = {
+        d.id: d for d in db.query(OrgDepartment).filter(OrgDepartment.id.in_(department_ids)).all()
+    } if department_ids else {}
+    manager_ids = {d.manager_id for d in departments_by_id.values() if d.manager_id}
+    managers_by_id = {
+        u.id: u for u in db.query(User).filter(User.id.in_(manager_ids)).all()
+    } if manager_ids else {}
+
+    def _owner_for(eq: Equipment) -> Optional[dict]:
+        dept = departments_by_id.get(eq.department_id) if eq.department_id else None
+        manager = managers_by_id.get(dept.manager_id) if dept and dept.manager_id else None
+        if not manager:
+            return None
+        # Same "firstname/lastname, fall back to email" display-name
+        # convention services/repair_report_service.py's _uname already uses.
+        return {
+            "user_id": str(manager.id),
+            "name": f"{manager.firstname or ''} {manager.lastname or ''}".strip() or manager.email,
+            "department": dept.name,
+        }
+
     # Minimum readings before a trend counts as a real signal at all, not
     # the engine's own bare computational minimum (2 points — services/
     # analytics_engine.py's MIN_TREND_POINTS = 1, i.e. 1 prior + current).
@@ -2023,6 +2070,7 @@ def get_deterioration_watch_list(
             "breach_predicted_at":   forecast["breach_predicted_at"] if forecast else None,
             "days_to_breach":        forecast["days_to_breach"] if forecast else None,
             "is_overdue_for_retest": forecast["is_overdue_for_retest"] if forecast else False,
+            "reason":                _watch_reason(row, forecast),
             "history_count":         row.history_count,
             # Real last-test date this snapshot is based on — how the
             # overdue-review scheduler (main.py's daily job) ages a pending
@@ -2082,6 +2130,7 @@ def get_deterioration_watch_list(
             "equipment_label": eq.ueic,
             "equipment_type":  equipment_type_names.get(eq.equipment_type_id),
             "department_id":   str(eq.department_id) if eq.department_id else None,
+            "owner":           _owner_for(eq),
             "health_score":    float(ea.health_score) if ea and ea.health_score is not None else None,
             "risk_level":      ea.risk_level if ea and ea.risk_level else "Unknown",
             "soonest_days_to_breach": soonest_days,

@@ -64,14 +64,17 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from services.analytics_engine import _load_band_rank_words
+from services.analytics_engine import _load_band_rank_words, NORMAL, ALERT, CRITICAL
 
 
 # ─── Status constants ──────────────────────────────────────────────────────────
-NORMAL   = "NORMAL"
-ALERT    = "ALERT"
-CRITICAL = "CRITICAL"
-
+# NORMAL/ALERT/CRITICAL themselves are defined once, in analytics_engine.py
+# (imported above) — this file previously redeclared the same three literal
+# strings independently. Not a drift risk on its own (identical strings can't
+# disagree), but no reason to say it twice. _STATUS_RANK stays here: it's the
+# real "worst status wins" ordinal with actual call sites (this file,
+# services/testing_service.py), deliberately hardcoded rather than table-driven
+# — see the comment above NORMAL/ALERT/CRITICAL in analytics_engine.py for why.
 _STATUS_RANK = {NORMAL: 0, ALERT: 1, CRITICAL: 2}
 
 

@@ -36,10 +36,9 @@ use this module.
 from __future__ import annotations
 
 ADVISORY_NOTE = (
-    "AI Advisory — Duval Triangle zone boundaries are the general IEC 60599 "
-    "method, not yet validated against KPTCL RT & R&D's specific standard "
-    "revision. Confirm with a qualified officer before acting on this "
-    "classification."
+    "AI Advisory — zone boundaries not yet validated by KPTCL RT & R&D. "
+    "Confirm with a qualified officer before acting. See report header for "
+    "full detail."
 )
 
 # Zone name -> plain-language meaning, shown alongside the code so a

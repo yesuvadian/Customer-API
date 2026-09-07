@@ -1225,6 +1225,24 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             for key, v in sorted(by_month.items())
         ]
 
+        # AI calibration-interval optimisation advisories (§14.6), scoped to
+        # this dashboard's own department + descendants (svc.dept_ids) —
+        # org root (svc.dept_ids is None) still gets the org-wide view. A
+        # cohort is (test type, make, model), which spans departments by
+        # nature, so a narrow scope will often have fewer (or no)
+        # advisories than the org-wide view — that's
+        # CALIBRATION_INTERVAL_MIN_CYCLES materiality gate doing its job,
+        # not a bug, and the panel already self-hides when the list is empty.
+        from services.calibration_service import compute_interval_advisories
+        try:
+            interval_advisories = compute_interval_advisories(db, svc.org_id, department_ids=svc.dept_ids)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "calibration interval advisory computation failed", exc_info=True
+            )
+            interval_advisories = []
+
         return {
             # Lets the frontend tell "no calibration activity at all in this
             # scope" apart from "100% compliant" — both leave compliance_pct
@@ -1238,6 +1256,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "expiring_30d": cal_expiring_30,
             "expiring_60d": cal_expiring_60,
             "fail_rate_trend": fail_rate_trend,
+            "interval_advisories": interval_advisories,
         }
 
     # Pending-approval TestingRequests in the given scope, most-recently-
@@ -1453,6 +1472,28 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "rejected_cancelled_tickets": _rows(rejected_cancelled_rows),
         }
 
+    def _failure_cohort_summary():
+        # Per make/model reliability (§2), scoped like the calibration
+        # interval advisories above — svc.dept_ids narrows to this
+        # dashboard's own department + descendants, org root
+        # (svc.dept_ids is None) still gets the org-wide view. A narrow
+        # scope may fall below FAILURE_COHORT_MIN_UNITS for some or all
+        # cohorts; the panel already self-hides when the list is empty
+        # rather than showing a diluted or misleading cohort. Defined
+        # before the leaf/branch split below (not after it, where it
+        # used to live) — the leaf return is an early return, so a
+        # nested function defined only after that point would never be
+        # bound yet when the leaf branch tried to call it.
+        from services.equipment_service import EquipmentService
+        try:
+            return EquipmentService.compute_failure_cohort_stats(db, svc.org_id, department_ids=svc.dept_ids)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "failure cohort reliability computation failed", exc_info=True
+            )
+            return []
+
     if not children:
         # Same TestResult evaluation query flagged_equipment() (dashboard_service.py)
         # already uses org-wide — reimplemented dept-scoped here since that
@@ -1582,6 +1623,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "can_review": can_review,
             "weekly_trend": _weekly_trend(svc.dept_ids),
             "calibration": _calibration_summary(svc.dept_ids),
+            "failure_reliability": _failure_cohort_summary(),
             **ticket_lists,
             **_scope_counts(svc.dept_ids),
         }
@@ -1636,6 +1678,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         "can_review": can_review,
         "weekly_trend": _weekly_trend(svc.dept_ids),
         "calibration": _calibration_summary(svc.dept_ids),
+        "failure_reliability": _failure_cohort_summary(),
         "rows": rows,
         # Full-subtree ticket lists behind the summary counts above — see
         # _ticket_lists' docstring for why a branch shape needs these too,
@@ -1680,6 +1723,78 @@ def get_overview_dashboard(
         else None
     )
     return result
+
+
+@router.get("/calibration-interval-advisories/export")
+def export_calibration_interval_advisories(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    One row per actual equipment unit behind a Calibration Interval
+    Advisory (the "AI ADVISORY" panel on the Overview Dashboard) — not one
+    row per cohort, since the whole point of this export is answering "so
+    which relays/meters actually drove this number," the same thing the
+    panel's own expandable equipment list answers on-screen. Scoped
+    identically to GET /dashboard/overview (same _svc/dept_ids), so the
+    export always matches whatever the caller is currently looking at.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    from services.calibration_service import compute_interval_advisories
+
+    svc = _svc(db, current_user, org_id, dept_id)
+    advisories = compute_interval_advisories(db, svc.org_id, department_ids=svc.dept_ids)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Calibration Advisories"
+
+    headers = [
+        "Test Type", "Manufacturer", "Model", "Direction",
+        "Current Validity (mo)", "Suggested Validity (mo)",
+        "Cohort Fail Rate %", "Equipment UEIC",
+        "Unit Cycles", "Unit Fails",
+    ]
+    hdr_fill = PatternFill("solid", fgColor="1E3A8A")
+    hdr_font = Font(bold=True, color="FFFFFF")
+    for ci, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=ci, value=h)
+        cell.fill = hdr_fill
+        cell.font = hdr_font
+
+    row_idx = 2
+    for a in advisories:
+        equipment = a.get("equipment") or [{}]  # at least one row even if empty
+        for u in equipment:
+            ws.cell(row=row_idx, column=1, value=a["test_type_name"])
+            ws.cell(row=row_idx, column=2, value=a["manufacturer"])
+            ws.cell(row=row_idx, column=3, value=a["model_number"])
+            ws.cell(row=row_idx, column=4, value=a["direction"])
+            ws.cell(row=row_idx, column=5, value=a["current_validity_months"])
+            ws.cell(row=row_idx, column=6, value=a["suggested_validity_months"])
+            ws.cell(row=row_idx, column=7, value=a["fail_rate_pct"])
+            ws.cell(row=row_idx, column=8, value=u.get("ueic"))
+            ws.cell(row=row_idx, column=9, value=u.get("cycle_count"))
+            ws.cell(row=row_idx, column=10, value=u.get("fail_count"))
+            row_idx += 1
+
+    for ci, h in enumerate(headers, start=1):
+        ws.column_dimensions[get_column_letter(ci)].width = max(14, len(h) + 2)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="calibration_interval_advisories.xlsx"'},
+    )
 
 
 @router.get("/see")

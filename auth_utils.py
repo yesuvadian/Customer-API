@@ -15,17 +15,23 @@ from security_utils import get_password_hash, verify_password
 from services import user_service
 from utils.common_service import UTCDateTimeMixin
 from utils.email_service import EmailService
+# Single source for these — previously redeclared here independently of
+# config.py with disagreeing fallback defaults (60 vs 30 min token expiry,
+# different placeholder SECRET_KEY strings). services/auth_service.py
+# already imports SECRET_KEY/ALGORITHM/REFRESH_TOKEN_EXPIRE_DAYS straight
+# from config.py to sign/verify JWTs — two independently-configured
+# secrets for the same token scheme was the real risk, not just the
+# duplication. Both currently resolve to the same real value in every
+# environment with these env vars set (confirmed against .env), so this
+# only closes a latent risk for an environment that doesn't set them.
+from config import (
+    SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS,
+    MAX_LOGIN_ATTEMPTS, LOGIN_LOCK_DURATION_MIN, PASSWORD_HISTORY_LIMIT,
+)
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
-REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
-MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", 5))
-LOGIN_LOCK_DURATION_MIN = int(os.getenv("LOGIN_LOCK_DURATION_MIN", 15))
-PASSWORD_HISTORY_LIMIT = int(os.getenv("PASSWORD_HISTORY_LIMIT", 5))
-SECRET_KEY = os.getenv("SECRET_KEY", "your_super_secret_key_here")
-ALGORITHM = "HS256"
 RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("RESET_TOKEN_EXPIRE_MINUTES", 300))
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -225,10 +231,22 @@ def build_user_privileges(db: Session, user_id) -> dict:
 
 def has_org_admin_role(user, db) -> bool:
     """Return True if the user holds any active org-admin role in their organisation.
-    Role-based check — never tests usertype, per plan Decision 7."""
+    Role-based check — never tests usertype, per plan Decision 7.
+
+    Single source for this check — previously reimplemented independently
+    in middleware/org_auth.py (4x), routers/equipment.py, and two services,
+    which had already drifted: one variant skipped the OrgUserRole.is_active
+    filter, another (services/repair_timeliness_service.py's _is_org_admin,
+    gating a 403 check on record_delay_attribution) skipped both active
+    filters entirely — a deactivated org-admin role assignment would still
+    pass. Accepts either a full user object (existing call sites) or a bare
+    user_id (the call sites above only ever had an id on hand), so neither
+    shape of caller needs to change how it calls this.
+    """
     from models import OrgUserRole, OrgRole
+    user_id = user.id if hasattr(user, "id") else user
     return db.query(OrgUserRole).join(OrgRole).filter(
-        OrgUserRole.user_id == user.id,
+        OrgUserRole.user_id == user_id,
         OrgUserRole.is_active == True,
         OrgRole.is_org_admin == True,
         OrgRole.is_active == True,

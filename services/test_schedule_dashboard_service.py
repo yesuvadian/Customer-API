@@ -722,24 +722,16 @@ class TestScheduleDashboardService:
     def _dept_subtree(self, dept_id: UUID) -> list[UUID]:
         """
         Return dept_id + ALL descendant department IDs at any depth.
-        Uses iterative BFS — safe for the 6-level KPTCL hierarchy
-        (Zone → Circle → Division → SubDiv → Section → Substation).
+
+        Delegates to the shared utils.common_service.get_dept_subtree_ids
+        (a recursive CTE) rather than its own iterative BFS — the BFS
+        version didn't filter is_active anywhere (root or descendants), so
+        a retired/deactivated department could pull its data into this
+        dashboard's rollup; every other implementation of this same query
+        elsewhere in the codebase excludes inactive departments.
         """
-        visited: list[UUID] = []
-        queue: list[UUID] = [dept_id]
-        while queue:
-            current_batch = queue[:]
-            queue = []
-            visited.extend(current_batch)
-            children = (
-                self.db.query(OrgDepartment.id)
-                .filter(OrgDepartment.parent_department_id.in_(current_batch))
-                .all()
-            )
-            for (child_id,) in children:
-                if child_id not in visited:
-                    queue.append(child_id)
-        return visited
+        from utils.common_service import get_dept_subtree_ids
+        return get_dept_subtree_ids(self.db, dept_id)
 
     def _compute_kpis(
         self,
