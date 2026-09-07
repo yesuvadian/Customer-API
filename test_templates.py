@@ -1506,6 +1506,117 @@ TEST_TEMPLATES = {
     },
 
     # ────────────────────────────────────────────────────────────
+    # 32b. Short Circuit & Open Circuit Test — HV-LV, merged (Power Transformer)
+    # ────────────────────────────────────────────────────────────
+    # Combines short_circuit_test_hv_lv + open_circuit_test_hv_lv_1ph/3ph into
+    # one form, since both are performed back-to-back in the same site visit
+    # with the same test kit - previously two separate testing requests,
+    # approvals, and health-score entries for one physical test event.
+    # Neither original had an overall_result or any calculated output
+    # (magnetizing current, iron loss, impedance, copper loss) at all - added
+    # here, since a combined form is the natural place to fix that gap too.
+    # short_circuit_test_hv_lv / open_circuit_test_hv_lv_1ph / _3ph are left
+    # in place (not deleted) so existing historical test results under those
+    # keys stay readable; the alter script deactivates them as selectable
+    # test types going forward so new requests use this combined form.
+    "short_open_circuit_test_hv_lv": {
+        "key": "short_open_circuit_test_hv_lv",
+        "name": "Short Circuit & Open Circuit Test (HV-LV)",
+        "equipment_type": "Power Transformer",
+        "description": "Combined short-circuit (impedance/copper loss) and open-circuit "
+                        "(no-load current/iron loss/magnetizing current) test between HV "
+                        "and LV windings.",
+        "context_bindings": {
+            "station_name": "equipment.department_name",
+            "manufacturer": "equipment.manufacturer",
+            "serial_number": "equipment.factory_serial_number",
+            "voltage_class": "equipment.voltage_class",
+        },
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name",  "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer",  "label": "Manufacturer",         "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number",        "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class",        "type": "readonly"},
+                    {"key": "rated_kva",         "label": "Rated kVA",             "type": "number", "unit": "kVA", "required": True},
+                    {"key": "rated_voltage_hv",  "label": "Rated Voltage (HV)",    "type": "number", "unit": "V",   "required": True},
+                    {"key": "rated_current_hv",  "label": "Rated Current (HV)",    "type": "number", "unit": "A"},
+                    {"key": "test_temperature",  "label": "Test Temperature",      "type": "number", "unit": "°C"},
+                ],
+            },
+            {
+                "title": "Short Circuit Test Readings (HV-LV)",
+                "fields": [
+                    {
+                        "key": "sc_readings",
+                        "label": "Short Circuit Test Readings",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "oltc_tap",   "label": "OLTC Tap Position", "type": "text"},
+                            {"key": "applied_ry", "label": "Applied V (RY)",    "type": "number"},
+                            {"key": "applied_yb", "label": "Applied V (YB)",    "type": "number"},
+                            {"key": "applied_br", "label": "Applied V (BR)",    "type": "number"},
+                            {"key": "current_r",  "label": "HV Current R (A)", "type": "number"},
+                            {"key": "current_y",  "label": "HV Current Y (A)", "type": "number"},
+                            {"key": "current_b",  "label": "HV Current B (A)", "type": "number"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Open Circuit Test Readings (HV-LV)",
+                "fields": [
+                    {
+                        "key": "oc_test_mode", "label": "Test Mode", "type": "dropdown", "required": True,
+                        "options": ["1 Phase 400V", "3 Phase 400V"],
+                    },
+                    {
+                        "key": "oc_readings",
+                        "label": "Open Circuit Test Readings",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "oltc_tap",   "label": "OLTC Tap Position",  "type": "text"},
+                            {"key": "applied_ry", "label": "Applied V (ry)",     "type": "number"},
+                            {"key": "applied_yb", "label": "Applied V (yb)",     "type": "number"},
+                            {"key": "applied_br", "label": "Applied V (br)",     "type": "number"},
+                            {"key": "current_r",  "label": "Current R (mA)",    "type": "number"},
+                            {"key": "current_y",  "label": "Current Y (mA)",    "type": "number"},
+                            {"key": "current_b",  "label": "Current B (mA)",    "type": "number"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "Calculated Values",
+                "fields": [
+                    {"key": "impedance_voltage",       "label": "Impedance Voltage",       "type": "number", "unit": "%"},
+                    {"key": "copper_loss",             "label": "Copper Loss",             "type": "number", "unit": "W"},
+                    {"key": "no_load_current_percent", "label": "No-Load Current",         "type": "number", "unit": "% of rated"},
+                    {"key": "iron_loss",                "label": "Iron Loss (Core Loss)",   "type": "number", "unit": "W"},
+                    {"key": "magnetizing_current",      "label": "Magnetizing Current",     "type": "number", "unit": "A"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True,
+                        "options": ["Pass", "Fail", "Conditional", "Retest"],
+                        "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR},
+                    },
+                ],
+            },
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────
     # 33. CT Insulation Test (Current Transformer)
     # ────────────────────────────────────────────────────────────
     "ct_insulation_test": {
@@ -9357,6 +9468,9 @@ TEST_TYPE_TO_TEMPLATE = {
     "Ratio Test HV-LV": "ratio_test_hv_lv",
     "Short Circuit Test HV-IV": "short_circuit_test_hv_iv",
     "Short Circuit Test HV-LV": "short_circuit_test_hv_lv",
+    # ── Merged form (replaces the above HV-LV pair + the two Open Circuit
+    # HV-LV variants below going forward — see short_open_circuit_test_hv_lv) ──
+    "Short Circuit & Open Circuit Test (HV-LV)": "short_open_circuit_test_hv_lv",
     "Magnetic Balance Test HV": "magnetic_balance_test_hv",
     "Magnetic Balance Test IV": "magnetic_balance_test_iv",
     "Magnetic Balance Test LV": "magnetic_balance_test_lv",
