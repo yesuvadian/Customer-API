@@ -869,7 +869,7 @@ class ReportingService:
                     "c2h4_rate_ppm_per_month": rates.get("c2h4"),
                     "c2h2_rate_ppm_per_month": rates.get("c2h2"),
                     "accelerating_gases": ", ".join(accelerating_gases) if accelerating_gases else None,
-                    "duval_zone":     duval["zone"],
+                    "duval_zone":     duval["zone"] if duval["zone"] is not None else "No Bottom (ppm) reading",
                     "duval_meaning":  duval["meaning"],
                     "duval_pct_ch4":  duval["pct_ch4"],
                     "duval_pct_c2h4": duval["pct_c2h4"],
