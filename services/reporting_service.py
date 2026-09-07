@@ -811,7 +811,10 @@ class ReportingService:
                 gas = row.get("gas")
                 if gas in KEY_GASES:
                     val = row.get("value_bottom")
-                    out[KEY_GASES[gas]] = float(val) if val is not None else None
+                    try:
+                        out[KEY_GASES[gas]] = float(val) if val not in (None, "") else None
+                    except (TypeError, ValueError):
+                        out[KEY_GASES[gas]] = None
             return out
 
         # Sort per-equipment so consecutive readings can be diffed for a
@@ -851,7 +854,7 @@ class ReportingService:
                         # test-over-test, independent of whether any single
                         # concentration has crossed an absolute threshold
                         # yet — the spec's own framing for this flag.
-                        if prior_rate is not None and rate > 0 and rate > prior_rate * 1.25:
+                        if prior_rate is not None and prior_rate > 0 and rate > prior_rate * 1.25:
                             accelerating_gases.append(key)
 
                 out_rows.append({
@@ -866,7 +869,7 @@ class ReportingService:
                     "c2h4_rate_ppm_per_month": rates.get("c2h4"),
                     "c2h2_rate_ppm_per_month": rates.get("c2h2"),
                     "accelerating_gases": ", ".join(accelerating_gases) if accelerating_gases else None,
-                    "duval_zone":     duval["zone"],
+                    "duval_zone":     duval["zone"] if duval["zone"] is not None else "No Bottom (ppm) reading",
                     "duval_meaning":  duval["meaning"],
                     "duval_pct_ch4":  duval["pct_ch4"],
                     "duval_pct_c2h4": duval["pct_c2h4"],

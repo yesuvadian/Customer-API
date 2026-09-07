@@ -132,52 +132,103 @@ class TestingRequestService:
         """
         Return (is_multi_session, total_sessions_planned, session_interval_days)
         from template's supports_multi_session / typical_total_sessions /
-        typical_session_interval_days. Same pattern as _resolve_is_cumulative().
+        typical_session_interval_days. Same DB-then-static-fallback pattern
+        as _resolve_is_cumulative()/_resolve_is_calibration() — see
+        _resolve_is_calibration's docstring for why the DB-only lookup alone
+        silently misses this for any org other than whichever one the
+        global template's test_type_id happened to be seeded against.
         """
         if not test_type_id:
             return False, None, None
+
+        def _multi_session_result(data: dict):
+            if data.get("supports_multi_session") or data.get("multi_session"):
+                session_types = data.get("session_types") or []
+                # Derive total from session_types length; fall back to explicit value
+                total = len(session_types) if session_types else data.get("typical_total_sessions")
+                return True, total, data.get("typical_session_interval_days")
+            return None
+
         tpl = (
             self.db.query(OrgTestTemplate)
             .filter(OrgTestTemplate.test_type_id == test_type_id)
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )
-        if not tpl:
-            return False, None, None
-        data = tpl.template_data or {}
-        if data.get("supports_multi_session") or data.get("multi_session"):
-            session_types = data.get("session_types") or []
-            # Derive total from session_types length; fall back to explicit value
-            total = len(session_types) if session_types else data.get("typical_total_sessions")
-            return (
-                True,
-                total,
-                data.get("typical_session_interval_days"),
-            )
+        if tpl:
+            result = _multi_session_result(tpl.template_data or {})
+            if result:
+                return result
+
+        # Fall back to test_templates.py static dict via test type name
+        try:
+            from test_templates import TEST_TYPE_TO_TEMPLATE, get_template_by_key
+            detail = self.db.query(CategoryDetails).filter(CategoryDetails.id == test_type_id).first()
+            if detail:
+                tmpl_key = TEST_TYPE_TO_TEMPLATE.get(detail.name)
+                if tmpl_key:
+                    static_tpl = get_template_by_key(tmpl_key)
+                    if static_tpl:
+                        result = _multi_session_result(static_tpl)
+                        if result:
+                            return result
+        except Exception:
+            pass
+
         return False, None, None
 
     def _resolve_is_calibration(self, test_type_id) -> bool:
         """
         Return True if the template has enable_calibration=true OR a DATE_ADD rule.
         Covers both legacy flag-based templates and rule-driven templates.
+        Checks DB OrgTestTemplate first, then falls back to test_templates.py
+        static dict — same two-step pattern as _resolve_is_cumulative(), for
+        the same reason: OrgTestTemplate.test_type_id on the global (org_id=
+        None) row is whichever org's CategoryDetails id happened to be first
+        when provision_global_defaults() seeded it (see
+        OrgTestTemplateService.provision_global_defaults's unscoped
+        `CategoryDetails.filter(name == type_name).first()`), so a different
+        org's CategoryDetails.id for the SAME-NAMED test type won't match it
+        at all. Confirmed live: an org whose "Protection Relay Calibration
+        and History" CategoryDetails.id was 102 got is_calibration=False on
+        every request, because the seeded global template's test_type_id was
+        45 (some other org's row for the same name) — the exact-id lookup
+        below silently found nothing for that org's own id every time.
         """
         if not test_type_id:
             return False
+
+        def _has_calibration(data: dict) -> bool:
+            if data.get("enable_calibration"):
+                return True
+            return any(
+                (r.get("type") or "").upper() == "DATE_ADD"
+                for r in data.get("rules", [])
+            )
+
         tpl = (
             self.db.query(OrgTestTemplate)
             .filter(OrgTestTemplate.test_type_id == test_type_id)
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )
-        if not tpl:
-            return False
-        data = tpl.template_data or {}
-        if data.get("enable_calibration"):
+        if tpl and _has_calibration(tpl.template_data or {}):
             return True
-        return any(
-            (r.get("type") or "").upper() == "DATE_ADD"
-            for r in data.get("rules", [])
-        )
+
+        # Fall back to test_templates.py static dict via test type name
+        try:
+            from test_templates import TEST_TYPE_TO_TEMPLATE, get_template_by_key
+            detail = self.db.query(CategoryDetails).filter(CategoryDetails.id == test_type_id).first()
+            if detail:
+                tmpl_key = TEST_TYPE_TO_TEMPLATE.get(detail.name)
+                if tmpl_key:
+                    static_tpl = get_template_by_key(tmpl_key)
+                    if static_tpl and _has_calibration(static_tpl):
+                        return True
+        except Exception:
+            pass
+
+        return False
 
     def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
         request_number = self._generate_request_number(org_id=data.get("organization_id"))
@@ -372,12 +423,7 @@ class TestingRequestService:
                 elif statuses:
                     query = query.filter(_status_conditions(statuses))
         if is_closed is not None:
-            _LEGACY_CLOSED_STATUSES = [
-                TestingRequestStatus.approved,
-                TestingRequestStatus.completed,
-                TestingRequestStatus.closed,
-                TestingRequestStatus.rejected,
-            ]
+            from services.dashboard_service import CLOSED_STATUSES as _LEGACY_CLOSED_STATUSES
             wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
                 TrWfInstance.status.in_(["completed", "terminated"])
             ).scalar_subquery()
@@ -1219,12 +1265,7 @@ class TestingRequestService:
             # so open_count + closed_count could fall short of request_count
             # and undercount "Open" on the zone carousel relative to the
             # /breakdown tiles (which use this same complement logic).
-            _LEGACY_CLOSED_STATUSES = [
-                TestingRequestStatus.approved,
-                TestingRequestStatus.completed,
-                TestingRequestStatus.closed,
-                TestingRequestStatus.rejected,
-            ]
+            from services.dashboard_service import CLOSED_STATUSES as _LEGACY_CLOSED_STATUSES
             wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
                 TrWfInstance.status.in_(["completed", "terminated"])
             ).scalar_subquery()
@@ -1638,12 +1679,8 @@ class TestingRequestService:
         from collections import defaultdict
 
         today = datetime.now(timezone.utc)
-        _CLOSED_STATUSES = {
-            TestingRequestStatus.closed,
-            TestingRequestStatus.completed,
-            TestingRequestStatus.approved,
-            TestingRequestStatus.rejected,
-        }
+        from services.dashboard_service import CLOSED_STATUSES as _CLOSED_STATUSES_TUPLE
+        _CLOSED_STATUSES = set(_CLOSED_STATUSES_TUPLE)
 
         query = (
             self.db.query(TestingRequest)

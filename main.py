@@ -108,6 +108,7 @@ from routers import organizations, org_departments, org_users, org_roles
 from routers import equipment
 from routers import equipment_type_kit_mappings
 from routers import condition_monitoring_recommendations
+from routers import threshold_config
 
 # Notification & Alert Engine
 from routers import notifications as notifications_router
@@ -1578,6 +1579,7 @@ app.include_router(precommission_router.router)  # Pre-Commission QAP
 app.include_router(equipment.router)
 app.include_router(equipment_type_kit_mappings.router)
 app.include_router(condition_monitoring_recommendations.router)
+app.include_router(threshold_config.router)
 
 # Notification & Alert Engine
 app.include_router(notifications_router.router)

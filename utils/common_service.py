@@ -61,20 +61,14 @@ def get_user_dept_scope(db: Session, user_id: UUID, org_id: Optional[UUID]) -> T
       4. (False, None)              [no dept restriction found]
     """
     from models import OrgRole, OrgUserRole, User
+    # Deferred import — auth_utils.py imports UTCDateTimeMixin from this
+    # module at load time, so a module-level import back here would be
+    # circular. has_org_admin_role is the single source for this check
+    # (previously reimplemented here without the OrgRole.is_active filter
+    # every other copy of this query had).
+    from auth_utils import has_org_admin_role
 
-    # Check for org-admin role
-    is_org_admin = (
-        db.query(OrgRole)
-        .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
-        .filter(
-            OrgUserRole.user_id == user_id,
-            OrgUserRole.is_active.is_(True),
-            OrgRole.is_org_admin.is_(True),
-        )
-        .first()
-    ) is not None
-
-    if is_org_admin:
+    if has_org_admin_role(user_id, db):
         return True, None
 
     # Priority 1: role scoped to a specific department

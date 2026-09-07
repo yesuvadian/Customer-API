@@ -219,6 +219,12 @@ ANALYTICS_ANOMALY_Z = float(os.getenv("ANALYTICS_ANOMALY_Z", 3.0))
 # ParameterAnalyzer.MIN_TREND_R_SQUARED's docstring for how this was
 # found (Acidity readings with r²=0.08 were still labeled "Increasing").
 ANALYTICS_MIN_TREND_R_SQUARED = float(os.getenv("ANALYTICS_MIN_TREND_R_SQUARED", 0.5))
+# Trend regression only fits the most recent N readings (current reading
+# included), not full history — an old bad/outlier reading years back would
+# otherwise permanently drag down r² for every future test on that
+# parameter, with no way to recover except deleting the offending row.
+# A rolling window means new clean readings naturally age old ones out.
+ANALYTICS_TREND_WINDOW = int(os.getenv("ANALYTICS_TREND_WINDOW", 8))
 # Deterioration Watch List (routers/analytics.py): minimum ParameterAnalytics
 # history_count before a parameter with no ParameterThresholdBand config at
 # all is trusted enough to surface there (a 2-3 point trend fits ~perfectly
@@ -233,3 +239,55 @@ ANALYTICS_MIN_WATCH_HISTORY = int(os.getenv("ANALYTICS_MIN_WATCH_HISTORY", 4))
 # their own tunable rather than a rule row in that table.
 ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS", 7))
 ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS", 15))
+
+# AI calibration-interval optimisation advisories (KPTCL spec §14.6,
+# services/calibration_service.py's compute_interval_advisories) — an
+# AI Advisory only, per the spec's own blanket rule that every AI output
+# is decision-support reviewed by an officer, never auto-applied to the
+# actual schedule. Cohort = (template_key, manufacturer, model_number):
+# never mixed across calibration test types or across different relay/
+# meter designs, and never advises off too small a sample.
+CALIBRATION_INTERVAL_MIN_CYCLES = int(os.getenv("CALIBRATION_INTERVAL_MIN_CYCLES", 5))
+# Fail rate (%) at or below which an all-clear cohort is advised to
+# EXTEND its validity period.
+CALIBRATION_INTERVAL_EXTEND_FAIL_RATE_PCT = float(os.getenv("CALIBRATION_INTERVAL_EXTEND_FAIL_RATE_PCT", 0.0))
+# Fail rate (%) at or above which a cohort is advised to SHORTEN its
+# validity period.
+CALIBRATION_INTERVAL_SHORTEN_FAIL_RATE_PCT = float(os.getenv("CALIBRATION_INTERVAL_SHORTEN_FAIL_RATE_PCT", 20.0))
+CALIBRATION_INTERVAL_EXTEND_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_EXTEND_MONTHS", 6))
+CALIBRATION_INTERVAL_SHORTEN_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_SHORTEN_MONTHS", 6))
+CALIBRATION_INTERVAL_MAX_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_MAX_MONTHS", 60))
+CALIBRATION_INTERVAL_MIN_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_MIN_MONTHS", 6))
+
+# Equipment failure cohort reliability (KPTCL spec §2: "cumulative failure
+# count, failure rate, and mean time between failures (MTBF) ... per
+# make/model cohort"). Cohort = (equipment_type, manufacturer,
+# model_number) — the existing "Equipment Failure Performance Analysis"
+# report groups by voltage_class/age_band instead of model_number, which is
+# right for that report's own comparative purpose but not a literal
+# make/model cohort, so this is computed separately.
+# Minimum units a (type, make, model) cohort needs before its failure rate
+# is surfaced — a 1-2 unit "cohort" isn't a real reliability signal yet.
+FAILURE_COHORT_MIN_UNITS = int(os.getenv("FAILURE_COHORT_MIN_UNITS", 3))
+# How many of the worst cohorts (by failure rate) to surface on the
+# Overall Dashboard panel.
+FAILURE_COHORT_DASHBOARD_LIMIT = int(os.getenv("FAILURE_COHORT_DASHBOARD_LIMIT", 8))
+# Per-cohort yearly failure trend, shown as a line chart alongside the
+# failure-rate ranking. Real failure history here is sparse and spans
+# decades (checked: as far back as 2001), not something a 12-month window
+# would show meaningfully, so this buckets by year, not month, over a
+# longer lookback.
+FAILURE_COHORT_TREND_YEARS = int(os.getenv("FAILURE_COHORT_TREND_YEARS", 10))
+# Trend lines are capped to the worst N cohorts (by failure rate) so the
+# chart stays readable instead of an 8-color tangle.
+FAILURE_COHORT_TREND_MAX_SERIES = int(os.getenv("FAILURE_COHORT_TREND_MAX_SERIES", 5))
+# KPTCL spec §2: "maintain a Design Problem Register to track recurring
+# failures attributed to a particular make, model, or design batch."
+# Deliberately just a dashboard flag, not an automatic register entry —
+# spec's own wording is "flagged by the AEE or EE" (a human decision).
+# A cohort at or above this failure rate is tagged "DESIGN PROBLEM
+# CANDIDATE" on the Failure Reliability panel; same default as the panel's
+# own "red" severity cutoff (overview_dashboard.dart's _failureRateColor),
+# so the tag lands on exactly the rows already shown as red — no new
+# threshold concept, just naming the existing one.
+DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE = float(os.getenv("DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE", 1.0))
