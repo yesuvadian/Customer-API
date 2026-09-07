@@ -691,18 +691,27 @@ class HealthScorer:
                         ru    = row.get("unit", "")
                         rs    = row.get("status", "")
                         name  = row.get("row_id", "")
+                        # Prefix with the table's own label so two tables in
+                        # the same template that happen to reuse a row name
+                        # (e.g. both the OTI and WTI functional-test tables
+                        # have an "Alarm" / "Trip" row) don't produce two
+                        # identical, undistinguishable critical findings -
+                        # same disambiguation convention already used for
+                        # per-row trend parameters (see row_label below).
+                        table_label   = field.get("label") or fkey
+                        display_name  = f"{table_label} — {name}" if table_label else name
                         # Use stored breach_limit if available; fall back to template lookup
                         rl    = row.get("breach_limit") or _tmpl_limits.get(name.lower())
                         u     = f" {ru}" if ru else ""
                         if rv is not None and rl is not None:
-                            r_reason = f"{name}: {rv}{u} — allowable {rl}{u} ({rs})"
+                            r_reason = f"{display_name}: {rv}{u} — allowable {rl}{u} ({rs})"
                         elif rv is not None:
-                            r_reason = f"{name}: {rv}{u} — {rs}"
+                            r_reason = f"{display_name}: {rv}{u} — {rs}"
                         else:
-                            r_reason = f"{name} — evaluated as {rs}"
+                            r_reason = f"{display_name} — evaluated as {rs}"
                         critical_findings.append({
                             "key":          f"{fkey}.{name}",
-                            "label":        name,
+                            "label":        display_name,
                             "condition":    "Poor",
                             "status":       rs,
                             "unit":         ru or None,

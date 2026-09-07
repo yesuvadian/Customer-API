@@ -9054,6 +9054,89 @@ TEST_TEMPLATES = {
         ],
     },
 
+    # ════════════════════════════════════════════════════════════════════════════
+    # OLTC DYNAMIC RESISTANCE MEASUREMENT (DRM) — gap flagged directly by the
+    # user against the TNEB proposal's own CM matrix, which lists it as one of
+    # Power Transformer's 12 in-scope CM procedures. Distinct from both
+    # "OLTC Operations Count" (a cumulative tap-change counter, not a
+    # measurement) and "Winding Resistance Measurement" (tests the main
+    # windings, not the OLTC's switching contacts). Power Transformer already
+    # has full active Test coverage, but this is genuinely new, unreviewed
+    # content — disabled by default like every other new template this round.
+    # ════════════════════════════════════════════════════════════════════════════
+
+    "oltc_drm_test": {
+        "key": "oltc_drm_test",
+        "name": "OLTC Dynamic Resistance Measurement (DRM)",
+        "equipment_type": "Power Transformer",
+        "description": "Dynamic contact resistance measurement across OLTC tap positions — detects contact pitting, coking, and transition-timing anomalies during tap-change operation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "OLTC & Test Setup",
+                "fields": [
+                    {"key": "oltc_make",          "label": "OLTC Make",              "type": "text",   "required": True},
+                    {"key": "oltc_type",          "label": "OLTC Type",              "type": "dropdown", "options": ["Motor-operated OLTC", "Pneumatic OLTC", "Other"]},
+                    {"key": "total_tap_positions","label": "Total Tap Positions",    "type": "number"},
+                    {"key": "test_current_a",     "label": "Test Current",           "type": "number", "unit": "A"},
+                    {"key": "test_equipment",     "label": "DRM Analyzer Used",      "type": "text"},
+                    {"key": "baseline_available", "label": "Factory / Commissioning Baseline Available", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Dynamic Resistance Readings",
+                "fields": [
+                    {
+                        "key": "drm_readings",
+                        "label": "Per-Tap DRM Readings",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "tap_position",       "label": "Tap Position",              "type": "text"},
+                            {"key": "direction",          "label": "Direction",                 "type": "dropdown", "options": ["Raise", "Lower"]},
+                            {"key": "selector_resistance_mohm", "label": "Selector Contact Resistance", "type": "number", "unit": "mΩ"},
+                            {"key": "transition_time_ms", "label": "Diverter Transition Time",  "type": "number", "unit": "ms"},
+                            {"key": "deviation_pct",      "label": "Deviation from Baseline",   "type": "number", "unit": "%"},
+                            {"key": "anomaly_detected",   "label": "Anomaly Detected",          "type": "dropdown", "options": ["No", "Yes"], "dropdown_evaluation": {"enabled": True, "value_severities": {"No": "NORMAL", "Yes": "ALERT"}}},
+                        ],
+                        "default_rows": [{"tap_position": "1", "direction": "Raise"}],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "max_deviation_pct",         "label": "Maximum Resistance Deviation Observed", "type": "number", "unit": "%"},
+                    {"key": "transition_time_within_limit","label": "All Transition Times Within Limit",   "type": "checkbox"},
+                    {
+                        "key": "suspected_fault_type", "label": "Suspected OLTC Fault Type", "type": "dropdown",
+                        "options": ["None", "Contact Pitting", "Coking", "Transition Timing Deviation",
+                                    "Selector Misalignment", "Diverter Switch Wear"],
+                    },
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
 }
 
 
@@ -9231,6 +9314,9 @@ TEST_TYPE_TO_TEMPLATE = {
     # ── Gap-fill: Maintenance for already-live equipment types (disabled) ───
     "Current Transformer Preventive Maintenance":  "current_transformer_maintenance",
     "Capacitor Voltage Transformer Preventive Maintenance": "cvt_maintenance",
+
+    # ── OLTC Dynamic Resistance Measurement (disabled) ──
+    "OLTC Dynamic Resistance Measurement (DRM)": "oltc_drm_test",
 
 }
 
