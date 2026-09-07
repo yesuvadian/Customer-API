@@ -7101,6 +7101,1959 @@ TEST_TEMPLATES = {
         ],
     },
 
+    # ── Transformer auxiliary functional checks ───────────────────────────────
+    # WTI/OTI, PRV and Buchholz relay only ever had a bare pass/fail checkbox
+    # inside the general inspection checklists (transformer_physical_inspection,
+    # the SRS §6.1 Visual Inspection Checklist) - a glance-and-tick, not an
+    # actual functional test. These three templates capture the real test: the
+    # nameplate/rated setpoint recorded alongside the actual value observed
+    # during a simulated heat/pressure/gas test, plus the objective pass/fail
+    # verdict of whether the alarm/trip/fan-start contact actually operated -
+    # which is what a "functional check" means for a protective device, as
+    # opposed to a calibration check of exact setpoint accuracy.
+    "wti_oti_functional_test": {
+        "key": "wti_oti_functional_test",
+        "name": "WTI / OTI Functional Test",
+        "equipment_type": "Power Transformer",
+        "description": "Functional verification of the Winding Temperature Indicator and Oil "
+                        "Temperature Indicator - confirms the alarm/trip/fan-start contacts "
+                        "actually operate, not just that the dial reads a plausible value.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",       "label": "Testing Kit Used",     "type": "text",   "required": True},
+                    {"key": "ambient_temp_c", "label": "Ambient Temperature",  "type": "number", "unit": "°C", "required": True},
+                    {"key": "test_method",    "label": "Test Method",          "type": "dropdown", "required": True,
+                     "options": ["Hot Oil Bath", "Secondary Injection", "Simulated (Test Kit)"]},
+                ],
+            },
+            {
+                "title": "OTI (Oil Temperature Indicator)",
+                "fields": [
+                    {
+                        "key": "oti_functional",
+                        "label": "OTI Functional Test Points",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_point",         "label": "Test Point",              "type": "readonly"},
+                            {"key": "rated_setpoint_c",   "label": "Rated Setpoint (Nameplate)", "type": "number", "unit": "°C"},
+                            {"key": "actual_value_c",     "label": "Actual Value Observed",   "type": "number", "unit": "°C"},
+                            {
+                                "key": "result", "label": "Contact Operation", "type": "dropdown",
+                                "options": ["Pass", "Fail"],
+                                "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
+                            },
+                        ],
+                        "default_rows": [
+                            {"test_point": "Alarm"},
+                            {"test_point": "Trip"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "remedial_action_text": "OTI alarm/trip contact did not operate at the "
+                                                     "rated setpoint - recalibrate or replace the "
+                                                     "indicator before re-energising.",
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "WTI (Winding Temperature Indicator)",
+                "fields": [
+                    {
+                        "key": "wti_functional",
+                        "label": "WTI Functional Test Points",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_point",         "label": "Test Point",              "type": "readonly"},
+                            {"key": "rated_setpoint_c",   "label": "Rated Setpoint (Nameplate)", "type": "number", "unit": "°C"},
+                            {"key": "actual_value_c",     "label": "Actual Value Observed",   "type": "number", "unit": "°C"},
+                            {
+                                "key": "result", "label": "Contact Operation", "type": "dropdown",
+                                "options": ["Pass", "Fail"],
+                                "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
+                            },
+                        ],
+                        "default_rows": [
+                            {"test_point": "Fan Auto-Start"},
+                            {"test_point": "Alarm"},
+                            {"test_point": "Trip"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "remedial_action_text": "WTI alarm/trip/fan-start contact did not "
+                                                     "operate at the rated setpoint - recalibrate "
+                                                     "or replace the indicator before re-energising.",
+                        },
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    "prv_functional_test": {
+        "key": "prv_functional_test",
+        "name": "Pressure Relief Valve (PRV) Functional Test",
+        "equipment_type": "Power Transformer",
+        "description": "Functional verification that the pressure relief valve operates at its "
+                        "rated pressure, reseats correctly, and its alarm contact fires.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",       "label": "Testing Kit Used",    "type": "text",   "required": True},
+                    {"key": "ambient_temp_c", "label": "Ambient Temperature", "type": "number", "unit": "°C", "required": True},
+                    {"key": "prv_make",       "label": "PRV Make",            "type": "text"},
+                    {"key": "prv_rated_pressure_kg_cm2", "label": "Rated Operating Pressure (Nameplate)", "type": "number", "unit": "kg/cm²", "required": True},
+                ],
+            },
+            {
+                "title": "Functional Test",
+                "fields": [
+                    {
+                        "key": "prv_functional",
+                        "label": "PRV Functional Test Points",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_point",       "label": "Test Point",                 "type": "readonly"},
+                            {"key": "rated_value",      "label": "Rated Value (Nameplate)",     "type": "number", "unit": "kg/cm²"},
+                            {"key": "actual_value",     "label": "Actual Value Observed",       "type": "number", "unit": "kg/cm²"},
+                            {
+                                "key": "result", "label": "Result", "type": "dropdown",
+                                "options": ["Pass", "Fail"],
+                                "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
+                            },
+                        ],
+                        "default_rows": [
+                            {"test_point": "Operating Pressure"},
+                            {"test_point": "Alarm Contact"},
+                            {"test_point": "Reseal (drops to 0 after operation)"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "remedial_action_text": "PRV did not operate at rated pressure, failed "
+                                                     "to reseat, or its alarm contact did not fire - "
+                                                     "replace or overhaul the valve before "
+                                                     "re-energising.",
+                        },
+                    },
+                    {"key": "prv_gasket_condition", "label": "Gasket / Seal Condition", "type": "dropdown",
+                     "options": ["Good", "Weathered", "Cracked", "Leaking"],
+                     "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Weathered": "ALERT", "Cracked": "CRITICAL", "Leaking": "CRITICAL"}}},
+                    {"key": "prv_visual_condition", "label": "Visual/Mechanical Condition", "type": "dropdown",
+                     "options": ["Good", "Corroded", "Damaged"],
+                     "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Corroded": "ALERT", "Damaged": "CRITICAL"}}},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    "buchholz_relay_functional_test": {
+        "key": "buchholz_relay_functional_test",
+        "name": "Buchholz Relay Functional Test",
+        "equipment_type": "Power Transformer",
+        "description": "Functional verification of the Buchholz relay's alarm (gas accumulation) "
+                        "and trip (oil surge) contacts via simulated air injection / oil surge, "
+                        "per IS 3637.",
+        "supports_multi_session": False,
+        "typical_total_sessions": 1,
+        "sections": [
+            {
+                "title": "Test Conditions",
+                "fields": [
+                    {"key": "test_kit",   "label": "Testing Kit Used",  "type": "text",   "required": True},
+                    {"key": "relay_make", "label": "Relay Make",        "type": "text"},
+                    {"key": "relay_type", "label": "Relay Type",        "type": "dropdown",
+                     "options": ["Double Float", "Single Float + Flap", "Reed Switch Type"]},
+                ],
+            },
+            {
+                "title": "Functional Test",
+                "fields": [
+                    {
+                        "key": "buchholz_functional",
+                        "label": "Buchholz Functional Test Points",
+                        "type": "table",
+                        "allow_add_rows": False,
+                        "allow_delete_rows": False,
+                        "lock_default_rows": False,
+                        "columns": [
+                            {"key": "test_point",   "label": "Test Point",                       "type": "readonly"},
+                            {"key": "test_value",   "label": "Air Injected / Surge Applied",      "type": "number", "unit": "cc"},
+                            {
+                                "key": "result", "label": "Contact Operation", "type": "dropdown",
+                                "options": ["Pass", "Fail"],
+                                "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
+                            },
+                        ],
+                        "default_rows": [
+                            {"test_point": "Alarm (Gas Accumulation - Air Injection Test)"},
+                            {"test_point": "Trip (Oil Surge Test)"},
+                        ],
+                        "table_evaluation": {
+                            "enabled": True,
+                            "remedial_action_text": "Buchholz relay alarm or trip contact did not "
+                                                     "operate during the simulated test - service or "
+                                                     "replace the relay before re-energising; the "
+                                                     "transformer's primary internal-fault protection "
+                                                     "cannot be relied upon until this is corrected.",
+                        },
+                    },
+                    {"key": "float_mercury_condition", "label": "Float / Mercury Switch Condition", "type": "dropdown",
+                     "options": ["Free Movement", "Sluggish", "Stuck", "Damaged"],
+                     "dropdown_evaluation": {"enabled": True, "value_severities": {"Free Movement": "NORMAL", "Sluggish": "ALERT", "Stuck": "CRITICAL", "Damaged": "CRITICAL"}}},
+                    {"key": "wiring_continuity_ok", "label": "Alarm/Trip Wiring Continuity Checked", "type": "boolean", "required": True},
+                    {"key": "gas_sample_taken", "label": "Gas Sample Taken for Analysis (if gas present)", "type": "boolean"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {
+                        "key": "overall_result", "label": "Overall Result", "type": "dropdown",
+                        "options": ["PASS", "ALERT", "FAIL"], "required": True,
+                        "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
+                    },
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                ],
+            },
+        ],
+    },
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # NEW EQUIPMENT TYPES — Test / Maintenance / Inspection, DISABLED BY DEFAULT.
+    #
+    # These 11 equipment types (Potential Transformer, Isolator/Disconnector,
+    # Control & Relay Panel, Battery Charger, Station Auxiliary Transformer,
+    # Diesel Generator Set, Digital Communication Panel, LTAC Panel, PLCC
+    # Panel, Wave Trap, Fire Fighting System) already exist as CategoryMaster
+    # rows but had zero test/maintenance/inspection templates. Each carries
+    # "is_active": False so sync_category_details_active_flags() (see
+    # seed_category_active_flags.py) marks the matching CategoryDetails rows
+    # inactive too — flip this to True (and re-run that sync) per type once
+    # its form content has been reviewed against real site procedures.
+    # ════════════════════════════════════════════════════════════════════════════
+
+    # ── Potential Transformer ──────────────────────────────────────────────────
+    "potential_transformer_test": {
+        "key": "potential_transformer_test",
+        "name": "Potential Transformer Test",
+        "equipment_type": "Potential Transformer",
+        "description": "Ratio, polarity and insulation resistance test for electromagnetic potential transformers.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Ratio, Polarity & Insulation",
+                "fields": [
+                    {"key": "rated_primary_voltage_kv",   "label": "Rated Primary Voltage",   "type": "number", "unit": "kV"},
+                    {"key": "rated_secondary_voltage_v",  "label": "Rated Secondary Voltage",  "type": "number", "unit": "V"},
+                    {"key": "measured_ratio",              "label": "Measured Ratio",           "type": "text"},
+                    {"key": "ratio_error_pct",              "label": "Ratio Error",             "type": "number", "unit": "%"},
+                    {"key": "polarity_result",              "label": "Polarity Test",           "type": "dropdown", "options": ["Pass", "Fail"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
+                    {"key": "ir_primary_earth_mohm",        "label": "IR — Primary to Earth",   "type": "number", "unit": "MΩ"},
+                    {"key": "ir_secondary_earth_mohm",      "label": "IR — Secondary to Earth", "type": "number", "unit": "MΩ"},
+                    {"key": "burden_va",                    "label": "Rated Burden",            "type": "number", "unit": "VA"},
+                    {"key": "accuracy_class",               "label": "Accuracy Class",          "type": "text"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "potential_transformer_maintenance": {
+        "key": "potential_transformer_maintenance",
+        "name": "Potential Transformer Preventive Maintenance",
+        "equipment_type": "Potential Transformer",
+        "description": "Routine preventive maintenance checklist for potential transformers.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",     "label": "Permit to Work obtained",           "type": "checkbox", "required": True},
+                    {"key": "earth_applied",      "label": "Earth connections applied",         "type": "checkbox", "required": True},
+                    {"key": "oil_level_ok",       "label": "Oil level satisfactory (oil-filled units)", "type": "checkbox"},
+                    {"key": "terminal_tightness", "label": "Terminal connections checked for tightness", "type": "checkbox"},
+                    {"key": "no_corrosion",       "label": "No corrosion / physical damage observed", "type": "checkbox"},
+                    {"key": "general_cleaning",   "label": "General cleaning completed",        "type": "checkbox", "required": True},
+                    {"key": "observations",       "label": "Observations",                      "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "potential_transformer_inspection": {
+        "key": "potential_transformer_inspection",
+        "name": "Potential Transformer Annual Inspection",
+        "equipment_type": "Potential Transformer",
+        "description": "Annual inspection checklist for potential transformers — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Isolator / Disconnector ─────────────────────────────────────────────────
+    "isolator_test": {
+        "key": "isolator_test",
+        "name": "Isolator Contact Resistance & Insulation Test",
+        "equipment_type": "Isolator / Disconnector",
+        "description": "Contact resistance, insulation resistance and interlock verification for isolators / disconnectors.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Contact Resistance & Insulation",
+                "fields": [
+                    {"key": "isolator_type",        "label": "Type", "type": "dropdown", "options": ["Manual", "Motorized"], "required": True},
+                    {"key": "contact_resistance_r",  "label": "Contact Resistance — R Phase", "type": "number", "unit": "µΩ"},
+                    {"key": "contact_resistance_y",  "label": "Contact Resistance — Y Phase", "type": "number", "unit": "µΩ"},
+                    {"key": "contact_resistance_b",  "label": "Contact Resistance — B Phase", "type": "number", "unit": "µΩ"},
+                    {"key": "insulation_resistance_mohm", "label": "Insulation Resistance", "type": "number", "unit": "MΩ"},
+                    {"key": "interlock_check",       "label": "Earth Switch Interlock Check", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "blade_alignment_ok",    "label": "Blade Alignment / Full Close Contact", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "isolator_maintenance": {
+        "key": "isolator_maintenance",
+        "name": "Isolator Preventive Maintenance",
+        "equipment_type": "Isolator / Disconnector",
+        "description": "Routine preventive maintenance checklist for isolators / disconnectors.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",       "label": "Permit to Work obtained",           "type": "checkbox", "required": True},
+                    {"key": "earth_applied",        "label": "Earth connections applied",         "type": "checkbox", "required": True},
+                    {"key": "contacts_lubricated",  "label": "Main contacts lubricated",          "type": "checkbox"},
+                    {"key": "mechanism_lubricated", "label": "Operating mechanism lubricated",    "type": "checkbox"},
+                    {"key": "blade_alignment_checked", "label": "Blade alignment checked",        "type": "checkbox"},
+                    {"key": "no_corrosion",         "label": "No corrosion / physical damage observed", "type": "checkbox"},
+                    {"key": "general_cleaning",     "label": "General cleaning completed",        "type": "checkbox", "required": True},
+                    {"key": "observations",         "label": "Observations",                      "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "isolator_inspection": {
+        "key": "isolator_inspection",
+        "name": "Isolator Annual Inspection",
+        "equipment_type": "Isolator / Disconnector",
+        "description": "Annual inspection checklist for isolators / disconnectors — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Control & Relay Panel ───────────────────────────────────────────────────
+    "cr_panel_test": {
+        "key": "cr_panel_test",
+        "name": "Control & Relay Panel Functional Test",
+        "equipment_type": "Control & Relay Panel",
+        "description": "Functional verification of control wiring, relay indication, annunciation, and trip circuit supervision.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Functional Checks",
+                "fields": [
+                    {"key": "wiring_continuity_ok",        "label": "Control wiring continuity verified", "type": "checkbox", "required": True},
+                    {"key": "indication_lamps_ok",          "label": "Relay / indication lamps functional", "type": "checkbox"},
+                    {"key": "annunciation_test_result",     "label": "Annunciation Test", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "trip_circuit_supervision_ok",  "label": "Trip Circuit Supervision Relay Healthy", "type": "checkbox"},
+                    {"key": "panel_meters_calibrated",      "label": "Panel Meters Within Calibration", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "cr_panel_maintenance": {
+        "key": "cr_panel_maintenance",
+        "name": "Control & Relay Panel Preventive Maintenance",
+        "equipment_type": "Control & Relay Panel",
+        "description": "Routine preventive maintenance checklist for control & relay panels.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",         "label": "Permit to Work obtained",         "type": "checkbox", "required": True},
+                    {"key": "terminal_tightness",     "label": "Terminal connections checked for tightness", "type": "checkbox"},
+                    {"key": "dust_removed",           "label": "Dust / debris removed from panel interior", "type": "checkbox", "required": True},
+                    {"key": "indication_lamps_checked","label": "Indication lamps checked / replaced",       "type": "checkbox"},
+                    {"key": "cable_glands_ok",        "label": "Cable glands and gasket seals intact",       "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations",                    "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "cr_panel_inspection": {
+        "key": "cr_panel_inspection",
+        "name": "Control & Relay Panel Annual Inspection",
+        "equipment_type": "Control & Relay Panel",
+        "description": "Annual inspection checklist for control & relay panels — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Battery Charger ─────────────────────────────────────────────────────────
+    "battery_charger_test": {
+        "key": "battery_charger_test",
+        "name": "Battery Charger Output & Ripple Test",
+        "equipment_type": "Battery Charger",
+        "description": "Float/boost output voltage, ripple content, load test, and alarm function verification.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Output & Ripple",
+                "fields": [
+                    {"key": "float_voltage_v",   "label": "Float Voltage Output",  "type": "number", "unit": "V"},
+                    {"key": "boost_voltage_v",   "label": "Boost Voltage Output",  "type": "number", "unit": "V"},
+                    {"key": "ripple_content_pct","label": "Ripple Content",        "type": "number", "unit": "%"},
+                    {"key": "load_test_result",  "label": "Full Load Test",        "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "ac_fail_alarm_ok",  "label": "AC Fail Alarm Functional",  "type": "checkbox"},
+                    {"key": "dc_fail_alarm_ok",  "label": "DC Fail Alarm Functional",  "type": "checkbox"},
+                    {"key": "low_voltage_alarm_ok","label": "Low Voltage Alarm Functional", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "battery_charger_maintenance": {
+        "key": "battery_charger_maintenance",
+        "name": "Battery Charger Preventive Maintenance",
+        "equipment_type": "Battery Charger",
+        "description": "Routine preventive maintenance checklist for battery chargers.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",     "label": "Permit to Work obtained",       "type": "checkbox", "required": True},
+                    {"key": "terminal_tightness", "label": "Terminal connections checked for tightness", "type": "checkbox"},
+                    {"key": "fan_filter_ok",      "label": "Cooling fan / filter cleaned",  "type": "checkbox"},
+                    {"key": "indication_lamps_checked", "label": "Indication lamps checked / replaced", "type": "checkbox"},
+                    {"key": "general_cleaning",   "label": "General cleaning completed",    "type": "checkbox", "required": True},
+                    {"key": "observations",       "label": "Observations",                  "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "battery_charger_inspection": {
+        "key": "battery_charger_inspection",
+        "name": "Battery Charger Annual Inspection",
+        "equipment_type": "Battery Charger",
+        "description": "Annual inspection checklist for battery chargers — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Station Auxiliary Transformer ───────────────────────────────────────────
+    "station_aux_transformer_test": {
+        "key": "station_aux_transformer_test",
+        "name": "Station Auxiliary Transformer Test",
+        "equipment_type": "Station Auxiliary Transformer",
+        "description": "Insulation resistance, winding resistance, ratio, and oil test for station auxiliary transformers.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Electrical & Oil Parameters",
+                "fields": [
+                    {"key": "ir_hv_earth_mohm",   "label": "IR — HV to Earth",       "type": "number", "unit": "MΩ"},
+                    {"key": "ir_lv_earth_mohm",   "label": "IR — LV to Earth",       "type": "number", "unit": "MΩ"},
+                    {"key": "winding_resistance_ohm", "label": "Winding Resistance", "type": "number", "unit": "Ω"},
+                    {"key": "ratio_test_result",  "label": "Ratio Test",             "type": "dropdown", "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
+                    {"key": "oil_bdv_kv",         "label": "Oil BDV",                "type": "number", "unit": "kV"},
+                    {"key": "oil_moisture_ppm",   "label": "Oil Moisture Content",   "type": "number", "unit": "ppm"},
+                    {"key": "oti_wti_functional", "label": "OTI / WTI Functional Check", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "station_aux_transformer_maintenance": {
+        "key": "station_aux_transformer_maintenance",
+        "name": "Station Auxiliary Transformer Preventive Maintenance",
+        "equipment_type": "Station Auxiliary Transformer",
+        "description": "Routine preventive maintenance checklist for station auxiliary transformers.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",       "label": "Permit to Work obtained",         "type": "checkbox", "required": True},
+                    {"key": "oil_level_ok",         "label": "Oil level satisfactory",          "type": "checkbox"},
+                    {"key": "breather_silica_ok",   "label": "Breather silica gel active (blue)", "type": "checkbox"},
+                    {"key": "cooling_fan_ok",       "label": "Cooling fan operational",         "type": "checkbox"},
+                    {"key": "general_cleaning",     "label": "General cleaning completed",      "type": "checkbox", "required": True},
+                    {"key": "observations",         "label": "Observations",                    "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "station_aux_transformer_inspection": {
+        "key": "station_aux_transformer_inspection",
+        "name": "Station Auxiliary Transformer Annual Inspection",
+        "equipment_type": "Station Auxiliary Transformer",
+        "description": "Annual inspection checklist for station auxiliary transformers — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Diesel Generator Set ────────────────────────────────────────────────────
+    "dg_set_test": {
+        "key": "dg_set_test",
+        "name": "DG Set Load & Performance Test",
+        "equipment_type": "Diesel Generator Set",
+        "description": "Load test, auto-start timing, voltage/frequency regulation, and alternator insulation check for diesel generator sets.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Load & Performance",
+                "fields": [
+                    {"key": "auto_start_time_sec",  "label": "Auto-Start Time",           "type": "number", "unit": "sec"},
+                    {"key": "load_test_kw",          "label": "Load Test Reading",         "type": "number", "unit": "kW"},
+                    {"key": "voltage_regulation_pct","label": "Voltage Regulation",        "type": "number", "unit": "%"},
+                    {"key": "frequency_hz",          "label": "Output Frequency",          "type": "number", "unit": "Hz"},
+                    {"key": "alternator_ir_mohm",    "label": "Alternator Insulation Resistance", "type": "number", "unit": "MΩ"},
+                    {"key": "fuel_consumption_lph",  "label": "Fuel Consumption",          "type": "number", "unit": "L/hr"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "dg_set_maintenance": {
+        "key": "dg_set_maintenance",
+        "name": "DG Set Preventive Maintenance",
+        "equipment_type": "Diesel Generator Set",
+        "description": "Routine preventive maintenance checklist for diesel generator sets.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",     "label": "Permit to Work obtained",         "type": "checkbox", "required": True},
+                    {"key": "oil_filter_changed", "label": "Engine oil / filter changed as due", "type": "checkbox"},
+                    {"key": "battery_checked",    "label": "Starting battery checked",        "type": "checkbox"},
+                    {"key": "coolant_level_ok",   "label": "Coolant level satisfactory",      "type": "checkbox"},
+                    {"key": "radiator_cleaned",   "label": "Radiator / cooling fins cleaned", "type": "checkbox"},
+                    {"key": "auto_start_test_ok", "label": "Auto-start test performed",       "type": "checkbox", "required": True},
+                    {"key": "observations",       "label": "Observations",                    "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "dg_set_inspection": {
+        "key": "dg_set_inspection",
+        "name": "DG Set Annual Inspection",
+        "equipment_type": "Diesel Generator Set",
+        "description": "Annual inspection checklist for diesel generator sets — safety, fuel storage, civil, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "fuel_storage_safe",      "label": "Fuel storage meets safety norms",         "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Digital Communication Panel ─────────────────────────────────────────────
+    "comm_panel_test": {
+        "key": "comm_panel_test",
+        "name": "Digital Communication Panel Functional Test",
+        "equipment_type": "Digital Communication Panel",
+        "description": "Link status, signal quality, alarm relay, and redundant power supply verification.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Link & Power Checks",
+                "fields": [
+                    {"key": "primary_link_status",   "label": "Primary Link Status",  "type": "dropdown", "options": ["Up", "Down"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Up": "NORMAL", "Down": "CRITICAL"}}},
+                    {"key": "backup_link_status",     "label": "Backup Link Status",   "type": "dropdown", "options": ["Up", "Down", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Up": "NORMAL", "Down": "ALERT", "N/A": "NORMAL"}}},
+                    {"key": "signal_ber",             "label": "Bit Error Rate (BER)", "type": "text"},
+                    {"key": "alarm_relay_test_result","label": "Alarm Relay Test",     "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "redundant_psu_ok",       "label": "Redundant Power Supply Healthy", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "comm_panel_maintenance": {
+        "key": "comm_panel_maintenance",
+        "name": "Digital Communication Panel Preventive Maintenance",
+        "equipment_type": "Digital Communication Panel",
+        "description": "Routine preventive maintenance checklist for digital communication panels.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",       "label": "Permit to Work obtained",       "type": "checkbox", "required": True},
+                    {"key": "connector_tightness",  "label": "Cable / connector tightness checked", "type": "checkbox"},
+                    {"key": "firmware_checked",     "label": "Firmware version checked / updated",  "type": "checkbox"},
+                    {"key": "backup_battery_ok",    "label": "Backup battery checked",        "type": "checkbox"},
+                    {"key": "general_cleaning",     "label": "General cleaning completed",    "type": "checkbox", "required": True},
+                    {"key": "observations",         "label": "Observations",                  "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "comm_panel_inspection": {
+        "key": "comm_panel_inspection",
+        "name": "Digital Communication Panel Annual Inspection",
+        "equipment_type": "Digital Communication Panel",
+        "description": "Annual inspection checklist for digital communication panels — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── LTAC Panel ───────────────────────────────────────────────────────────────
+    "ltac_panel_test": {
+        "key": "ltac_panel_test",
+        "name": "LTAC Panel Tuning & Insertion Loss Test",
+        "equipment_type": "LTAC Panel",
+        "description": "Line tuning and coupling (LTAC) panel tuning frequency, insertion loss and VSWR verification.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Tuning & Loss",
+                "fields": [
+                    {"key": "tuning_frequency_khz",   "label": "Tuning Frequency",     "type": "number", "unit": "kHz"},
+                    {"key": "insertion_loss_db",       "label": "Insertion Loss",       "type": "number", "unit": "dB"},
+                    {"key": "vswr",                    "label": "VSWR",                 "type": "number"},
+                    {"key": "earthing_continuity_ok",  "label": "Earthing Continuity Verified", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "ltac_panel_maintenance": {
+        "key": "ltac_panel_maintenance",
+        "name": "LTAC Panel Preventive Maintenance",
+        "equipment_type": "LTAC Panel",
+        "description": "Routine preventive maintenance checklist for LTAC panels.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",       "label": "Permit to Work obtained",         "type": "checkbox", "required": True},
+                    {"key": "connector_tightness",  "label": "Coaxial / RF connector tightness checked", "type": "checkbox"},
+                    {"key": "weatherproofing_ok",   "label": "Weatherproofing / seals intact",  "type": "checkbox"},
+                    {"key": "general_cleaning",     "label": "General cleaning completed",      "type": "checkbox", "required": True},
+                    {"key": "observations",         "label": "Observations",                    "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "ltac_panel_inspection": {
+        "key": "ltac_panel_inspection",
+        "name": "LTAC Panel Annual Inspection",
+        "equipment_type": "LTAC Panel",
+        "description": "Annual inspection checklist for LTAC panels — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── PLCC Panel ───────────────────────────────────────────────────────────────
+    "plcc_panel_test": {
+        "key": "plcc_panel_test",
+        "name": "PLCC Panel Carrier & Signal Test",
+        "equipment_type": "PLCC Panel",
+        "description": "Power line carrier communication panel — carrier frequency, transmit/receive levels, and inter-trip signaling test.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Carrier & Signaling",
+                "fields": [
+                    {"key": "carrier_frequency_khz",   "label": "Carrier Frequency",       "type": "number", "unit": "kHz"},
+                    {"key": "transmit_power_w",         "label": "Transmit Power",          "type": "number", "unit": "W"},
+                    {"key": "receive_sensitivity_dbm",  "label": "Receive Sensitivity",     "type": "number", "unit": "dBm"},
+                    {"key": "intertrip_test_result",    "label": "Inter-Trip Signaling Test", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "noise_level_db",           "label": "Noise Level",             "type": "number", "unit": "dB"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "plcc_panel_maintenance": {
+        "key": "plcc_panel_maintenance",
+        "name": "PLCC Panel Preventive Maintenance",
+        "equipment_type": "PLCC Panel",
+        "description": "Routine preventive maintenance checklist for PLCC panels.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",       "label": "Permit to Work obtained",       "type": "checkbox", "required": True},
+                    {"key": "connector_tightness",  "label": "Cable / connector tightness checked", "type": "checkbox"},
+                    {"key": "backup_battery_ok",    "label": "Backup battery checked",        "type": "checkbox"},
+                    {"key": "firmware_checked",     "label": "Firmware version checked / updated", "type": "checkbox"},
+                    {"key": "general_cleaning",     "label": "General cleaning completed",    "type": "checkbox", "required": True},
+                    {"key": "observations",         "label": "Observations",                  "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "plcc_panel_inspection": {
+        "key": "plcc_panel_inspection",
+        "name": "PLCC Panel Annual Inspection",
+        "equipment_type": "PLCC Panel",
+        "description": "Annual inspection checklist for PLCC panels — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Wave Trap ────────────────────────────────────────────────────────────────
+    "wave_trap_test": {
+        "key": "wave_trap_test",
+        "name": "Wave Trap Tuning & Impedance Test",
+        "equipment_type": "Wave Trap",
+        "description": "Tuning frequency verification, blocking impedance measurement, and insulation resistance for line wave traps.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Tuning & Impedance",
+                "fields": [
+                    {"key": "tuning_frequency_khz",     "label": "Tuning Frequency",           "type": "number", "unit": "kHz"},
+                    {"key": "blocking_impedance_ohm",   "label": "Blocking Impedance",         "type": "number", "unit": "Ω"},
+                    {"key": "insulation_resistance_mohm","label": "Insulation Resistance",     "type": "number", "unit": "MΩ"},
+                    {"key": "mounting_insulator_ok",    "label": "Mounting Insulator Condition Satisfactory", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "wave_trap_maintenance": {
+        "key": "wave_trap_maintenance",
+        "name": "Wave Trap Preventive Maintenance",
+        "equipment_type": "Wave Trap",
+        "description": "Routine preventive maintenance checklist for wave traps.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",        "label": "Permit to Work obtained",           "type": "checkbox", "required": True},
+                    {"key": "insulator_cleaning",    "label": "Mounting insulators cleaned",       "type": "checkbox"},
+                    {"key": "corona_ring_ok",        "label": "Corona ring condition satisfactory", "type": "checkbox"},
+                    {"key": "connector_tightness",   "label": "Line connector tightness checked",  "type": "checkbox"},
+                    {"key": "general_cleaning",      "label": "General cleaning completed",        "type": "checkbox", "required": True},
+                    {"key": "observations",          "label": "Observations",                      "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "wave_trap_inspection": {
+        "key": "wave_trap_inspection",
+        "name": "Wave Trap Annual Inspection",
+        "equipment_type": "Wave Trap",
+        "description": "Annual inspection checklist for wave traps — safety, civil, fire, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "physical_condition_ok", "label": "Physical condition satisfactory",         "type": "checkbox"},
+                    {"key": "labelling_ok",           "label": "Equipment labelling complete and legible", "type": "checkbox"},
+                    {"key": "earthing_ok",            "label": "Earthing and bonding intact",              "type": "checkbox"},
+                    {"key": "safety_clearances_ok",   "label": "Safety clearances maintained",             "type": "checkbox"},
+                    {"key": "documents_updated",      "label": "Test and maintenance records up to date",  "type": "checkbox"},
+                    {"key": "observations",           "label": "Observations / Non-conformances",          "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ── Fire Fighting System ────────────────────────────────────────────────────
+    "fire_fighting_test": {
+        "key": "fire_fighting_test",
+        "name": "Fire Fighting System Functional Test",
+        "equipment_type": "Fire Fighting System",
+        "description": "Hydrant pressure, sprinkler flow, fire pump auto-start, and detector/alarm functional test.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Functional Checks",
+                "fields": [
+                    {"key": "hydrant_pressure_bar",    "label": "Hydrant Pressure",          "type": "number", "unit": "bar"},
+                    {"key": "sprinkler_flow_test_result","label": "Sprinkler Flow Test",      "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "fire_pump_auto_start_ok", "label": "Fire Pump Auto-Start Verified", "type": "checkbox"},
+                    {"key": "detector_alarm_test_result","label": "Detector / Alarm Functional Test", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "foam_system_ok",          "label": "Foam / Water Spray System Functional (transformer bays)", "type": "checkbox"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",   "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "fire_fighting_maintenance": {
+        "key": "fire_fighting_maintenance",
+        "name": "Fire Fighting System Preventive Maintenance",
+        "equipment_type": "Fire Fighting System",
+        "description": "Routine preventive maintenance checklist for fire fighting systems.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",       "label": "Permit to Work obtained",         "type": "checkbox", "required": True},
+                    {"key": "cylinder_pressure_ok", "label": "Extinguisher / cylinder pressure checked", "type": "checkbox"},
+                    {"key": "pipe_leakage_checked", "label": "Pipework checked for leakage",    "type": "checkbox"},
+                    {"key": "pump_lubricated",      "label": "Fire pump lubricated / serviced", "type": "checkbox"},
+                    {"key": "alarm_battery_ok",     "label": "Alarm panel battery checked",     "type": "checkbox"},
+                    {"key": "observations",         "label": "Observations",                    "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "fire_fighting_inspection": {
+        "key": "fire_fighting_inspection",
+        "name": "Fire Fighting System Annual Inspection",
+        "equipment_type": "Fire Fighting System",
+        "description": "Annual inspection checklist for fire fighting systems — extinguisher validity, signage, evacuation routes, and documentation.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Inspection Details",
+                "fields": [
+                    {"key": "inspection_date", "label": "Date of Inspection",  "type": "date", "required": True},
+                    {"key": "inspection_type", "label": "Inspection Category", "type": "dropdown", "required": True,
+                     "options": ["Electrical Safety", "Civil", "Fire Safety", "Documentation", "Environmental", "General Maintenance"]},
+                    {"key": "inspector_name",  "label": "Inspector Name",      "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Inspection Checklist",
+                "fields": [
+                    {"key": "extinguisher_validity_ok", "label": "Extinguisher tags / validity current",   "type": "checkbox"},
+                    {"key": "signage_ok",                "label": "Fire safety signage in place",           "type": "checkbox"},
+                    {"key": "evacuation_route_clear",    "label": "Evacuation routes clear and marked",     "type": "checkbox"},
+                    {"key": "documents_updated",         "label": "Test and maintenance records up to date","type": "checkbox"},
+                    {"key": "observations",              "label": "Observations / Non-conformances",        "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "compliance_status", "label": "Compliance Status", "type": "dropdown", "required": True, "options": ["Compliant", "Non-Compliant", "Partial"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_COMPLY}},
+                    {"key": "action_required",   "label": "Action Required",   "type": "textarea"},
+                    {"key": "inspected_by",      "label": "Inspected By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # GAP-FILL — Maintenance for two already-live equipment types that had
+    # Test coverage but zero Maintenance/Inspection at all. Disabled by
+    # default like the 11 new equipment types above; Inspection for these two
+    # reuses the shared transformer_inspection template via the standard 6
+    # generic category names (see alter_fill_existing_equipment_gaps.py),
+    # same as every other equipment type — no new Inspection form needed.
+    # ════════════════════════════════════════════════════════════════════════════
+
+    "current_transformer_maintenance": {
+        "key": "current_transformer_maintenance",
+        "name": "Current Transformer Preventive Maintenance",
+        "equipment_type": "Current Transformer",
+        "description": "Routine preventive maintenance checklist for current transformers.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",           "label": "Permit to Work obtained",              "type": "checkbox", "required": True},
+                    {"key": "earth_applied",            "label": "Earth connections applied",            "type": "checkbox", "required": True},
+                    {"key": "secondary_not_open",       "label": "Secondary circuit continuity verified — not open-circuited", "type": "checkbox", "required": True},
+                    {"key": "oil_level_ok",             "label": "Oil level satisfactory (oil-filled units)", "type": "checkbox"},
+                    {"key": "terminal_box_sealed",      "label": "Terminal box sealing intact",           "type": "checkbox"},
+                    {"key": "terminal_tightness",       "label": "Terminal connections checked for tightness", "type": "checkbox"},
+                    {"key": "no_corrosion",             "label": "No corrosion / physical damage observed", "type": "checkbox"},
+                    {"key": "general_cleaning",         "label": "General cleaning completed",           "type": "checkbox", "required": True},
+                    {"key": "observations",             "label": "Observations",                         "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
+    "cvt_maintenance": {
+        "key": "cvt_maintenance",
+        "name": "Capacitor Voltage Transformer Preventive Maintenance",
+        "equipment_type": "Capacitor Voltage Transformer",
+        "description": "Routine preventive maintenance checklist for capacitor voltage transformers.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Maintenance Metadata",
+                "fields": [
+                    {"key": "maintenance_date",    "label": "Date of Maintenance",            "type": "date", "required": True},
+                    {"key": "maintenance_officer", "label": "Name and Designation of Officer", "type": "text", "required": True},
+                ],
+            },
+            {
+                "title": "Maintenance Checklist",
+                "fields": [
+                    {"key": "permit_to_work",         "label": "Permit to Work obtained",           "type": "checkbox", "required": True},
+                    {"key": "earth_applied",          "label": "Earth connections applied",         "type": "checkbox", "required": True},
+                    {"key": "capacitor_stack_oil_ok", "label": "Capacitor stack oil level satisfactory", "type": "checkbox"},
+                    {"key": "carrier_accessory_ok",   "label": "PLCC / carrier coupling accessory checked (if fitted)", "type": "checkbox"},
+                    {"key": "terminal_tightness",     "label": "Terminal connections checked for tightness", "type": "checkbox"},
+                    {"key": "no_corrosion",           "label": "No corrosion / physical damage observed", "type": "checkbox"},
+                    {"key": "general_cleaning",       "label": "General cleaning completed",        "type": "checkbox", "required": True},
+                    {"key": "observations",           "label": "Observations",                      "type": "textarea"},
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Satisfactory", "Unsatisfactory", "Action Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
+                    {"key": "next_maint_due", "label": "Next Maintenance Due", "type": "date"},
+                    {"key": "maintained_by",  "label": "Maintained By",  "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
 }
 
 
@@ -7130,6 +9083,9 @@ TEST_TYPE_TO_TEMPLATE = {
     # Power Transformer
     "Power Transformer Nameplate Details": "power_transformer_nameplate",
     "Transformer Physical Inspection": "transformer_physical_inspection",
+    "WTI / OTI Functional Test": "wti_oti_functional_test",
+    "Pressure Relief Valve (PRV) Functional Test": "prv_functional_test",
+    "Buchholz Relay Functional Test": "buchholz_relay_functional_test",
     "Ratio Test HV-IV": "ratio_test_hv_iv",
     "Ratio Test HV-LV": "ratio_test_hv_lv",
     "Short Circuit Test HV-IV": "short_circuit_test_hv_iv",
@@ -7160,6 +9116,12 @@ TEST_TYPE_TO_TEMPLATE = {
 
     # ── Tan-Delta / Capacitance / IDAX (single-session, individual + combined) ──
     "Tan-Delta, Capacitance & Insulation Diagnostics": "tan_delta_capacitance_idax",
+    # Alias: "Winding Tan-Delta & Capacitance Test" is an existing, active
+    # Power Transformer CategoryDetails row (id-seeded elsewhere) that had no
+    # template mapping at all - selecting it in the UI resolved to nothing.
+    # Same test in substance as the entry above; point it at the same form
+    # rather than duplicating a template.
+    "Winding Tan-Delta & Capacitance Test": "tan_delta_capacitance_idax",
     "Winding Resistance Measurement":            "tan_delta_winding",
     "220kV Bushing Tan-Delta Test":                    "tan_delta_bushing_220kv",
     "66kV Bushing Tan-Delta Test":                     "tan_delta_bushing_66kv",
@@ -7228,6 +9190,47 @@ TEST_TYPE_TO_TEMPLATE = {
     "Documentation":        "transformer_inspection",
     "Environmental":        "transformer_inspection",
     "General Maintenance":  "transformer_inspection",
+
+    # ── New equipment types — Test / Maintenance test-type names ────────────
+    # (disabled by default — see the matching TEST_TEMPLATES entries above).
+    # Annual Inspection is deliberately NOT re-mapped here: every equipment
+    # type's inspection currently resolves through the same 6 generic
+    # category names above to the single shared "transformer_inspection"
+    # template (see Circuit Breaker's/Battery Set's/Surge Arrestor's own
+    # CategoryDetails rows — they follow the identical pattern). Each new
+    # equipment type still needs its own copies of those 6 CategoryDetails
+    # rows (added by the alter script), but they point at the same shared
+    # template, not the new equipment-specific "_inspection" templates —
+    # those exist in TEST_TEMPLATES ready to wire in once a per-equipment-
+    # type inspection resolution path exists, matching the latent state
+    # Circuit Breaker/Battery Set/Surge Arrestor's own "_inspection"
+    # templates are already in.
+    "Potential Transformer Test":                          "potential_transformer_test",
+    "Potential Transformer Preventive Maintenance":        "potential_transformer_maintenance",
+    "Isolator Contact Resistance & Insulation Test":       "isolator_test",
+    "Isolator Preventive Maintenance":                     "isolator_maintenance",
+    "Control & Relay Panel Functional Test":               "cr_panel_test",
+    "Control & Relay Panel Preventive Maintenance":        "cr_panel_maintenance",
+    "Battery Charger Output & Ripple Test":                "battery_charger_test",
+    "Battery Charger Preventive Maintenance":              "battery_charger_maintenance",
+    "Station Auxiliary Transformer Test":                  "station_aux_transformer_test",
+    "Station Auxiliary Transformer Preventive Maintenance":"station_aux_transformer_maintenance",
+    "DG Set Load & Performance Test":                      "dg_set_test",
+    "DG Set Preventive Maintenance":                       "dg_set_maintenance",
+    "Digital Communication Panel Functional Test":         "comm_panel_test",
+    "Digital Communication Panel Preventive Maintenance":  "comm_panel_maintenance",
+    "LTAC Panel Tuning & Insertion Loss Test":             "ltac_panel_test",
+    "LTAC Panel Preventive Maintenance":                   "ltac_panel_maintenance",
+    "PLCC Panel Carrier & Signal Test":                    "plcc_panel_test",
+    "PLCC Panel Preventive Maintenance":                   "plcc_panel_maintenance",
+    "Wave Trap Tuning & Impedance Test":                   "wave_trap_test",
+    "Wave Trap Preventive Maintenance":                    "wave_trap_maintenance",
+    "Fire Fighting System Functional Test":                "fire_fighting_test",
+    "Fire Fighting System Preventive Maintenance":         "fire_fighting_maintenance",
+
+    # ── Gap-fill: Maintenance for already-live equipment types (disabled) ───
+    "Current Transformer Preventive Maintenance":  "current_transformer_maintenance",
+    "Capacitor Voltage Transformer Preventive Maintenance": "cvt_maintenance",
 
 }
 
