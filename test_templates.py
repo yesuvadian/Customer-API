@@ -343,7 +343,27 @@ TEST_TEMPLATES = {
                             "ir_value_1min": "avg",
                             "ir_value_10min": "avg",
                             "pi_value": "avg"
-                        }
+                        },
+                        # PI acceptance bands per IEEE 43 — auto-evaluated
+                        # regardless of the tester's own Pass/Fail pick on
+                        # row_result, so a low PI can't be waved through.
+                        "table_evaluation": {
+                            "enabled": True,
+                            "column_evaluations": {
+                                "pi_value": {
+                                    "critical_below": 1.0,   # < 1.0  -> Dangerous
+                                    "alert_min": 2.0,         # 1.0-2.0 -> Questionable/Fair
+                                    "alert_max": None,
+                                    "critical_above": None,
+                                    "normal_min": None, "normal_max": None,
+                                },
+                            },
+                            "remedial_action_text": "Polarisation Index below 2.0 (IEEE 43) indicates "
+                                                     "questionable-to-dangerous insulation condition — "
+                                                     "investigate moisture/contamination; a PI below 1.0 "
+                                                     "means the winding should not be energised until dried "
+                                                     "out or otherwise remediated.",
+                        },
                     }
                 ]
             },
@@ -9137,6 +9157,85 @@ TEST_TEMPLATES = {
         ],
     },
 
+    # ════════════════════════════════════════════════════════════════════════════
+    # TRANSFORMER TURNS RATIO (TTR) — another gap flagged directly by the user;
+    # also listed on the TNEB proposal's CM matrix as the first Power
+    # Transformer procedure. The app already has per-winding-pair ratio tests
+    # ("Ratio Test HV-IV" / "Ratio Test HV-LV"), and a differently-scoped
+    # tap-wise ratio template exists under the legacy generic "Transformer"
+    # equipment type (not the real Power Transformer registry) - this is a
+    # proper standalone TTR procedure for Power Transformer itself: one
+    # winding-pair x tap-position x phase table, IEEE C57.12.90 / IS 1866
+    # style. Disabled by default, same as every other new template this round.
+    # ════════════════════════════════════════════════════════════════════════════
+
+    "transformer_ttr_test": {
+        "key": "transformer_ttr_test",
+        "name": "Transformer Turns Ratio (TTR)",
+        "equipment_type": "Power Transformer",
+        "description": "Turns ratio measurement across all winding pairs and tap positions, compared against nameplate ratio.",
+        "is_active": False,
+        "supports_multi_session": False,
+        "typical_session_interval_days": None,
+        "typical_total_sessions": 1,
+        "context_bindings": {"station_name": "equipment.department_name", "bay_number": "equipment.bay_number", "manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class"},
+        "sections": [
+            {
+                "title": "Equipment Details", "collapsed": True,
+                "fields": [
+                    {"key": "station_name", "label": "Station / Substation", "type": "readonly"},
+                    {"key": "bay_number", "label": "Bay Number", "type": "readonly"},
+                    {"key": "manufacturer", "label": "Manufacturer", "type": "readonly"},
+                    {"key": "serial_number", "label": "Serial Number", "type": "readonly"},
+                    {"key": "voltage_class", "label": "Voltage Class", "type": "readonly"},
+                ],
+            },
+            {
+                "title": "Nameplate Ratios",
+                "fields": [
+                    {"key": "rated_ratio_hv_lv", "label": "Rated Ratio HV-LV", "type": "text", "required": True},
+                    {"key": "rated_ratio_hv_iv", "label": "Rated Ratio HV-IV", "type": "text"},
+                    {"key": "rated_ratio_iv_lv", "label": "Rated Ratio IV-LV", "type": "text"},
+                    {"key": "vector_group",      "label": "Vector Group",     "type": "text", "placeholder": "e.g. YNyn0d11"},
+                    {"key": "number_of_taps",    "label": "Number of Taps",  "type": "number"},
+                    {"key": "test_equipment",    "label": "TTR Test Set Used", "type": "text"},
+                ],
+            },
+            {
+                "title": "TTR Readings",
+                "fields": [
+                    {
+                        "key": "ttr_readings",
+                        "label": "Turns Ratio Readings",
+                        "type": "table",
+                        "allow_add_rows": True,
+                        "allow_delete_rows": True,
+                        "columns": [
+                            {"key": "tap_position",    "label": "Tap Position",  "type": "text"},
+                            {"key": "winding_pair",    "label": "Winding Pair",  "type": "dropdown", "options": ["HV-LV", "HV-IV", "IV-LV"]},
+                            {"key": "phase",           "label": "Phase",         "type": "dropdown", "options": ["R", "Y", "B"]},
+                            {"key": "measured_ratio",  "label": "Measured Ratio","type": "number"},
+                            {"key": "expected_ratio",  "label": "Expected Ratio","type": "number"},
+                            {"key": "deviation_pct",   "label": "Deviation",     "type": "number", "unit": "%"},
+                            {"key": "row_result",      "label": "Result",        "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
+                        ],
+                        "default_rows": [{"tap_position": "1", "winding_pair": "HV-LV", "phase": "R"}],
+                    },
+                ],
+            },
+            {
+                "title": "Overall Assessment",
+                "fields": [
+                    {"key": "max_deviation_pct", "label": "Maximum Deviation Observed", "type": "number", "unit": "%"},
+                    {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "required": True, "options": ["Pass", "Fail", "Conditional", "Retest"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "observation",    "label": "Observation",    "type": "textarea"},
+                    {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
+                    {"key": "tested_by",      "label": "Tested By",      "type": "text", "required": True},
+                ],
+            },
+        ],
+    },
+
 }
 
 
@@ -9317,6 +9416,9 @@ TEST_TYPE_TO_TEMPLATE = {
 
     # ── OLTC Dynamic Resistance Measurement (disabled) ──
     "OLTC Dynamic Resistance Measurement (DRM)": "oltc_drm_test",
+
+    # ── Transformer Turns Ratio (disabled) ──
+    "Transformer Turns Ratio (TTR)": "transformer_ttr_test",
 
 }
 
