@@ -2082,6 +2082,71 @@ def get_deterioration_watch_list(
             ),
         })
 
+    # ── Duval Triangle findings ─────────────────────────────────────────
+    # A second, categorical kind of finding alongside the numeric-trend
+    # ones above: classify each equipment's LATEST transformer_dga reading
+    # and surface it here when the resulting zone is watch-list-worthy per
+    # the template's own duval_watchlist_severity config (test_templates.py,
+    # editable through the Template Designer) — not a numeric trend, so it
+    # has no ParameterAnalytics row and bypasses that machinery entirely.
+    from services.duval_triangle import classify_duval_triangle, gas_values_from_test_data
+    from services.evaluation_service import EvaluationService
+
+    dga_rows = (
+        db.query(TestResult, TestingRequest.equipment_id)
+        .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
+        .filter(TestResult.template_key == "transformer_dga")
+        .filter(TestingRequest.equipment_id.in_(eq_ids))
+        .order_by(TestResult.tested_at.asc())
+        .all()
+    )
+    dga_by_equipment: dict = {}
+    for tr_result, equipment_id in dga_rows:
+        dga_by_equipment.setdefault(equipment_id, []).append(tr_result)
+
+    duval_template = EvaluationService.get_template_data("transformer_dga", db, org_id) or {}
+    duval_severity: dict = {}
+    for sec in (duval_template.get("sections") or []):
+        for f in (sec.get("fields") or []):
+            if f.get("is_duval_triangle_source"):
+                duval_severity = f.get("duval_watchlist_severity") or {}
+                break
+
+    for eq_id, eq_dga_results in dga_by_equipment.items():
+        latest = eq_dga_results[-1]  # already ordered tested_at asc
+        gas_values = gas_values_from_test_data(latest.test_data)
+        duval = classify_duval_triangle(
+            gas_values.get("ch4") or 0,
+            gas_values.get("c2h4") or 0,
+            gas_values.get("c2h2") or 0,
+        )
+        zone = duval["zone"]
+        severity_tier = duval_severity.get(zone) if zone else None
+        if not severity_tier:
+            continue  # no zone, or a zone not marked watch-list-worthy (PD/T1)
+
+        flagged_by_equipment.setdefault(eq_id, []).append({
+            "analytics_id":          None,
+            "parameter_key":         "duval_zone",
+            "parameter_label":       "Duval Triangle Classification",
+            "template_key":          "transformer_dga",
+            "unit":                  None,
+            "current_value":         None,
+            "trend":                 None,
+            "annual_change":         None,
+            "breach_threshold":      None,
+            "breach_band":           None,
+            "breach_predicted_at":   None,
+            "days_to_breach":        None,
+            "is_overdue_for_retest": False,
+            "reason":                f"Zone {zone} — {duval['meaning']}",
+            "history_count":         len(eq_dga_results),
+            "tested_at":             latest.tested_at.isoformat() if latest.tested_at else None,
+            "zone":                  zone,
+            "zone_meaning":          duval["meaning"],
+            "severity_tier":         severity_tier,
+        })
+
     # Officer review state (KPTCL spec §14.3: "Deterioration Watch List
     # advisories pending officer review") — keyed to the exact snapshot
     # (equipment_id, parameter_key, history_count) each flagged parameter
@@ -2186,17 +2251,41 @@ def review_deterioration_advisory(
     # Resolve the CURRENT history_count server-side — never trust a value
     # from the client — so a stale client can't "review" a snapshot that's
     # already been superseded by a newer test.
-    latest = (
-        db.query(ParameterAnalytics)
-        .filter(
-            ParameterAnalytics.equipment_id == body.equipment_id,
-            ParameterAnalytics.parameter_key == body.parameter_key,
+    #
+    # Duval Triangle findings (get_deterioration_watch_list's second,
+    # categorical finding type) have no ParameterAnalytics row at all — they
+    # bypass that machinery entirely — so history_count is re-derived the
+    # same way it was there: the count of this equipment's transformer_dga
+    # TestResults so far. A plain SimpleNamespace stands in for the
+    # ParameterAnalytics row the rest of this function reads from below.
+    if body.parameter_key == "duval_zone" and body.template_key == "transformer_dga":
+        dga_count = (
+            db.query(TestResult)
+            .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
+            .filter(TestResult.template_key == "transformer_dga")
+            .filter(TestingRequest.equipment_id == body.equipment_id)
+            .count()
         )
-        .order_by(ParameterAnalytics.history_count.desc(), ParameterAnalytics.calculated_at.desc())
-        .first()
-    )
-    if not latest:
-        raise HTTPException(status_code=404, detail="No analytics found for this equipment/parameter")
+        if dga_count == 0:
+            raise HTTPException(status_code=404, detail="No DGA test results found for this equipment")
+        latest = SimpleNamespace(
+            history_count=dga_count,
+            parameter_label="Duval Triangle Classification",
+            trend=None,
+            id=None,
+        )
+    else:
+        latest = (
+            db.query(ParameterAnalytics)
+            .filter(
+                ParameterAnalytics.equipment_id == body.equipment_id,
+                ParameterAnalytics.parameter_key == body.parameter_key,
+            )
+            .order_by(ParameterAnalytics.history_count.desc(), ParameterAnalytics.calculated_at.desc())
+            .first()
+        )
+        if not latest:
+            raise HTTPException(status_code=404, detail="No analytics found for this equipment/parameter")
 
     org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
     reviewer_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
