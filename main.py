@@ -15,7 +15,6 @@ from routers import (
     repair_workflow,
     surveillance_workflow,
     surveillance_dashboard,
-    websocket_routes,
     workflow_dashboard,
     workflow_config,
     workflow_config,
@@ -66,7 +65,6 @@ from routers import (
     category_master,
     category_details,
     cities,
-    webhook_zoho,
     zoho_auth,
     zoho_dashboard,
     zoho_items,
@@ -1547,7 +1545,6 @@ app.include_router(sales_orders.router)
 app.include_router(zoho_dashboard.router)
 app.include_router(statements.router)
 app.include_router(zoho_register.router)
-app.include_router(webhook_zoho.router)
 app.include_router(customer_care_router)
 
 # Testing Request System
@@ -1619,9 +1616,6 @@ app.include_router(workflow_dashboard.router)
 
 # Workflow Configuration (super_admin only)
 app.include_router(workflow_config.router)
-
-# WebSocket
-app.include_router(websocket_routes.router)
 
 # ✅ Vendor Directory — fetches vendors from supplier portal
 app.include_router(vendor_directory_router)
