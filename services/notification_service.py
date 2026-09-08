@@ -2467,10 +2467,20 @@ class NotificationService:
                         extra_data=extra_data,
                     )
 
-                # If inapp channel: mark batch log sent right away
+                # If inapp channel: mark batch log sent right away — but only if it
+                # actually reached someone. An empty recipient list (bad role names,
+                # a dept-scoping miss, an @token that didn't resolve) previously still
+                # marked this "sent", which made the Notification Center Log tab
+                # indistinguishable from a real delivery and hid the failure entirely.
                 if tmpl.channel == "inapp":
-                    batch_log.status  = "sent"
-                    batch_log.sent_at = datetime.now(timezone.utc)
+                    if recipients:
+                        batch_log.status  = "sent"
+                        batch_log.sent_at = datetime.now(timezone.utc)
+                    else:
+                        batch_log.status = "skipped"
+                        batch_log.error_message = (
+                            f"No recipients resolved for roles {effective_roles}"
+                        )
 
                 # ── extra_recipient_emails → NotificationLogRecipient rows ────
                 if tmpl.channel == "email":
@@ -2496,9 +2506,10 @@ class NotificationService:
                             self.db.add(extra_rcpt)
 
                 if not recipients and not (tmpl.extra_recipient_emails):
-                    logger.debug(
+                    logger.warning(
                         f"[Notif] event={event_type!r} channel={tmpl.channel!r}: "
-                        f"no recipients for roles {effective_roles}"
+                        f"no recipients for roles {effective_roles} "
+                        f"(org={organization_id}, source={source_type}/{source_id})"
                     )
 
                 try:
