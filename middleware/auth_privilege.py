@@ -27,16 +27,10 @@ PUBLIC_ENDPOINTS = [
     "/register/",
     "/auth/",
     "/files/",
-    "/zoho_register/",
-    "/zohocontacts/",
     "/health",      # external load-test monitoring poll - no auth token available
     "/billing/webhook",   # Razorpay webhook — no auth
     "/billing/plans",     # Plan list — no auth needed
 ]
-ZOHO_PREFIXES = (
-    "/zoho",
-    "/webhooks/zoho",
-)
 
 # --------------------------------------------------
 # HTTP method → privilege mapping
@@ -80,13 +74,6 @@ async def auth_and_privilege_middleware(request: Request, call_next):
     # 2. Allow API root (/api or /)
     # --------------------------------------------------
     if raw_path in ("/", "/api", "/api/"):
-        return await call_next(request)
-
-    # --------------------------------------------------
-    # 3. Allow Zoho webhooks (FIXED)
-    # --------------------------------------------------
-    if path.startswith("/webhooks/zoho"):
-        print("✅ Skipping auth for Zoho webhook")
         return await call_next(request)
 
     # --------------------------------------------------
