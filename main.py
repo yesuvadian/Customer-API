@@ -33,23 +33,16 @@ from routers import (
     company_product_certificates,
     company_product_supply_references,
     company_products,
-    contacts,
     dashboard,
     divisions,
     erp_router,
-    invoices,
     module,
     mongo_router,
-    payments,
     plan,
     products,
-    quotes,
     register,
-    retainerinvoices,
     role,
     role_module_privileges,
-    sales_orders,
-    statements,
     subcategories,
     sync_full_erp,
     token,
@@ -65,10 +58,6 @@ from routers import (
     category_master,
     category_details,
     cities,
-    zoho_auth,
-    zoho_dashboard,
-    zoho_items,
-    zoho_register,
 )
 from routers.kyc_router import router as kyc_router
 from routers.customer_care import router as customer_care_router
@@ -1534,17 +1523,6 @@ app.include_router(kyc_router)
 app.include_router(file_download_router)
 app.include_router(erp_router.router)
 app.include_router(mongo_router.router)
-app.include_router(quotes.router)
-app.include_router(zoho_items.router)
-app.include_router(zoho_auth.router)
-app.include_router(invoices.router)
-app.include_router(payments.router)
-app.include_router(contacts.router)
-app.include_router(retainerinvoices.router)
-app.include_router(sales_orders.router)
-app.include_router(zoho_dashboard.router)
-app.include_router(statements.router)
-app.include_router(zoho_register.router)
 app.include_router(customer_care_router)
 
 # Testing Request System

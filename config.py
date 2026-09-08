@@ -23,10 +23,6 @@ IS_DEV = APP_ENV in ["development", "dev", "local"]
 # ==============================
 # CACHE SETTINGS
 # ==============================
-ZOHO_WEBHOOK_SECRET = os.getenv("ZOHO_WEBHOOK_SECRET", "default_zoho_webhook_secret")
-ZOHO_DASHBOARD_CACHE_TTL = int(
-    os.getenv("ZOHO_DASHBOARD_CACHE_TTL", 300)  # seconds (5 min)
-)
 
 REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
@@ -148,48 +144,6 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", EMAIL_USER or "noreply@example.com")
 # FILE UPLOAD LIMITS
 # ==============================
 MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 10000))
-# ==============================
-# ZOHO BOOKS CONFIGURATION
-# ==============================
-
-ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
-ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")    
-ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
-ZOHO_ORG_ID = os.getenv("ZOHO_ORG_ID")
-ZOHO_ESTIMATE_RFQ_FIELD_ID = os.getenv(
-    "ZOHO_ESTIMATE_RFQ_FIELD_ID",
-    "2789833000001742002"   # RFQ custom field id
-)
-
-# India DC (books.zohosecure.in → zohoapis.in)
-ZOHO_API_BASE = os.getenv("ZOHO_API_BASE", "https://www.zohoapis.in")
-ZOHO_ACCOUNTS_BASE = os.getenv("ZOHO_ACCOUNTS_BASE", "https://accounts.zoho.in")
-ZOHO_SENT_EMAIL=os.getenv("ZOHO_SENT_EMAIL", False)
-# Safety check (fail fast in startup)
-ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
-ZOHO_OAUTH_TOKEN_URL = f"{ZOHO_ACCOUNTS_BASE}/oauth/v2/token"
-if not all([ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ORG_ID]):
-    raise RuntimeError("Zoho Books environment variables are not fully configured")
-
-# ==============================
-# ZOHO EMAIL SETTINGS
-# ==============================
- 
-ZOHO_SENT_EMAIL = os.getenv(
-    "ZOHO_SENT_EMAIL",
-    FROM_EMAIL  # fallback to default sender
-)
-
-if APP_ENV == "production":
-    if not all([
-        ZOHO_CLIENT_ID,
-        ZOHO_CLIENT_SECRET,
-        ZOHO_REFRESH_TOKEN,
-        ZOHO_ORG_ID,
-        ZOHO_SENT_EMAIL,
-    ]):
-        raise RuntimeError("Zoho Books environment variables are not fully configured")
-    
 # ======================================================
 VENDOR_APP_URL = os.getenv("VENDOR_APP_URL", "http://127.0.0.1:8001")
 
