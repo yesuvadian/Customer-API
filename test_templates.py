@@ -176,7 +176,7 @@ TEST_TEMPLATES = {
                 "title": "Stability Test",
                 "fields": [
                     {"key": "through_fault_current", "label": "Through Fault Current", "type": "number", "unit": "A"},
-                    {"key": "stability_result", "label": "Stability Test Result", "type": "dropdown", "options": ["Stable (No Trip)", "Unstable (Tripped)"], "required": True},
+                    {"key": "stability_result", "label": "Stability Test Result", "type": "dropdown", "options": ["Stable (No Trip)", "Unstable (Tripped)"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_TRIP}},
                 ]
             },
             {
@@ -510,8 +510,8 @@ TEST_TEMPLATES = {
                         "columns": [
                             {"key": "protection_type", "label": "Protection Type", "type": "text"},
                             {"key": "relay_make_model", "label": "Relay Make/Model", "type": "text"},
-                            {"key": "setting_verified", "label": "Setting Verified", "type": "dropdown", "options": ["Yes", "No"]},
-                            {"key": "trip_test_ok", "label": "Trip Test OK", "type": "dropdown", "options": ["Yes", "No"]},
+                            {"key": "setting_verified", "label": "Setting Verified", "type": "dropdown", "options": ["Yes", "No"], "column_evaluation": {"Yes": "NORMAL", "No": "CRITICAL"}},
+                            {"key": "trip_test_ok", "label": "Trip Test OK", "type": "dropdown", "options": ["Yes", "No"], "column_evaluation": {"Yes": "NORMAL", "No": "CRITICAL"}},
                             {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
@@ -619,12 +619,12 @@ TEST_TEMPLATES = {
                 "title": "External Condition",
                 "fields": [
                     {"key": "body_condition", "label": "Body/Tank Condition", "type": "dropdown", "options": ["Good", "Fair", "Poor", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_GFP}},
-                    {"key": "paint_condition", "label": "Paint Condition", "type": "dropdown", "options": ["Good", "Faded", "Peeling", "Rusted"], "required": True},
+                    {"key": "paint_condition", "label": "Paint Condition", "type": "dropdown", "options": ["Good", "Faded", "Peeling", "Rusted"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Faded": "ALERT", "Peeling": "ALERT", "Rusted": "CRITICAL"}}},
                     {"key": "oil_leak", "label": "Oil Leakage Observed", "type": "dropdown", "options": ["No", "Yes"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"No": "NORMAL", "Yes": "CRITICAL"}}},
                     {"key": "oil_leak_location", "label": "Leakage Location", "type": "text"},
                     {"key": "oil_level", "label": "Oil Level", "type": "dropdown", "options": ["Normal", "Low", "Very Low", "Empty"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "Low": "ALERT", "Very Low": "CRITICAL", "Empty": "CRITICAL"}}},
                     {"key": "oil_color", "label": "Oil Color", "type": "dropdown", "options": ["Clear", "Light Yellow", "Dark Yellow", "Brown", "Black"]},
-                    {"key": "silica_gel_condition", "label": "Silica Gel Condition", "type": "dropdown", "options": ["Blue (Good)", "Pink (Saturated)", "Not Available"]},
+                    {"key": "silica_gel_condition", "label": "Silica Gel Condition", "type": "dropdown", "options": ["Blue (Good)", "Pink (Saturated)", "Not Available"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Blue (Good)": "NORMAL", "Pink (Saturated)": "ALERT", "Not Available": "ALERT"}}},
                 ]
             },
             {
@@ -2372,7 +2372,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "s5_inspection_date",        "label": "Date of Joint Inspection",            "type": "date",   "required": True},
                     {"key": "s5_inspection_report_ref",  "label": "Inspection Report Reference",         "type": "text",   "required": False},
-                    {"key": "s5_inspection_outcome",     "label": "Inspection Outcome",                  "type": "dropdown","required": True, "options": ["Satisfactory", "Satisfactory with Observations", "Unsatisfactory — Rework Required"]},
+                    {"key": "s5_inspection_outcome",     "label": "Inspection Outcome",                  "type": "dropdown","required": True, "options": ["Satisfactory", "Satisfactory with Observations", "Unsatisfactory — Rework Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
                     {"key": "s5_defects_found",          "label": "Defects / Observations found at Vendor Works", "type": "textarea", "required": False},
                     {"key": "s5_responsible_officer",    "label": "Responsible Officer (KPTCL)",         "type": "text",   "required": True},
                     {"key": "s5_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
@@ -2402,11 +2402,11 @@ TEST_TEMPLATES = {
                 "title": "Stage 7 — Stage Inspections During Repair (SRS §7.1)",
                 "fields": [
                     {"key": "s7_stage_insp_1_date",      "label": "Stage Inspection 1 — Date",           "type": "date",   "required": False},
-                    {"key": "s7_stage_insp_1_result",    "label": "Stage Inspection 1 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_insp_1_result",    "label": "Stage Inspection 1 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Pass": "NORMAL", "Pass with Observations": "ALERT", "Fail": "CRITICAL"}}},
                     {"key": "s7_stage_insp_2_date",      "label": "Stage Inspection 2 — Date",           "type": "date",   "required": False},
-                    {"key": "s7_stage_insp_2_result",    "label": "Stage Inspection 2 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_insp_2_result",    "label": "Stage Inspection 2 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Pass": "NORMAL", "Pass with Observations": "ALERT", "Fail": "CRITICAL"}}},
                     {"key": "s7_stage_insp_3_date",      "label": "Stage Inspection 3 — Date",           "type": "date",   "required": False},
-                    {"key": "s7_stage_insp_3_result",    "label": "Stage Inspection 3 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_insp_3_result",    "label": "Stage Inspection 3 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Pass": "NORMAL", "Pass with Observations": "ALERT", "Fail": "CRITICAL"}}},
                     {"key": "s7_stage_observations",     "label": "Observations across Stage Inspections","type": "textarea","required": False},
                     {"key": "s7_responsible_officer",    "label": "Responsible Officer (Stage Inspections)","type": "text", "required": False},
                     {"key": "s7_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
@@ -2456,9 +2456,9 @@ TEST_TEMPLATES = {
                     {"key": "s10_ir_hv_mohm",            "label": "IR — HV to Earth (Post-Repair)",      "type": "number", "required": True,  "unit": "MOhm"},
                     {"key": "s10_ir_lv_mohm",            "label": "IR — LV to Earth (Post-Repair)",      "type": "number", "required": True,  "unit": "MOhm"},
                     {"key": "s10_bdv_kv",                "label": "Oil BDV (Post-Repair)",               "type": "number", "required": True,  "unit": "kV"},
-                    {"key": "s10_turns_ratio_ok",        "label": "Turns ratio within specification",    "type": "dropdown","required": True, "options": ["Pass", "Fail"]},
-                    {"key": "s10_winding_resistance_ok", "label": "Winding resistance within specification","type":"dropdown","required": True, "options": ["Pass", "Fail"]},
-                    {"key": "s10_no_load_test_ok",       "label": "No-load test result",                 "type": "dropdown","required": True, "options": ["Pass", "Fail"]},
+                    {"key": "s10_turns_ratio_ok",        "label": "Turns ratio within specification",    "type": "dropdown","required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
+                    {"key": "s10_winding_resistance_ok", "label": "Winding resistance within specification","type":"dropdown","required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
+                    {"key": "s10_no_load_test_ok",       "label": "No-load test result",                 "type": "dropdown","required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                     {"key": "s10_test_results_summary",  "label": "Complete Test Results Summary",       "type": "textarea","required": True},
                     {"key": "s10_commissioning_status",  "label": "Commissioning Status",                "type": "dropdown","required": True, "options": ["Commissioned — In Service", "Commissioned with Surveillance", "Commissioning Failed — Rework Required"]},
                     {"key": "s10_responsible_officer",   "label": "Responsible Officer",                 "type": "text",   "required": True},
@@ -2477,13 +2477,13 @@ TEST_TEMPLATES = {
                     {"key": "surveillance_period_months","label": "Surveillance Period",                 "type": "number", "required": True,  "unit": "months", "default": "24"},
                     {"key": "surveillance_start_date",   "label": "Surveillance Start Date",             "type": "date",   "required": True},
                     {"key": "surveillance_end_date",     "label": "Surveillance End Date",               "type": "date",   "required": False},
-                    {"key": "dga_result_1m",             "label": "DGA at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
-                    {"key": "bdv_result_1m",             "label": "BDV at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
-                    {"key": "ir_result_6m",              "label": "IR Test at 6 Months",                "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
+                    {"key": "dga_result_1m",             "label": "DGA at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_NAC}},
+                    {"key": "bdv_result_1m",             "label": "BDV at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_NAC}},
+                    {"key": "ir_result_6m",              "label": "IR Test at 6 Months",                "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_NAC}},
                     {"key": "loading_history_summary",   "label": "Loading History Summary (surveillance period)", "type": "textarea","required": False},
                     {"key": "incidents_during_surveillance","label":"Any incidents during surveillance period","type":"checkbox","required": True},
                     {"key": "incident_details",          "label": "Incident Details (if any)",           "type": "textarea","required": False},
-                    {"key": "overall_quality_rating",    "label": "Overall Quality Rating of Repair",    "type": "dropdown","required": True, "options": ["Excellent", "Good", "Satisfactory", "Poor", "Unsatisfactory"]},
+                    {"key": "overall_quality_rating",    "label": "Overall Quality Rating of Repair",    "type": "dropdown","required": True, "options": ["Excellent", "Good", "Satisfactory", "Poor", "Unsatisfactory"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Excellent": "NORMAL", "Good": "NORMAL", "Satisfactory": "NORMAL", "Poor": "ALERT", "Unsatisfactory": "CRITICAL"}}},
                     {"key": "post_repair_evaluation",    "label": "Post-Repair Evaluation Summary",      "type": "textarea","required": True},
                     {"key": "warranty_expiry_date",      "label": "Repair Warranty Expiry Date",         "type": "date",   "required": False},
                 ],
@@ -4623,7 +4623,7 @@ TEST_TEMPLATES = {
                             {"key": "y_phase_ms",  "label": "Y Phase (ms)",     "type": "number"},
                             {"key": "b_phase_ms",  "label": "B Phase (ms)",     "type": "number"},
                             {"key": "limit_ms",    "label": "Max Limit (ms)",   "type": "number"},
-                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"operation": "Closing Time"},
@@ -5016,7 +5016,7 @@ TEST_TEMPLATES = {
                             {"key": "phase",             "label": "Phase",                  "type": "text"},
                             {"key": "test_voltage_kv",   "label": "Test Voltage (kVrms)",    "type": "number"},
                             {"key": "duration_sec",      "label": "Duration (s)",            "type": "number"},
-                            {"key": "flashover",         "label": "Flashover / Breakdown",   "type": "dropdown", "options": ["No", "Yes"]},
+                            {"key": "flashover",         "label": "Flashover / Breakdown",   "type": "dropdown", "options": ["No", "Yes"], "column_evaluation": {"No": "NORMAL", "Yes": "CRITICAL"}},
                             {"key": "result",            "label": "Result",                  "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
@@ -6596,11 +6596,11 @@ TEST_TEMPLATES = {
                             {"key": "test_configuration",         "label": "Test Configuration",                    "type": "readonly"},
                             {"key": "moisture_percent",            "label": "% Moisture",                            "type": "number"},
                             {"key": "moisture_analysis",          "label": "Tr. Analysis (% Moisture)",             "type": "dropdown",
-                             "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]},
+                             "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"], "column_evaluation": _EV_MOISTURE},
                             {"key": "moisture_previous_test",     "label": "% Moisture Previous Test",              "type": "number"},
                             {"key": "oil_conductivity_psm",       "label": "Oil Conductivity (pS/m)",               "type": "number"},
                             {"key": "oil_conductivity_analysis",  "label": "Tr. Analysis (Oil Conductivity)",       "type": "dropdown",
-                             "options": ["As new", "Acceptable", "Poor", "Bad"]},
+                             "options": ["As new", "Acceptable", "Poor", "Bad"], "column_evaluation": _EV_OIL_COND},
                         ],
                         "default_rows": [
                             {"test_configuration": "HV-GND"},
@@ -9250,7 +9250,7 @@ TEST_TEMPLATES = {
                             {"key": "selector_resistance_mohm", "label": "Selector Contact Resistance", "type": "number", "unit": "mΩ"},
                             {"key": "transition_time_ms", "label": "Diverter Transition Time",  "type": "number", "unit": "ms"},
                             {"key": "deviation_pct",      "label": "Deviation from Baseline",   "type": "number", "unit": "%"},
-                            {"key": "anomaly_detected",   "label": "Anomaly Detected",          "type": "dropdown", "options": ["No", "Yes"], "dropdown_evaluation": {"enabled": True, "value_severities": {"No": "NORMAL", "Yes": "ALERT"}}},
+                            {"key": "anomaly_detected",   "label": "Anomaly Detected",          "type": "dropdown", "options": ["No", "Yes"], "column_evaluation": {"No": "NORMAL", "Yes": "ALERT"}},
                         ],
                         "default_rows": [{"tap_position": "1", "direction": "Raise"}],
                     },
