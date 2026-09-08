@@ -109,7 +109,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Trip Circuit Test",
                 "fields": [
-                    {"key": "trip_circuit_ok", "label": "Trip Circuit Healthy", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "trip_circuit_ok", "label": "Trip Circuit Healthy", "type": "boolean", "required": True},
                     {"key": "trip_coil_resistance", "label": "Trip Coil Resistance", "type": "number", "unit": "ohms"},
                     {"key": "trip_time", "label": "Trip Time", "type": "number", "unit": "ms"},
                 ]
@@ -119,7 +119,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks / Observations", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
-                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -229,7 +228,7 @@ TEST_TEMPLATES = {
                 "title": "Stability Verification",
                 "fields": [
                     {"key": "max_through_fault", "label": "Max Through Fault Current", "type": "number", "unit": "A"},
-                    {"key": "relay_stable", "label": "Relay Stable (No Maloperation)", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "relay_stable", "label": "Relay Stable (No Maloperation)", "type": "boolean", "required": True},
                     {"key": "stability_margin", "label": "Stability Margin", "type": "number", "unit": "%"},
                 ]
             },
@@ -238,7 +237,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
-                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -283,10 +281,10 @@ TEST_TEMPLATES = {
             {
                 "title": "Functional Tests",
                 "fields": [
-                    {"key": "trip_test_ok", "label": "Trip Test Successful", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "close_test_ok", "label": "Close Test Successful", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "flag_indication_ok", "label": "Flag/LED Indication OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "alarm_contacts_ok", "label": "Alarm Contacts OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "trip_test_ok", "label": "Trip Test Successful", "type": "boolean", "required": True},
+                    {"key": "close_test_ok", "label": "Close Test Successful", "type": "boolean"},
+                    {"key": "flag_indication_ok", "label": "Flag/LED Indication OK", "type": "boolean", "required": True},
+                    {"key": "alarm_contacts_ok", "label": "Alarm Contacts OK", "type": "boolean"},
                     {"key": "auxiliary_supply", "label": "Auxiliary Supply", "type": "number", "unit": "V DC"},
                 ]
             },
@@ -295,7 +293,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
-                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -421,7 +418,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Polarity Test",
                 "fields": [
-                    {"key": "polarity_ok", "label": "Polarity Correct", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "polarity_ok", "label": "Polarity Correct", "type": "boolean", "required": True},
                     {"key": "polarity_method", "label": "Test Method", "type": "dropdown", "options": ["DC Kick Test", "AC Test", "Comparator"]},
                 ]
             },
@@ -430,7 +427,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
-                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -520,11 +516,11 @@ TEST_TEMPLATES = {
             {
                 "title": "Wiring & Panel Checks",
                 "fields": [
-                    {"key": "ct_wiring_ok", "label": "CT Wiring Correct", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "pt_wiring_ok", "label": "PT Wiring Correct", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "trip_circuit_ok", "label": "Trip Circuit OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "alarm_circuit_ok", "label": "Alarm Circuit OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "interlock_ok", "label": "Interlocks Verified", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "ct_wiring_ok", "label": "CT Wiring Correct", "type": "boolean", "required": True},
+                    {"key": "pt_wiring_ok", "label": "PT Wiring Correct", "type": "boolean", "required": True},
+                    {"key": "trip_circuit_ok", "label": "Trip Circuit OK", "type": "boolean", "required": True},
+                    {"key": "alarm_circuit_ok", "label": "Alarm Circuit OK", "type": "boolean"},
+                    {"key": "interlock_ok", "label": "Interlocks Verified", "type": "boolean"},
                 ]
             },
             {
@@ -532,7 +528,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
-                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -620,7 +615,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "body_condition", "label": "Body/Tank Condition", "type": "dropdown", "options": ["Good", "Fair", "Poor", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_GFP}},
                     {"key": "paint_condition", "label": "Paint Condition", "type": "dropdown", "options": ["Good", "Faded", "Peeling", "Rusted"], "required": True},
-                    {"key": "oil_leak", "label": "Oil Leakage Observed", "type": "dropdown", "options": ["No", "Yes"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"No": "NORMAL", "Yes": "CRITICAL"}}},
+                    {"key": "oil_leak", "label": "Oil Leakage Observed", "type": "boolean", "required": True},
                     {"key": "oil_leak_location", "label": "Leakage Location", "type": "text"},
                     {"key": "oil_level", "label": "Oil Level", "type": "dropdown", "options": ["Normal", "Low", "Very Low", "Empty"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "Low": "ALERT", "Very Low": "CRITICAL", "Empty": "CRITICAL"}}},
                     {"key": "oil_color", "label": "Oil Color", "type": "dropdown", "options": ["Clear", "Light Yellow", "Dark Yellow", "Brown", "Black"]},
@@ -633,16 +628,16 @@ TEST_TEMPLATES = {
                     {"key": "hv_bushing_condition", "label": "HV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Cracked": "ALERT", "Chipped": "ALERT", "Damaged": "CRITICAL"}}},
                     {"key": "lv_bushing_condition", "label": "LV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Cracked": "ALERT", "Chipped": "ALERT", "Damaged": "CRITICAL"}}},
                     {"key": "terminal_connections", "label": "Terminal Connections", "type": "dropdown", "options": ["Tight", "Loose", "Corroded"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Tight": "NORMAL", "Loose": "ALERT", "Corroded": "CRITICAL"}}},
-                    {"key": "earthing_ok", "label": "Earthing Proper", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "earthing_ok", "label": "Earthing Proper", "type": "boolean", "required": True},
                 ]
             },
             {
                 "title": "Accessories",
                 "fields": [
-                    {"key": "rating_plate_ok", "label": "Rating Plate Readable", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "thermometer_ok", "label": "Thermometer Working", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "buchholz_relay_ok", "label": "Buchholz Relay OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
-                    {"key": "prv_ok", "label": "PRV/Explosion Vent OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "rating_plate_ok", "label": "Rating Plate Readable", "type": "boolean"},
+                    {"key": "thermometer_ok", "label": "Thermometer Working", "type": "boolean"},
+                    {"key": "buchholz_relay_ok", "label": "Buchholz Relay OK", "type": "boolean"},
+                    {"key": "prv_ok", "label": "PRV/Explosion Vent OK", "type": "boolean"},
                     {"key": "tap_changer_position", "label": "Tap Changer Position", "type": "text"},
                 ]
             },
@@ -651,7 +646,6 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks / Observations", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
-                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -7477,7 +7471,7 @@ TEST_TEMPLATES = {
                     {"key": "float_mercury_condition", "label": "Float / Mercury Switch Condition", "type": "dropdown",
                      "options": ["Free Movement", "Sluggish", "Stuck", "Damaged"],
                      "dropdown_evaluation": {"enabled": True, "value_severities": {"Free Movement": "NORMAL", "Sluggish": "ALERT", "Stuck": "CRITICAL", "Damaged": "CRITICAL"}}},
-                    {"key": "wiring_continuity_ok", "label": "Alarm/Trip Wiring Continuity Checked", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "wiring_continuity_ok", "label": "Alarm/Trip Wiring Continuity Checked", "type": "boolean", "required": True},
                     {"key": "gas_sample_taken", "label": "Gas Sample Taken for Analysis (if gas present)", "type": "boolean"},
                 ],
             },
@@ -7489,7 +7483,6 @@ TEST_TEMPLATES = {
                         "options": ["PASS", "ALERT", "FAIL"], "required": True,
                         "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
                     },
-                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "FAIL"}},
                     {"key": "observation",    "label": "Observation",    "type": "textarea"},
                     {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
                 ],
