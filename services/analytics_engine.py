@@ -103,14 +103,19 @@ def _load_risk_bands(db: Optional[Session]) -> list[tuple[float, str]]:
     if db is None:
         return _DEFAULT_RISK_BANDS
     from models import EquipmentHealthBandThreshold
+    # Table not seeded at all vs admin having deliberately disabled every
+    # band are different states: the former should fall back to defaults
+    # (environment not configured yet), the latter must not - an admin who
+    # turns every band off wants nothing classified by band, not to
+    # silently get the hardcoded defaults back.
+    if db.query(EquipmentHealthBandThreshold).first() is None:
+        return _DEFAULT_RISK_BANDS
     rows = (
         db.query(EquipmentHealthBandThreshold)
         .filter(EquipmentHealthBandThreshold.is_active.is_(True))
         .order_by(EquipmentHealthBandThreshold.threshold.desc())
         .all()
     )
-    if not rows:
-        return _DEFAULT_RISK_BANDS
     return [(float(r.threshold), r.label) for r in rows]
 
 
@@ -122,13 +127,16 @@ def _load_condition_labels(db: Optional[Session]) -> dict[str, str]:
     if db is None:
         return _DEFAULT_CONDITION
     from models import TestStatusCondition
+    # See _load_risk_bands: table-never-seeded and admin-disabled-everything
+    # must not be conflated, or disabling every row silently resurrects the
+    # hardcoded defaults instead of leaving the map empty.
+    if db.query(TestStatusCondition).first() is None:
+        return _DEFAULT_CONDITION
     rows = (
         db.query(TestStatusCondition)
         .filter(TestStatusCondition.is_active.is_(True))
         .all()
     )
-    if not rows:
-        return _DEFAULT_CONDITION
     return {r.status: r.condition_label for r in rows}
 
 
@@ -140,13 +148,13 @@ def _load_condition_scores(db: Optional[Session]) -> dict[str, float]:
     if db is None:
         return _DEFAULT_SCORE
     from models import ParameterConditionScore
+    if db.query(ParameterConditionScore).first() is None:
+        return _DEFAULT_SCORE
     rows = (
         db.query(ParameterConditionScore)
         .filter(ParameterConditionScore.is_active.is_(True))
         .all()
     )
-    if not rows:
-        return _DEFAULT_SCORE
     return {r.condition: float(r.score) for r in rows}
 
 
@@ -170,13 +178,13 @@ def _load_band_rank_words(db: Optional[Session]) -> dict[str, int]:
     if db is None:
         return _DEFAULT_BAND_RANK_WORDS
     from models import ConditionBandRankWord
+    if db.query(ConditionBandRankWord).first() is None:
+        return _DEFAULT_BAND_RANK_WORDS
     rows = (
         db.query(ConditionBandRankWord)
         .filter(ConditionBandRankWord.is_active.is_(True))
         .all()
     )
-    if not rows:
-        return _DEFAULT_BAND_RANK_WORDS
     return {r.phrase.lower(): r.rank for r in rows}
 
 
@@ -185,19 +193,36 @@ def _risk_from_score(
     critical_findings: list | None = None,
     db: Optional[Session] = None,
 ) -> str:
-    # If any finding has CRITICAL status, the equipment risk is at least Critical,
-    # regardless of its composite health score.
-    if critical_findings and any(
-        isinstance(f, dict) and f.get("status") == "CRITICAL"
-        for f in critical_findings
+    bands = _load_risk_bands(db)
+    band_labels = {label for _, label in bands}
+    # If any finding has CRITICAL status, the equipment risk is at least
+    # Critical, regardless of its composite health score - but only while
+    # a "Critical" band is actually active. An admin who disables the
+    # Critical band expects it to stop appearing anywhere, including here;
+    # without this guard a single CRITICAL-status finding force-labels the
+    # equipment "Critical" no matter what the (now Critical-less) bands say,
+    # which is why disabling that band appeared to do nothing.
+    if (
+        critical_findings
+        and "Critical" in band_labels
+        and any(
+            isinstance(f, dict) and f.get("status") == "CRITICAL"
+            for f in critical_findings
+        )
     ):
         return "Critical"
     if score is None:
         return "Unknown"
-    for threshold, label in _load_risk_bands(db):
+    for threshold, label in bands:
         if score >= threshold:
             return label
-    return "Critical"
+    # Score cleared none of the active bands - typically because the
+    # lowest-threshold band (normally "Critical") was deactivated. The
+    # lowest-threshold *active* band is the catch-all for everything below
+    # it, so deactivating "Critical" actually stops new equipment from
+    # being labeled Critical instead of silently keeping the old label via
+    # a hardcoded fallback.
+    return bands[-1][1] if bands else "Unknown"
 
 
 def _condition_from_score(score: Optional[float]) -> str:
@@ -627,8 +652,13 @@ class HealthScorer:
                 or {}
             )
             weight    = float(ev.get("weight", 1.0))
-            condition = condition_labels.get(status, "Poor")
-            score     = scores.get(condition, 0.0)
+            # Fall back to the hardcoded defaults (not a blanket "Poor"/0.0)
+            # when a status/condition is missing from the admin-configured
+            # maps - e.g. because that row was deactivated rather than
+            # given a new value. Deactivating a row should restore its
+            # original fixed behavior, not silently zero out its score.
+            condition = condition_labels.get(status, _DEFAULT_CONDITION.get(status, "Poor"))
+            score     = scores.get(condition, _DEFAULT_SCORE.get(condition, 0.0))
 
             weighted_sum  += score  * weight
             total_weight  += weight

@@ -7810,9 +7810,33 @@ def seed_direct_submission_templates(session) -> int:
                     "title": "Failure Information",
                     "fields": [
                         {"key": "failure_date",        "label": "Date of Failure",       "type": "date",     "required": True},
+                        # KPTCL spec §2: "classification of failure type — Unexpected
+                        # Breakdown, Forced Outage, Degradation Failure, Partial
+                        # Discharge, Insulation Failure, Mechanical Failure, Protection
+                        # Misoperation, and any other failure type defined by the
+                        # utility." A distinct axis from failure_category below (that
+                        # one is which subsystem — Electrical/Oil/Protection/etc — this
+                        # is the nature of the failure event itself). "any other ...
+                        # defined by the utility" is already satisfied by this being a
+                        # normal dropdown field — an admin can add more options via
+                        # Template Designer without a code change.
+                        {"key": "failure_type",        "label": "Failure Type",          "type": "dropdown", "required": True,
+                         "options": ["Unexpected Breakdown", "Forced Outage", "Degradation Failure",
+                                     "Partial Discharge", "Insulation Failure", "Mechanical Failure",
+                                     "Protection Misoperation", "Other"]},
                         {"key": "failure_category",    "label": "Failure Category",      "type": "dropdown", "required": True,
                          "options": ["Electrical", "Mechanical", "Oil", "Protection", "Thermal", "Other"]},
+                        # KPTCL spec §2: "...capturing failure date, failure mode,
+                        # failure symptoms, probable cause, equipment status at
+                        # failure, and affected substation/bay details."
+                        # Substation/bay is already covered transitively (the
+                        # equipment record itself carries bay_number + department);
+                        # these two were the genuinely missing capture fields.
+                        {"key": "equipment_status_at_failure", "label": "Equipment Status at Failure", "type": "dropdown", "required": True,
+                         "options": ["In Service (Energized)", "Out of Service", "Under Maintenance",
+                                     "Under Testing / Commissioning", "Standby / Reserve", "Other"]},
                         {"key": "failure_description", "label": "Description of Failure","type": "textarea", "required": True},
+                        {"key": "failure_symptoms",    "label": "Failure Symptoms",      "type": "textarea", "required": True},
                         {"key": "root_cause_analysis", "label": "Root Cause Analysis",   "type": "textarea", "required": False},
                     ],
                 },
