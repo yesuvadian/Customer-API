@@ -257,6 +257,7 @@ class SalesOrderService:
         cf_grn_number: str,
         file: UploadFile,
         uploaded_by: str | None = None,
+        content: bytes | None = None,
     ):
         # Single fetch covers validation + old-file lookup + filename
         salesorder = self._get_order_status(access_token, salesorder_id)
@@ -282,10 +283,15 @@ class SalesOrderService:
         file.file.seek(0)
         new_filename = self._build_filename(salesorder=salesorder, file=file, doc_type="grn")
 
+        # `content` is the already size-capped body (read via read_upload_capped
+        # in the router). Falls back to streaming file.file directly for any
+        # caller that hasn't been updated to pre-read it.
+        attachment_payload = content if content is not None else file.file
+
         response = requests.post(
             f"{self.base_url}/salesorders/{salesorder_id}/attachment",
             headers=self._auth_headers(access_token),
-            files={"attachment": (new_filename, file.file, file.content_type or "application/pdf")},
+            files={"attachment": (new_filename, attachment_payload, file.content_type or "application/pdf")},
             params={"organization_id": self.org_id},
             timeout=30,
         )

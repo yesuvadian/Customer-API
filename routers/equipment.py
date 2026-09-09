@@ -676,7 +676,7 @@ async def bulk_validate(
     Returns {department_id, equipment_type_id, rows: [{row, status, errors, data}]}
     """
     _enforce_org_scope(current_user)
-    contents = await file.read()
+    contents = await read_upload_capped(file)
     try:
         meta, rows = _parse_bulk_excel(contents)
     except Exception as exc:
@@ -713,7 +713,7 @@ async def bulk_import(
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_add")
 
-    contents = await file.read()
+    contents = await read_upload_capped(file)
     try:
         meta, rows = _parse_bulk_excel(contents)
     except Exception as exc:

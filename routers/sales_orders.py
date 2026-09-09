@@ -64,19 +64,21 @@ async def upload_grn(
 
 
 @router.put("/{salesorder_id}/grn", status_code=status.HTTP_200_OK)
-def update_grn(
+async def update_grn(
     salesorder_id: str,
     cf_grn_number: str = Form(...),
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
     access_token = get_zoho_access_token()
+    content = await read_upload_capped(file)
     try:
         sales_order_service.update_grn_attachment(
             access_token=access_token,
             salesorder_id=salesorder_id,
             cf_grn_number=cf_grn_number,
             file=file,
+            content=content,
             uploaded_by=current_user.email,
         )
     except HTTPException as e:
