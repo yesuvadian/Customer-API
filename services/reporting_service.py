@@ -779,7 +779,7 @@ class ReportingService:
         duval_advisory column.
         """
         from models import TestResult, TestingRequest, Equipment, CategoryMaster, OrgDepartment
-        from services.duval_triangle import classify_duval_triangle
+        from services.duval_triangle import classify_duval_triangle, gas_values_from_test_data
 
         months = int(_p(p, "months", 12))
         cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
@@ -798,25 +798,6 @@ class ReportingService:
         eq_type_names = {c.id: c.name for c in self.db.query(CategoryMaster).all()}
         dept_names = {d.id: d.name for d in self.db.query(OrgDepartment).all()}
 
-        # Key gases the Duval Triangle and generation-rate tracking use.
-        # value_bottom mirrors the transformer_dga template's own THRESHOLD
-        # rule (test_templates.py), which reads value_bottom as the
-        # authoritative reading for per-gas Normal/Alert/Critical status —
-        # kept consistent here rather than picking a different column.
-        KEY_GASES = {"Methane": "ch4", "Ethylene": "c2h4", "Acetylene": "c2h2"}
-
-        def _gas_values(test_data: dict) -> dict:
-            out = {}
-            for row in (test_data or {}).get("dga_results", []) or []:
-                gas = row.get("gas")
-                if gas in KEY_GASES:
-                    val = row.get("value_bottom")
-                    try:
-                        out[KEY_GASES[gas]] = float(val) if val not in (None, "") else None
-                    except (TypeError, ValueError):
-                        out[KEY_GASES[gas]] = None
-            return out
-
         # Sort per-equipment so consecutive readings can be diffed for a
         # ppm/month generation rate and an acceleration flag (this test's
         # rate vs. that same equipment's own previous rate) — both
@@ -831,7 +812,7 @@ class ReportingService:
             prev_tested_at = None
             prev_rates = {}
             for tr_result, tr_req, eq in eq_rows:
-                gas_values = _gas_values(tr_result.test_data)
+                gas_values = gas_values_from_test_data(tr_result.test_data)
                 duval = classify_duval_triangle(
                     gas_values.get("ch4") or 0,
                     gas_values.get("c2h4") or 0,

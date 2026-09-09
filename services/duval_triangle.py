@@ -35,6 +35,39 @@ use this module.
 
 from __future__ import annotations
 
+# transformer_dga's dga_results table rows are keyed by gas name ("Methane",
+# "Ethylene", "Acetylene"); this is the only mapping from that vocabulary to
+# the three-letter keys the rest of this module uses.
+KEY_GASES = {"Methane": "ch4", "Ethylene": "c2h4", "Acetylene": "c2h2"}
+
+
+def gas_values_from_test_data(test_data: dict) -> dict:
+    """
+    Extract {"ch4": float|None, "c2h4": float|None, "c2h2": float|None} from
+    a transformer_dga TestResult.test_data dict's dga_results rows, reading
+    value_bottom (mirrors the template's own THRESHOLD rule, which uses
+    value_bottom as the authoritative per-gas reading — kept consistent
+    here rather than picking a different column). Blank/non-numeric cells
+    come back None rather than raising, since an incomplete reading is
+    common and shouldn't break classification or crash a report/query.
+
+    Shared by services/reporting_service.py's DGA Trend Report and
+    routers/analytics.py's Deterioration Watch List — both need the same
+    "which reading counts" extraction, so it lives here once rather than
+    twice.
+    """
+    out = {}
+    for row in (test_data or {}).get("dga_results", []) or []:
+        gas = row.get("gas")
+        if gas in KEY_GASES:
+            val = row.get("value_bottom")
+            try:
+                out[KEY_GASES[gas]] = float(val) if val not in (None, "") else None
+            except (TypeError, ValueError):
+                out[KEY_GASES[gas]] = None
+    return out
+
+
 ADVISORY_NOTE = (
     "AI Advisory — zone boundaries not yet validated by KPTCL RT & R&D. "
     "Confirm with a qualified officer before acting. See report header for "

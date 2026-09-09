@@ -5631,13 +5631,24 @@ class ParameterThresholdBand(Base):
     """
     __tablename__ = "parameter_threshold_bands"
     __table_args__ = (
-        UniqueConstraint("template_key", "parameter_key", "context_key", "band_label",
+        UniqueConstraint("template_key", "table_field_key", "parameter_key", "context_key", "band_label",
                           name="uq_threshold_band"),
         {"schema": "public"},
     )
 
     id            = Column(Integer, primary_key=True, autoincrement=True)
     template_key  = Column(String(100), nullable=False, index=True)   # e.g. "transformer_oil_test"
+    # Which table field within the template this row came from, e.g.
+    # "winding_test_results", "bushing_220kv_results" — confirmed live
+    # several templates reuse the exact same row id ('R'/'Y'/'B' Phase,
+    # HV-GND/TV-GND/etc) across two or more DIFFERENT tables in the same
+    # template with DIFFERENT cutoffs (capacitance_tandelta_transformer's
+    # five bushing voltage-class tables, and separately its
+    # winding_test_results vs idax_test_results). template_key +
+    # parameter_key alone can't tell those apart; without this column one
+    # sub-table's band silently overwrote another's on extraction. NULL
+    # only for rows extracted before this column existed.
+    table_field_key = Column(String(100), nullable=True, index=True)
     parameter_key = Column(String(200), nullable=False, index=True)   # row identifier, e.g. "Acidity", "Methane"
     # NULL = the threshold applies regardless of context (a flat, single-
     # level thresholds config). Non-NULL is whatever context the source

@@ -500,12 +500,16 @@ class WorkflowRoutingService:
             # Null to_stage → explicitly terminal
             is_terminal = True
 
-        # Resolve terminal status code
+        # Resolve terminal status code (+ display name, for the status-changed
+        # notification — status_code alone is the stable API identifier like
+        # "closed", not something to show a user).
+        terminal_status_name: Optional[str] = None
         if is_terminal:
             if terminal_status_id:
                 ts = self.db.query(TrWfStatus).filter(TrWfStatus.id == terminal_status_id).first()
                 if ts:
                     terminal_status_code = ts.status_code
+                    terminal_status_name = ts.status_name
             if not terminal_status_code:
                 # Fallback: last TrWfStatus (by sequence) for this definition
                 _last = (
@@ -516,6 +520,7 @@ class WorkflowRoutingService:
                 )
                 if _last:
                     terminal_status_code = _last.status_code
+                    terminal_status_name = _last.status_name
 
         # Close current stage instance
         current_stage_inst: Optional[TrWfStageInstance] = (
@@ -536,6 +541,7 @@ class WorkflowRoutingService:
             current_stage_inst.comment = comment
 
         to_status_code: Optional[str] = None
+        to_status_name: Optional[str] = None
 
         if is_terminal:
             instance.status = "terminated" if transition.is_rejection else "completed"
@@ -543,6 +549,7 @@ class WorkflowRoutingService:
             instance.current_status_code = terminal_status_code
             instance.completed_at = datetime.now(timezone.utc)
             to_status_code = terminal_status_code
+            to_status_name = terminal_status_name
 
             # If this ticket was auto-generated from a one-off schedule (a
             # single ad-hoc test, not a recurring cadence), that schedule
@@ -581,6 +588,7 @@ class WorkflowRoutingService:
             self.db.add(new_stage_inst)
 
             next_status_code = to_stage.status.status_code if to_stage.status else None
+            next_status_name = to_stage.status.status_name if to_stage.status else None
             if not next_status_code:
                 # Stage has no status linked — fall back to WF definition's next status by sequence
                 _cur_seq = (
@@ -599,9 +607,11 @@ class WorkflowRoutingService:
                     .first()
                 )
                 next_status_code = _next_status.status_code if _next_status else None
+                next_status_name = _next_status.status_name if _next_status else None
             instance.current_stage_id = to_stage.id
             instance.current_status_code = next_status_code
             to_status_code = next_status_code
+            to_status_name = next_status_name
 
         # Audit log
         is_send_back = (
@@ -703,6 +713,7 @@ class WorkflowRoutingService:
                     action_code=action_code,
                     stage_name=to_stage.name if to_stage else "",
                     status_code=to_status_code,
+                    status_name=to_status_name,
                     performed_by=_performer_name,
                     comment=comment,
                     is_terminal=is_terminal,
