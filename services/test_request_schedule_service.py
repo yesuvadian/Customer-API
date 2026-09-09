@@ -318,6 +318,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         schedule: TestRequestSchedule,
         now: datetime,
         force_run: bool = False,
+        enforce_open_ticket_guard: bool = True,
     ) -> bool:
 
         from services.testing_request_service import (
@@ -371,7 +372,14 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             # (threshold-alert followup on save AND recommendation dispatch on
             # approval). Guard here — the single chokepoint for ALL generated
             # tickets — so only ONE open ticket exists per equipment+test_type.
-            if schedule.equipment_id and schedule.test_type_id:
+            #
+            # The recurring daily scheduler cadence opts out of this guard
+            # (enforce_open_ticket_guard=False): a schedule's own next_run_date
+            # must keep firing/advancing on its cadence even while the PRIOR
+            # cycle's ticket is still open, otherwise next_run_date freezes on
+            # a past date indefinitely (it only advances below once a ticket is
+            # actually created for this cycle).
+            if enforce_open_ticket_guard and schedule.equipment_id and schedule.test_type_id:
                 from models import TestingRequestStatus as _TRS
                 _open = [
                     _TRS.draft, _TRS.submitted, _TRS.assigned, _TRS.accepted,
@@ -704,6 +712,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     db=db,
                     schedule=schedule,
                     now=now,
+                    enforce_open_ticket_guard=False,
                 )
             )
 

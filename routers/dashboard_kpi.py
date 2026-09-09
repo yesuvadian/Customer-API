@@ -1465,11 +1465,77 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             .all()
         )
 
+        # Per-equipment breakdown behind _scope_counts' critical_count —
+        # same EquipmentAnalytics.risk_level == 'Critical' definition (see
+        # that function's comment on why this must match the AI Analytics
+        # Dashboard's own definition), just returning the actual rows
+        # instead of a bare count so the "Critical Equipment" tile can
+        # expand into a list the same way Open/Closed/Rejected already do.
+        from models import EquipmentAnalytics as _CritEA
+        crit_filters = [_CritEA.organization_id == svc.org_id,
+                        _CritEA.risk_level == 'Critical']
+        if dept_ids_for_scope:
+            crit_filters.append(_CritEA.department_id.in_(dept_ids_for_scope))
+        critical_rows = (
+            db.query(_CritEA)
+            .filter(*crit_filters)
+            .order_by(_CritEA.health_score.asc().nulls_last())
+            .limit(limit)
+            .all()
+        )
+        critical_equipment = []
+        for row in critical_rows:
+            eq = row.equipment
+            critical_equipment.append({
+                "equipment_id": str(row.equipment_id),
+                "equipment_label": eq.ueic if eq else "Unknown equipment",
+                "health_score": float(row.health_score) if row.health_score is not None else None,
+                "condition_summary": row.condition_summary,
+            })
+
+        # Per-ticket breakdown behind _scope_counts' "Awaiting Approval" tile
+        # (pending_approval_count + pending_review_count — deliberately NOT
+        # pending_assign_count, which is its own separate queue, see that
+        # tile's comment above). Built directly off the same two stage-id
+        # sets rather than reusing _approval_queue()'s broader
+        # viewer_approval_stage_ids (which also folds in assign-only
+        # stages) — that would make this list's rows disagree with what
+        # the tile's own number is actually counting.
+        awaiting_stage_ids = viewer_approve_only_stage_ids | viewer_review_stage_ids
+        awaiting_approval = []
+        if awaiting_stage_ids:
+            aw_q = db.query(TestingRequest, TrWfInstance.current_stage_id).join(
+                TrWfInstance, TrWfInstance.testing_request_id == TestingRequest.id,
+            ).filter(
+                TestingRequest.organization_id == svc.org_id,
+                TrWfInstance.status == 'active',
+                TrWfInstance.current_stage_id.in_(awaiting_stage_ids),
+            )
+            if dept_ids_for_scope:
+                aw_q = aw_q.filter(TestingRequest.department_id.in_(dept_ids_for_scope))
+            aw_rows = aw_q.order_by(TestingRequest.mts.desc()).limit(limit).all()
+            for r, current_stage_id in aw_rows:
+                ueic = r.equipment.ueic if r.equipment else (
+                    r.equipment_type.name if r.equipment_type else "Unknown equipment")
+                dept = db.query(OrgDepartment).filter(OrgDepartment.id == r.department_id).first()
+                stage = "review" if current_stage_id in viewer_review_stage_ids else "approval"
+                awaiting_approval.append({
+                    "request_id": str(r.id),
+                    "request_number": r.request_number,
+                    "equipment_id": str(r.equipment_id) if r.equipment_id else None,
+                    "equipment_label": ueic,
+                    "test_type": r.test_type.name if r.test_type else None,
+                    "department_name": dept.name if dept else None,
+                    "stage": stage,
+                })
+
         return {
             "this_week": this_week,
             "open_tickets": _rows(open_rows),
             "closed_this_week_tickets": _rows(closed_this_week_rows),
+            "awaiting_approval": awaiting_approval,
             "rejected_cancelled_tickets": _rows(rejected_cancelled_rows),
+            "critical_equipment": critical_equipment,
         }
 
     def _failure_cohort_summary():
