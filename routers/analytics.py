@@ -191,6 +191,22 @@ def _table_column_key(parameter_key: str) -> str:
     return parts[2] if len(parts) == 3 else parameter_key
 
 
+def _table_field_key(parameter_key: str) -> Optional[str]:
+    """The TABLE FIELD portion of the same composite key — e.g.
+    "winding_test_results" out of "winding_test_results.TV-GND.
+    df_corrected_20c". Confirmed live several templates reuse the exact
+    same row id or column key across two or more DIFFERENT table fields
+    in the SAME template with DIFFERENT cutoffs (capacitance_tandelta_
+    transformer's five bushing voltage-class tables all use 'R'/'Y'/'B'
+    Phase; tan_delta_capacitance_idax's 220kV vs 66kV bushing tables,
+    same collision) — template_key + parameter_key alone can't tell those
+    apart, so every ParameterThresholdBand lookup must also scope by this.
+    None for a flat (non-table) parameter_key, matching
+    ParameterThresholdBand.table_field_key's own NULL convention there."""
+    parts = parameter_key.split(".")
+    return parts[0] if len(parts) == 3 else None
+
+
 def _next_worse_boundary(bands: list, current_value: float, slope_per_day: float,
                           rank_words: dict[str, int]):
     """Returns (breach_value, band_label) for the next threshold boundary
@@ -3102,11 +3118,13 @@ def _real_breach_forecast(
     if db is None or row.trend not in ("Increasing", "Decreasing") or row.current_value is None or row.trend_slope is None:
         return out
     row_id = _table_row_id(row.parameter_key)
+    field_key = _table_field_key(row.parameter_key)
     if candidate_bands is None:
         candidate_bands = (
             db.query(ParameterThresholdBand)
             .filter(
                 ParameterThresholdBand.template_key == row.template_key,
+                ParameterThresholdBand.table_field_key == field_key,
                 ParameterThresholdBand.parameter_key == row_id,
                 ParameterThresholdBand.is_active.is_(True),
             )
@@ -3123,11 +3141,18 @@ def _real_breach_forecast(
                     db.query(ParameterThresholdBand)
                     .filter(
                         ParameterThresholdBand.template_key == row.template_key,
+                        ParameterThresholdBand.table_field_key == field_key,
                         ParameterThresholdBand.parameter_key == column_key,
                         ParameterThresholdBand.is_active.is_(True),
                     )
                     .all()
                 )
+    else:
+        # Bulk-fetched by the caller (Deterioration Watch List) keyed only
+        # by (template_key, parameter_key) — same cross-table-field
+        # collision _table_field_key's docstring describes, so narrow to
+        # bands from THIS row's own table field before using them.
+        candidate_bands = [b for b in candidate_bands if b.table_field_key == field_key]
     if not candidate_bands:
         return out
     context_keys = sorted({b.context_key for b in candidate_bands if b.context_key})
