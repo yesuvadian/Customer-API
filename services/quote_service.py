@@ -77,11 +77,16 @@ class QuoteService:
         estimate_id: str,
         file: UploadFile,
         uploaded_by: str | None = None,
+        content: bytes | None = None,
     ):
+        # `content` is the already size-capped body (read via read_upload_capped
+        # in the router). Falls back to streaming file.file directly for any
+        # caller that hasn't been updated to pre-read it.
+        attachment_payload = content if content is not None else file.file
         response = requests.post(
             f"{self.base_url}/estimates/{estimate_id}/attachment",
             headers=self._auth_headers(access_token),
-            files={"attachment": (file.filename, file.file, file.content_type or "application/octet-stream")},
+            files={"attachment": (file.filename, attachment_payload, file.content_type or "application/octet-stream")},
             params={"organization_id": self.org_id},
             timeout=30,
         )
