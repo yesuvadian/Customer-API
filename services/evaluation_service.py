@@ -574,17 +574,12 @@ class EvaluationService:
         # is_duval_triangle_source comment above.
         watchlist_severity = field.get("duval_watchlist_severity")
         if field.get("is_duval_triangle_source") and watchlist_severity:
-            from services.duval_triangle import KEY_GASES, classify_duval_triangle
-            gas_vals: dict = {}
-            for row in table_data:
-                gas_key = KEY_GASES.get(row.get("gas"))
-                if not gas_key:
-                    continue
-                raw = row.get("value_bottom")
-                try:
-                    gas_vals[gas_key] = float(raw) if raw not in (None, "") else None
-                except (TypeError, ValueError):
-                    gas_vals[gas_key] = None
+            from services.duval_triangle import classify_duval_triangle, gas_values_from_test_data
+            # Shared with services/reporting_service.py's DGA Trend Report and
+            # routers/analytics.py's Deterioration Watch List — same "which
+            # reading counts" extraction, kept in one place rather than
+            # re-parsed here too.
+            gas_vals = gas_values_from_test_data(test_data)
             duval = classify_duval_triangle(
                 gas_vals.get("ch4") or 0,
                 gas_vals.get("c2h4") or 0,
