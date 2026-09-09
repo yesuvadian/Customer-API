@@ -578,6 +578,186 @@ def get_ee_tlss_dashboard(
 # per-stage due dates) is NOT included. Deliberately left out for now — this org
 # has zero RepairWorkflow rows to verify correctness against; folding it in is a
 # real, explicitly flagged follow-up, not an oversight.
+# The 7 DQI (Data Quality Index) checks — 5 Equipment nameplate-field names
+# plus the two other checks ('test_history'/'overdue_test') — mirrored by
+# DqiRuleConfig's seed data (alter_dqi_rule_config.py). Used only as the
+# fallback when that table hasn't been seeded yet; the live source of truth
+# for which of these are actually active is always the DB table itself.
+_DQI_ALL_KEYS = (
+    "manufacturer", "factory_serial_number", "year_of_manufacture",
+    "voltage_class", "commissioned_date", "test_history", "overdue_test",
+)
+
+# Historical exception: this key's remediation-list issue code was
+# 'missing_serial_number', not 'missing_factory_serial_number', from before
+# per-field checks became data-driven — kept as-is so the existing
+# 'MISSING SERIAL NO.' badge label (base_role_dashboard.dart's
+# _dqiIssueLabels) keeps matching for this specific key. Any other/new key
+# just gets 'missing_<key>'.
+_DQI_ISSUE_CODE_OVERRIDES = {"factory_serial_number": "missing_serial_number"}
+
+
+def _dqi_missing_issue_code(key: str) -> str:
+    return _DQI_ISSUE_CODE_OVERRIDES.get(key, f"missing_{key}")
+
+
+def _dqi_active_key_scopes(db: Session) -> dict:
+    """{key: None-or-set-of-equipment_type_ids} for every currently active
+    DQI rule — the single source of truth for both the aggregate dqi_pct
+    (_build_department_rollup, via _dqi_compute_scope below) and the
+    standalone GET /dashboard/dqi-issues pagination endpoint, so a rule
+    toggle/scope edit is honored identically everywhere the moment it's
+    saved — this is a fresh DB query every call, nothing cached.
+
+    None scope = the check applies to every equipment type (the original
+    global behavior, and what every row got before per-type scoping
+    existed); a non-empty set restricts it to just those CategoryMaster
+    ids (Equipment.equipment_type_id) — see DqiRuleConfig's own docstring
+    in models.py for why this exists (a CT/PT/transformer-specific field
+    would otherwise incorrectly flag every OTHER equipment type too).
+    """
+    from models import DqiRuleConfig
+    rows = db.query(
+        DqiRuleConfig.key, DqiRuleConfig.is_active, DqiRuleConfig.equipment_type_ids,
+    ).all()
+    if not rows:
+        # Table not seeded yet (alter_dqi_rule_config.py never run) — fall
+        # back to every check active and unscoped, matching the original
+        # hardcoded behavior, rather than silently scoring everything 100%.
+        return {k: None for k in _DQI_ALL_KEYS}
+    return {
+        key: (set(type_ids) if type_ids else None)
+        for key, active, type_ids in rows if active
+    }
+
+
+def _dqi_compute_scope(db: Session, org_id, dept_ids_for_scope, key_scopes: dict, closed_expr) -> dict:
+    """Core DQI evaluation for one department scope: for every active
+    check in `key_scopes`, applies it only to equipment whose
+    equipment_type_id falls within that check's own scope (None = every
+    type) — then returns BOTH the aggregate ready-count (dqi_pct's
+    numerator) and the full per-equipment issue list (the remediation
+    panel) from a SINGLE pass over the same equipment/checks, so the two
+    numbers can never independently drift out of sync the way two
+    separately-written computations could.
+
+    Returns {"total": int, "ready": int, "issues": [...]}. `issues` is
+    NOT paginated here — callers slice/offset it themselves (see
+    _build_department_rollup's leaf/branch return blocks, and the
+    standalone GET /dashboard/dqi-issues "Load More" endpoint).
+    """
+    from models import (
+        Equipment as _DqiEquipment, TestAnalytics as _DqiTestAnalytics, TestingRequest,
+        DQI_SPECIAL_KEY_LABELS, get_dqi_live_only_field_keys, dqi_fetch_raw_field_values,
+    )
+    from services.dashboard_service import _now
+
+    eq_filters = [_DqiEquipment.organization_id == org_id, _DqiEquipment.status == 'active']
+    if dept_ids_for_scope:
+        eq_filters.append(_DqiEquipment.department_id.in_(dept_ids_for_scope))
+    equipment_rows = db.query(_DqiEquipment).filter(*eq_filters).all()
+    total = len(equipment_rows)
+    if total == 0:
+        return {"total": 0, "ready": 0, "issues": []}
+
+    eq_ids = [e.id for e in equipment_rows]
+    special_keys = set(DQI_SPECIAL_KEY_LABELS)
+    field_keys = [k for k in key_scopes if k not in special_keys]
+
+    has_test_ids = set()
+    if 'test_history' in key_scopes:
+        has_test_ids = {
+            row[0] for row in db.query(_DqiTestAnalytics.equipment_id)
+            .filter(_DqiTestAnalytics.equipment_id.in_(eq_ids)).distinct().all()
+        }
+    overdue_ids = set()
+    if 'overdue_test' in key_scopes:
+        overdue_ids = {
+            row[0] for row in db.query(TestingRequest.equipment_id).filter(
+                TestingRequest.equipment_id.in_(eq_ids),
+                TestingRequest.request_category == 'test',
+                ~closed_expr,
+                TestingRequest.due_date < _now(),
+            ).distinct().all()
+        }
+
+    # ORM-mapped keys read via plain getattr (no extra query — the rows are
+    # already loaded); anything else is a live-only raw Postgres column
+    # (models.py's get_dqi_live_only_field_keys/dqi_fetch_raw_field_values)
+    # — one batched query per request for those, not one per row/key.
+    orm_mapped = {c.name for c in _DqiEquipment.__table__.columns}
+    raw_candidates = [k for k in field_keys if k not in orm_mapped]
+    safe_raw_keys = (
+        [k for k in raw_candidates if k in get_dqi_live_only_field_keys(db)]
+        if raw_candidates else []
+    )
+    raw_values = dqi_fetch_raw_field_values(db, safe_raw_keys, eq_ids) if safe_raw_keys else {}
+
+    def field_value(e, key):
+        if key in orm_mapped:
+            return getattr(e, key, None)
+        return raw_values.get(key, {}).get(e.id)
+
+    def key_applies(key, equipment_type_id):
+        scope = key_scopes.get(key)
+        return scope is None or equipment_type_id in scope
+
+    ready = 0
+    issues_out = []
+    for e in equipment_rows:
+        # not in (None, '') / in (None, '') rather than plain truthiness —
+        # a real 0/0.0 (e.g. latitude/longitude/impedance_pct at the
+        # equator, or a genuine zero reading) counts as present, only an
+        # actual empty value doesn't.
+        issues = []
+        for key in sorted(field_keys):
+            if not key_applies(key, e.equipment_type_id):
+                continue
+            if field_value(e, key) in (None, ''):
+                issues.append(_dqi_missing_issue_code(key))
+        if ('test_history' in key_scopes and key_applies('test_history', e.equipment_type_id)
+                and e.id not in has_test_ids):
+            issues.append('no_test_history')
+        if ('overdue_test' in key_scopes and key_applies('overdue_test', e.equipment_type_id)
+                and e.id in overdue_ids):
+            issues.append('overdue_test')
+        if issues:
+            issues_out.append({
+                "equipment_id": str(e.id),
+                "equipment_label": e.ueic,
+                "issues": issues,
+            })
+        else:
+            ready += 1
+
+    return {"total": total, "ready": ready, "issues": issues_out}
+
+
+def _dqi_closed_expr_for_org(db: Session, org_id):
+    """Same 'closed' definition used throughout this file's ticket/DQI
+    counts — legacy TestingRequest.status=='closed' OR whatever this org's
+    OWN tr_wf terminal status codes are (per-org workflow config, not a
+    fixed set — a custom workflow can name/count its terminal statuses
+    differently). Standalone version of the computation
+    _build_department_rollup does inline, for GET /dashboard/dqi-issues
+    (the "Load More" pagination endpoint) to call without needing the
+    whole rollup around it.
+    """
+    from sqlalchemy import or_ as _or_dqi_closed
+    from models import TrWfStatus, TrWfDefinition, TestingRequest
+    terminal_status_rows = (
+        db.query(TrWfStatus.status_code)
+        .join(TrWfDefinition, TrWfDefinition.id == TrWfStatus.wf_definition_id)
+        .filter(TrWfDefinition.org_id == org_id, TrWfStatus.is_terminal.is_(True))
+        .all()
+    )
+    terminal_status_codes = list({row[0] for row in terminal_status_rows})
+    return _or_dqi_closed(
+        TestingRequest.status == 'closed',
+        TestingRequest.current_status_code.in_(terminal_status_codes),
+    )
+
+
 def _build_department_rollup(db: Session, svc: DashboardService,
                               current_user: Optional[User] = None) -> dict:
     from models import OrgDepartment, TestingRequest, OrgRole, OrgUserRole, User, HierarchyAnalytics, EquipmentAnalytics, TrWfStageRole
@@ -590,6 +770,14 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     # uses for exactly this reason. (SQL-level filters below don't need this —
     # only in-memory comparisons against fetched datetime values do.)
     from services.dashboard_service import _make_tz, _now
+
+    # Which of the DQI (Data Quality Index) checks currently count toward
+    # the score/remediation list, and which equipment types each applies
+    # to — admin-configurable via Threshold Config's "Data Quality" tab
+    # (DqiRuleConfig, /threshold-config/dqi-rules). Read once here so
+    # _scope_counts (below) and the leaf/branch dqi_issues blocks agree on
+    # the same active/scoped set for every row/summary in this response.
+    _dqi_key_scopes = _dqi_active_key_scopes(db)
 
     # Current department's own name/level — lets the frontend build a real
     # title ("BMAZ North · Substation", "Bangalore Zone · Zone") instead of a
@@ -1046,49 +1234,21 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         compliance_pct = int((completed_requests / total_requests * 100)) if total_requests > 0 else 0
 
         # Data Quality Index (DQI) — % of active equipment in this scope
-        # meeting all three data-readiness checks: nameplate completeness
-        # (key fields filled), has at least one test result ever, and not
-        # currently overdue for its next scheduled test. Pure computation
-        # over existing tables (Equipment/TestAnalytics/TestingRequest) —
-        # no new column or table. TestAnalytics (not EquipmentAnalytics) is
-        # used for "has test history" because it's one row per test result,
-        # so equipment with old-but-real test history still counts as
-        # having history even if EquipmentAnalytics' own live snapshot were
-        # ever cleared.
-        from models import Equipment as _DqiEquipment, TestAnalytics as _DqiTestAnalytics
-        dqi_eq_filters = [_DqiEquipment.organization_id == svc.org_id, _DqiEquipment.status == 'active']
-        if dept_ids_for_scope:
-            dqi_eq_filters.append(_DqiEquipment.department_id.in_(dept_ids_for_scope))
-        dqi_equipment_rows = db.query(_DqiEquipment).filter(*dqi_eq_filters).all()
-        dqi_total = len(dqi_equipment_rows)
-        dqi_ready = 0
-        if dqi_total > 0:
-            dqi_eq_ids = [e.id for e in dqi_equipment_rows]
-            dqi_has_test_ids = {
-                row[0] for row in db.query(_DqiTestAnalytics.equipment_id)
-                .filter(_DqiTestAnalytics.equipment_id.in_(dqi_eq_ids))
-                .distinct().all()
-            }
-            dqi_overdue_ids = {
-                row[0] for row in db.query(TestingRequest.equipment_id).filter(
-                    TestingRequest.equipment_id.in_(dqi_eq_ids),
-                    TestingRequest.request_category == 'test',
-                    ~_closed_expr,
-                    TestingRequest.due_date < _now(),
-                ).distinct().all()
-            }
-            for e in dqi_equipment_rows:
-                nameplate_ok = bool(
-                    e.manufacturer and e.factory_serial_number
-                    and e.year_of_manufacture and e.voltage_class
-                    and e.commissioned_date
-                )
-                if nameplate_ok and e.id in dqi_has_test_ids and e.id not in dqi_overdue_ids:
-                    dqi_ready += 1
-        # No active equipment yet isn't a data-quality failure — default to
-        # fully ready rather than 0, matching compliance_pct's own "no
-        # evidence of a problem" convention elsewhere in this function.
-        dqi_pct = int((dqi_ready / dqi_total) * 100) if dqi_total > 0 else 100
+        # meeting every active, type-applicable check (see
+        # _dqi_active_key_scopes/_dqi_compute_scope above _build_department_
+        # rollup — nameplate fields, has-test-history, not-overdue, each
+        # optionally scoped to specific equipment types).
+        _dqi_result = _dqi_compute_scope(db, svc.org_id, dept_ids_for_scope, _dqi_key_scopes, _closed_expr)
+        dqi_total = _dqi_result["total"]
+        dqi_ready = _dqi_result["ready"]
+        # No active equipment yet means there's nothing to score — not the
+        # same as "fully ready". Reporting 100% here reads as a genuine pass
+        # and made empty departments look better than departments that
+        # actually have equipment with real data gaps, which is what an
+        # empty dept_ids scope (e.g. no equipment assigned) always did to
+        # this — so leave it unscored (None) instead, and let callers render
+        # "no equipment" rather than a misleading 100%.
+        dqi_pct = int((dqi_ready / dqi_total) * 100) if dqi_total > 0 else None
 
         return {
             "total_tests": total_requests,
@@ -1105,6 +1265,31 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "dqi_ready_count": dqi_ready,
             "dqi_total_count": dqi_total,
         }
+
+    def _dqi_issues_list(dept_ids_for_scope, limit=None, offset=0):
+        """Per-equipment DQI remediation list — same checks as
+        _scope_counts' dqi_pct above (via the same shared
+        _dqi_compute_scope), extracted so both the leaf shape and the
+        branch shape (its "summary", scoped the same as _scope_counts' own
+        dqi_pct there) can surface an actionable list, not just the
+        aggregate percentage. Previously leaf-scope only; branch scopes can
+        span hundreds of substations' worth of equipment, so `limit`/
+        `offset` page through it (offset used by GET /dashboard/dqi-issues'
+        "Load More", never by the initial /overview response itself) — the
+        caller gets the true total (count of equipment with at least one
+        issue, not the scope's total equipment count) so it can say
+        "showing N of TOTAL".
+        """
+        from sqlalchemy import or_ as _or_dqi
+        dqi_closed_expr = _or_dqi(
+            TestingRequest.status == 'closed',
+            TestingRequest.current_status_code.in_(terminal_status_codes),
+        )
+        result = _dqi_compute_scope(db, svc.org_id, dept_ids_for_scope, _dqi_key_scopes, dqi_closed_expr)
+        issues_out = result["issues"]
+        total = len(issues_out)
+        page = issues_out[offset:offset + limit] if limit is not None else issues_out[offset:]
+        return page, total
 
     def _calibration_summary(dept_ids_for_scope):
         """Zone-wide relay/ETV calibration KPIs (KPTCL spec §14.6's CEE
@@ -1538,76 +1723,21 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # Shared with the branch shape below — see _ticket_lists' docstring.
         ticket_lists = _ticket_lists(svc.dept_ids)
 
-        # Same closed-expression definition as _scope_counts'/_ticket_lists'
-        # closed_this_week_count (legacy .status=='closed' OR tr_wf terminal
-        # current_status_code, via terminal_status_codes) — only needed here
-        # for the DQI overdue-equipment check below.
-        leaf_closed_expr = _or_tl(
-            TestingRequest.status == 'closed',
-            TestingRequest.current_status_code.in_(terminal_status_codes),
-        )
-
         # Total equipment at this one station — the mockup's 4th leaf KPI
         # tile is "Equipment", not "Awaiting Approval" (an individual tester
         # doesn't approve anything; that's a supervisor-level concept, see
         # _scope_counts' pending_approval_count for the branch-scope version).
-        from models import Equipment, TestAnalytics
+        from models import Equipment
         equipment_count = db.query(func.count(Equipment.id)).filter(
             Equipment.organization_id == svc.org_id,
             Equipment.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
         ).scalar() or 0
 
-        # Equipment failing at least one DQI check (routers/dashboard_kpi.py's
-        # _scope_counts computes the same three checks for the dqi_pct
-        # number — this is the per-equipment remediation list behind it,
-        # leaf-scope only since a task list is only actionable at a single
-        # substation, matching open_tickets/closed_this_week_tickets below).
-        dqi_all_eq = db.query(Equipment).filter(
-            Equipment.organization_id == svc.org_id,
-            Equipment.status == 'active',
-            Equipment.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
-        ).all()
-        dqi_issues = []
-        if dqi_all_eq:
-            _dqi_eq_ids = [e.id for e in dqi_all_eq]
-            _dqi_has_test = {
-                row[0] for row in db.query(TestAnalytics.equipment_id)
-                .filter(TestAnalytics.equipment_id.in_(_dqi_eq_ids))
-                .distinct().all()
-            }
-            _dqi_overdue = {
-                row[0] for row in db.query(TestingRequest.equipment_id).filter(
-                    TestingRequest.equipment_id.in_(_dqi_eq_ids),
-                    TestingRequest.request_category == 'test',
-                    ~leaf_closed_expr,
-                    TestingRequest.due_date < _now(),
-                ).distinct().all()
-            }
-            for e in dqi_all_eq:
-                # Each missing nameplate field gets its own issue code
-                # instead of one blanket "incomplete_nameplate" flag, so
-                # the remediation list says exactly what to go fill in.
-                issues = []
-                if not e.manufacturer:
-                    issues.append('missing_manufacturer')
-                if not e.factory_serial_number:
-                    issues.append('missing_serial_number')
-                if not e.year_of_manufacture:
-                    issues.append('missing_year_of_manufacture')
-                if not e.voltage_class:
-                    issues.append('missing_voltage_class')
-                if not e.commissioned_date:
-                    issues.append('missing_commissioned_date')
-                if e.id not in _dqi_has_test:
-                    issues.append('no_test_history')
-                if e.id in _dqi_overdue:
-                    issues.append('overdue_test')
-                if issues:
-                    dqi_issues.append({
-                        "equipment_id": str(e.id),
-                        "equipment_label": e.ueic,
-                        "issues": issues,
-                    })
+        # Equipment failing at least one DQI check — see _dqi_issues_list's
+        # own docstring above. Unlimited here: a single substation's
+        # equipment count is small enough to return in full (unlike the
+        # branch shape below, which caps it).
+        dqi_issues, _dqi_issues_total = _dqi_issues_list(svc.dept_ids)
 
         return {
             "shape": "leaf",
@@ -1616,6 +1746,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "flagged_equipment": flagged,
             "equipment_count": equipment_count,
             "dqi_issues": dqi_issues,
+            "dqi_issues_total_count": _dqi_issues_total,
             "can_test": can_test,
             "assigned_test_count": assigned_test_count,
             "can_approve_requests": can_approve_requests,
@@ -1665,6 +1796,12 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         })
 
     rows.sort(key=lambda r: r["compliance_pct"])
+    # Full-subtree DQI remediation list — same scope as "summary" above, so
+    # its dqi_pct isn't just an unreachable aggregate: capped to keep the
+    # response bounded at a zone/org scope (potentially hundreds of
+    # substations' worth of equipment), with the true total alongside so the
+    # UI can say "showing N of TOTAL" rather than imply the list is complete.
+    _branch_dqi_issues, _branch_dqi_issues_total = _dqi_issues_list(svc.dept_ids, limit=50)
     return {
         "shape": "branch",
         "scope_name": scope_name,
@@ -1673,6 +1810,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # separately-tracked figure), so the top-line numbers can't drift out
         # of sync with what the rollup rows say they should add up to.
         "summary": _scope_counts(svc.dept_ids),
+        "dqi_issues": _branch_dqi_issues,
+        "dqi_issues_total_count": _branch_dqi_issues_total,
         "approvals": _approval_queue(svc.dept_ids),
         "can_approve_requests": can_approve_requests,
         "can_review": can_review,
@@ -1723,6 +1862,41 @@ def get_overview_dashboard(
         else None
     )
     return result
+
+
+@router.get("/dqi-issues")
+def get_dqi_issues_page(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the Data Quality remediation list embedded
+    in GET /dashboard/overview (whose own `dqi_issues` is capped at 50 for
+    a branch scope) — powers the Overall Dashboard's "Load More" button
+    without re-running the whole rollup (compliance/ticket lists/
+    calibration/etc — all already fetched once by /overview and still held
+    by the frontend). Same scope resolution (_svc) and the same
+    _dqi_active_key_scopes/_dqi_compute_scope machinery
+    _build_department_rollup itself uses, just invoked directly so this
+    can be a lightweight, independently-cacheable call.
+    """
+    svc = _svc(db, current_user, org_id, dept_id)
+    key_scopes = _dqi_active_key_scopes(db)
+    closed_expr = _dqi_closed_expr_for_org(db, svc.org_id)
+    result = _dqi_compute_scope(db, svc.org_id, svc.dept_ids, key_scopes, closed_expr)
+    issues = result["issues"]
+    total = len(issues)
+    page = issues[offset:offset + limit]
+    return {
+        "issues": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
 
 
 @router.get("/calibration-interval-advisories/export")
