@@ -2789,6 +2789,7 @@ class NotificationService:
         comment: Optional[str],
         is_terminal: bool,
         from_status_code: Optional[str],
+        status_name: Optional[str] = None,
         recipient_roles_override: Optional[list] = None,
     ) -> None:
         """
@@ -2809,6 +2810,12 @@ class NotificationService:
             "performed_by":    performed_by,
             "comment":         comment or "",
             "status_code":     status_code or "",
+            # Templates render {{status_name}} (a human label like "Under
+            # Review") — status_code alone is the stable API identifier
+            # (e.g. "under_review") and was never meant to be shown as-is.
+            # Fall back to the code, then a generic word, so the placeholder
+            # is never left unrendered even if TrWfStatus has no display name.
+            "status_name":     status_name or status_code or "Updated",
             "is_terminal":     str(is_terminal),
         }
         common = dict(
