@@ -6,6 +6,7 @@ from database import get_db
 
 from schemas import CompanyProductCertificateOut
 from services.companyproductcertificate_service import CompanyProductCertificateService
+from utils.upload_limits import read_upload_capped
 
 
 router = APIRouter(
@@ -41,7 +42,7 @@ async def upload_certificate(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    file_data = await file.read()
+    file_data = await read_upload_capped(file)
 
     return service.create_certificate(
         db=db,

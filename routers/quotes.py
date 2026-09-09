@@ -7,6 +7,7 @@ from services.quote_service import QuoteService
 from services.zoho_auth_service import get_zoho_access_token
 import zohoschemas
 from services.sales_order_service import SalesOrderService
+from utils.upload_limits import read_upload_capped
 
 router = APIRouter(
     prefix="/zohoquotes",
@@ -212,7 +213,7 @@ def create_quotes_for_vendors(
     "/{estimate_id}/attachment",
     status_code=status.HTTP_201_CREATED
 )
-def upload_quote_attachment(
+async def upload_quote_attachment(
     estimate_id: str,
     file: UploadFile = File(...),
     current_user=Depends(get_current_user)
@@ -221,12 +222,14 @@ def upload_quote_attachment(
     Upload attachment to a Zoho Books Estimate (Quote)
     """
     access_token = get_zoho_access_token()
+    content = await read_upload_capped(file)
 
     try:
         result = quote_service.upload_attachment(
             access_token=access_token,
             estimate_id=estimate_id,
             file=file,
+            content=content,
             uploaded_by=current_user.email
         )
     except Exception as e:

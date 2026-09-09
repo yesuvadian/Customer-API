@@ -28,6 +28,7 @@ from schemas import (
     EquipmentCountResponse,
 )
 from services.equipment_service import EquipmentService
+from utils.upload_limits import read_upload_capped
 
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "analysis_reports")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -1865,7 +1866,7 @@ def download_testing_kit_import_template(
 
 
 @router.post("/testing-kits/bulk-import")
-def bulk_import_testing_kits(
+async def bulk_import_testing_kits(
     file: UploadFile = File(...),
     org_id: UUID = Query(...),
     skip_errors: bool = Query(False, description="Skip invalid rows instead of aborting"),
@@ -1886,7 +1887,7 @@ def bulk_import_testing_kits(
 
     _require_permission(db, current_user, "can_import")
 
-    content = file.file.read().decode("utf-8-sig")
+    content = (await read_upload_capped(file)).decode("utf-8-sig")
     def _is_comment_or_blank(line: str) -> bool:
         s = line.strip()
         return not s or s.startswith("#") or s.startswith('"#')

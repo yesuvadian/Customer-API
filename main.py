@@ -3,6 +3,7 @@ load_dotenv()
 
 import os
 import logging
+import anyio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -11,6 +12,7 @@ from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
 from routers.health import router as health_router
+from routers.public_config import router as public_config_router
 from routers import (
     repair_workflow,
     surveillance_workflow,
@@ -1484,6 +1486,10 @@ security = HTTPBearer()
 # polled repeatedly by external load-testing tools during a live run.
 app.include_router(health_router)
 
+# Public runtime config (e.g. max_upload_mb) - no auth, fetched by the UI at
+# startup before login so client-side limits stay in sync with the backend.
+app.include_router(public_config_router)
+
 # Authentication & Token
 app.include_router(token.router)
 app.include_router(auth.router)
@@ -1638,6 +1644,15 @@ app.include_router(billing_router.admin_router)   # Billing admin endpoints (/ad
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
+    # Most routers here use plain `def` (sync) handlers, which FastAPI runs
+    # on anyio's worker-thread pool rather than the event loop. That pool
+    # defaults to 40 threads regardless of vCPU count, so it — not CPU — is
+    # often the real concurrency ceiling. Configurable per deployment via
+    # THREAD_POOL_SIZE in .env; default matches anyio's own default (40).
+    thread_pool_size = int(os.getenv("THREAD_POOL_SIZE", 40))
+    anyio.to_thread.current_default_thread_limiter().total_tokens = thread_pool_size
+    logger.info(f"[Startup] Thread pool limiter set to {thread_pool_size} (THREAD_POOL_SIZE)")
+
     scheduler.start()
     logger.info(
         "[Scheduler] APScheduler started — "

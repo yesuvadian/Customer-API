@@ -24,6 +24,8 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+from utils.upload_limits import read_upload_capped
+
 from category_labels import RequestCategoryFullLabels
 from models import (
     NextActionType,
@@ -640,7 +642,7 @@ class DirectSubmissionService:
             )
 
         # Read and store
-        data = await file.read()
+        data = await read_upload_capped(file)
         result.file_name = file.filename
         result.file_type = file.content_type or "application/octet-stream"
         result.file_size = len(data)

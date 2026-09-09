@@ -19,6 +19,7 @@ from schemas import (
 )
 from services.testing_service import TestingService
 from services.test_result_pdf_service import TestResultPDFService
+from utils.upload_limits import read_upload_capped
 
 router = APIRouter(
     prefix="/testing",
@@ -1766,7 +1767,7 @@ async def upload_request_import(
 
     tpl = _template_for_request(req)
 
-    file_bytes = await file.read()
+    file_bytes = await read_upload_capped(file)
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 

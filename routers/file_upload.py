@@ -10,10 +10,18 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from auth_utils import get_current_user
+from utils.upload_limits import read_upload_capped
 
 router = APIRouter(prefix="/upload", tags=["File Upload"])
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "documents")
+# Defaults to a local folder for single-instance/dev use. For a multi-instance
+# deployment, set UPLOAD_DIR in .env to a network share or object-storage
+# mount point shared by every instance — a file saved on one instance must
+# be readable from the others, which a local path alone cannot guarantee.
+UPLOAD_DIR = os.getenv(
+    "UPLOAD_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "uploads", "documents"),
+)
 
 
 @router.post("/file")
@@ -27,7 +35,7 @@ async def upload_file(
     stored_name = f"{uuid.uuid4()}{ext}"
     dest = os.path.join(UPLOAD_DIR, stored_name)
 
-    content = await file.read()
+    content = await read_upload_capped(file)
     if not content:
         raise HTTPException(status_code=400, detail="Empty file")
 
