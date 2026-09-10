@@ -5647,12 +5647,13 @@ def get_dqi_available_field_keys() -> dict:
     routers/dashboard_kpi.py), so it won't appear and can't be checked
     until the model itself is updated to match.
 
-    CAUTION, surfaced in the admin UI too: DQI is NOT equipment-type-aware
-    — it runs the same active checks over every active equipment record
-    regardless of type. A field that's only meaningful for one type (e.g.
-    ct_ratio_actual/ct_ratio_current/pt_ratio are CT/PT-specific,
-    vector_group/impedance_pct are power-transformer-specific) will show
-    every OTHER type as failing that check too if added here.
+    CAUTION, surfaced in the admin UI too: a field that's only meaningful
+    for one type (e.g. ct_ratio_actual/ct_ratio_current/pt_ratio are
+    CT/PT-specific, vector_group/impedance_pct are power-transformer-
+    specific) runs over every active equipment record regardless of type
+    UNLESS the admin also sets that rule's equipment_type_ids scope
+    (DqiRuleConfig, /threshold-config/dqi-rules) — left unscoped, it will
+    show every OTHER type as failing a check that was never meant for it.
     """
     return {
         col.name: _humanize_column_name(col.name)
