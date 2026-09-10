@@ -25,6 +25,7 @@ from schemas import (
     User as UserSchema
 )
 from services.org_department_service import OrgDepartmentService
+from utils.upload_limits import read_upload_capped
 
 
 # ── Dept bulk-import response schema ─────────────────────────────────────────
@@ -433,7 +434,7 @@ async def bulk_import_departments(
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Please upload a valid Excel file (.xlsx or .xls)")
 
-    contents = await file.read()
+    contents = await read_upload_capped(file)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
     except Exception:

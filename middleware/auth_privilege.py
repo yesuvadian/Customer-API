@@ -30,6 +30,7 @@ PUBLIC_ENDPOINTS = [
     "/zoho_register/",
     "/zohocontacts/",
     "/health",      # external load-test monitoring poll - no auth token available
+    "/public-config",   # safe non-secret settings (e.g. max_upload_mb) - fetched by the UI before login
     "/billing/webhook",   # Razorpay webhook — no auth
     "/billing/plans",     # Plan list — no auth needed
 ]
