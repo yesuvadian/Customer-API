@@ -112,11 +112,22 @@ def _band_rank(label: str, rank_words: dict[str, int]) -> int:
     ConditionBandRankWord table, same word-matching convention
     services/evaluation_service.py's own _cond_rank uses) — not a
     hardcoded copy, so a template's bands are ranked the same way here as
-    they are at test-evaluation time, from the same source."""
+    they are at test-evaluation time, from the same source.
+
+    Checks the LONGEST matching word first, not table/insertion order —
+    confirmed live: "Abnormal" (sfra_transformer/sfra_routine's own worst
+    band label) contains "normal" as a substring, so with a plain
+    dict-order scan, the rank-0 "normal" entry matched before the
+    correctly-configured rank-2 "abnormal" entry was ever reached,
+    silently classifying the worst SFRA band as the best one. Same
+    latent risk already flagged for "not ok" vs "ok" in the table's own
+    docstring — sorting by length fixes both without needing the word
+    list curated in any particular order.
+    """
     low = (label or "").lower()
-    for word, rank in rank_words.items():
+    for word in sorted(rank_words, key=len, reverse=True):
         if word in low:
-            return rank
+            return rank_words[word]
     return 1  # unrecognized band name — treat as a middle tier, not best/worst
 
 
@@ -159,10 +170,41 @@ def _table_row_id(parameter_key: str) -> str:
     """ParameterAnalytics.parameter_key for a table-row field is a 3-part
     composite key: "{table_field_key}.{row_id}.{column_key}" (confirmed
     live, e.g. "oil_test_results.Acidity.measured_value"). Extracts just
-    the row_id — what ParameterThresholdBand.parameter_key stores — since
-    a flat field's parameter_key has no dots and passes through unchanged."""
+    the row_id — what ParameterThresholdBand.parameter_key stores for
+    THRESHOLD-style tables (Acidity, DGA: cutoff varies PER ROW/substance)
+    — since a flat field's parameter_key has no dots and passes through
+    unchanged."""
     parts = parameter_key.split(".")
     return parts[1] if len(parts) == 3 else parameter_key
+
+
+def _table_column_key(parameter_key: str) -> str:
+    """The COLUMN portion of the same 3-part composite key — what
+    ParameterThresholdBand.parameter_key stores for WORST_OF_BANDS-style
+    tables instead (sfra_transformer/sfra_routine's Correlation
+    Coefficient Analysis: cutoff varies PER COLUMN/frequency-band, e.g.
+    "cc_mf", shared across every row/winding-pair, not per row). Callers
+    try _table_row_id first (the more common shape) and fall back to this
+    one when no bands are found for the row id — see
+    alter_parameter_threshold_band.py's _worst_of_bands_rows."""
+    parts = parameter_key.split(".")
+    return parts[2] if len(parts) == 3 else parameter_key
+
+
+def _table_field_key(parameter_key: str) -> Optional[str]:
+    """The TABLE FIELD portion of the same composite key — e.g.
+    "winding_test_results" out of "winding_test_results.TV-GND.
+    df_corrected_20c". Confirmed live several templates reuse the exact
+    same row id or column key across two or more DIFFERENT table fields
+    in the SAME template with DIFFERENT cutoffs (capacitance_tandelta_
+    transformer's five bushing voltage-class tables all use 'R'/'Y'/'B'
+    Phase; tan_delta_capacitance_idax's 220kV vs 66kV bushing tables,
+    same collision) — template_key + parameter_key alone can't tell those
+    apart, so every ParameterThresholdBand lookup must also scope by this.
+    None for a flat (non-table) parameter_key, matching
+    ParameterThresholdBand.table_field_key's own NULL convention there."""
+    parts = parameter_key.split(".")
+    return parts[0] if len(parts) == 3 else None
 
 
 def _next_worse_boundary(bands: list, current_value: float, slope_per_day: float,
@@ -2029,6 +2071,12 @@ def get_deterioration_watch_list(
 
         row_id = _table_row_id(row.parameter_key)
         candidate_bands = bands_by_param.get((row.template_key, row_id), [])
+        if not candidate_bands:
+            # Fall back to column-keyed thresholds — see
+            # _table_column_key's docstring (WORST_OF_BANDS-style tables).
+            column_key = _table_column_key(row.parameter_key)
+            if column_key != row_id:
+                candidate_bands = bands_by_param.get((row.template_key, column_key), [])
         forecast = None
         if candidate_bands:
             eq_for_row = eq_by_id.get(row.equipment_id)
@@ -3070,16 +3118,41 @@ def _real_breach_forecast(
     if db is None or row.trend not in ("Increasing", "Decreasing") or row.current_value is None or row.trend_slope is None:
         return out
     row_id = _table_row_id(row.parameter_key)
+    field_key = _table_field_key(row.parameter_key)
     if candidate_bands is None:
         candidate_bands = (
             db.query(ParameterThresholdBand)
             .filter(
                 ParameterThresholdBand.template_key == row.template_key,
+                ParameterThresholdBand.table_field_key == field_key,
                 ParameterThresholdBand.parameter_key == row_id,
                 ParameterThresholdBand.is_active.is_(True),
             )
             .all()
         )
+        if not candidate_bands:
+            # Fall back to column-keyed thresholds (WORST_OF_BANDS-style
+            # tables, e.g. sfra_transformer/sfra_routine's cc_lf/cc_mf/
+            # cc_hf — cutoff varies by column, not by row) — see
+            # _table_column_key's docstring.
+            column_key = _table_column_key(row.parameter_key)
+            if column_key != row_id:
+                candidate_bands = (
+                    db.query(ParameterThresholdBand)
+                    .filter(
+                        ParameterThresholdBand.template_key == row.template_key,
+                        ParameterThresholdBand.table_field_key == field_key,
+                        ParameterThresholdBand.parameter_key == column_key,
+                        ParameterThresholdBand.is_active.is_(True),
+                    )
+                    .all()
+                )
+    else:
+        # Bulk-fetched by the caller (Deterioration Watch List) keyed only
+        # by (template_key, parameter_key) — same cross-table-field
+        # collision _table_field_key's docstring describes, so narrow to
+        # bands from THIS row's own table field before using them.
+        candidate_bands = [b for b in candidate_bands if b.table_field_key == field_key]
     if not candidate_bands:
         return out
     context_keys = sorted({b.context_key for b in candidate_bands if b.context_key})
