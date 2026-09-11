@@ -1,6 +1,7 @@
 
+import re
 from enum import Enum as PyEnum
-from sqlalchemy import Enum
+from sqlalchemy import Enum, inspect
 
 import uuid
 from sqlalchemy import (
@@ -1719,6 +1720,7 @@ class Equipment(Base):
 
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
+    gps_coordinates = Column(String(100), nullable=True)
 
     # SCADA integration
     scada_tag = Column(String(120), nullable=True, index=True)
@@ -5597,6 +5599,226 @@ class EquipmentConditionBandThreshold(Base):
     label     = Column(String(20), nullable=False)      # "Excellent" | "Good" | "Fair" | "Poor" | "Critical"
     is_active = Column(Boolean, default=True)
     notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# Equipment columns that are NEVER offered as a DQI "this field must be
+# present" check, even though nullable — either they're not user-facing
+# nameplate data (id/FKs, the nameplate_data JSONB blob, the status enum,
+# audit trail) or they're only meaningful in one specific lifecycle state
+# (replacement_reason_type/replacement_recommendation_id/analysis_report_path
+# and replaces_equipment_id/replaced_by_id only apply to a replaced unit;
+# retired_date/retirement_reason only apply to a retired one; DQI only ever
+# scores status=='active' equipment, so requiring any of these would mean
+# every normal active unit "fails" a check that was never meant for it).
+# Kept as an EXCLUDE list (rather than an include allow-list) specifically
+# so a column added to Equipment later for some unrelated reason becomes
+# usable here automatically, with no code change — see
+# get_dqi_available_field_keys below.
+DQI_EXCLUDED_EQUIPMENT_COLUMNS = {
+    "id", "ueic", "organization_id", "department_id", "equipment_type_id",
+    "nameplate_data", "status",
+    "replaces_equipment_id", "replaced_by_id",
+    "retired_date", "retirement_reason",
+    "replacement_reason_type", "replacement_recommendation_id", "analysis_report_path",
+    "precommission_request_id",
+    "created_by", "modified_by", "cts", "mts",
+}
+
+
+def get_dqi_available_field_keys() -> dict:
+    """Every Equipment column usable as a DQI "this field must be present"
+    check, discovered LIVE from the Equipment model (not a hand-maintained
+    list) — a column added to the Equipment class later is available here
+    immediately, no further code change needed anywhere in the DQI feature.
+    Only nullable columns not in DQI_EXCLUDED_EQUIPMENT_COLUMNS qualify.
+    Label is auto-derived from the column name (e.g. "vector_group" ->
+    "Vector Group") since there's no curated label possible for a column
+    that didn't exist when this was written.
+
+    NOTE: this reflects the Equipment *ORM model* (models.py), not
+    whatever the live Postgres table happens to contain — a column added
+    directly in the database without also adding it to the Equipment class
+    here is invisible to SQLAlchemy (and to getattr(equipment, key) in
+    routers/dashboard_kpi.py), so it won't appear and can't be checked
+    until the model itself is updated to match.
+
+    CAUTION, surfaced in the admin UI too: a field that's only meaningful
+    for one type (e.g. ct_ratio_actual/ct_ratio_current/pt_ratio are
+    CT/PT-specific, vector_group/impedance_pct are power-transformer-
+    specific) runs over every active equipment record regardless of type
+    UNLESS the admin also sets that rule's equipment_type_ids scope
+    (DqiRuleConfig, /threshold-config/dqi-rules) — left unscoped, it will
+    show every OTHER type as failing a check that was never meant for it.
+    """
+    return {
+        col.name: _humanize_column_name(col.name)
+        for col in Equipment.__table__.columns
+        if col.nullable and col.name not in DQI_EXCLUDED_EQUIPMENT_COLUMNS
+    }
+
+
+# Column-name identifier check for anything about to be interpolated into
+# raw SQL text below (column names can't be bound parameters — this is the
+# defense-in-depth check applied ON TOP OF "is this actually a live column
+# right now", never a substitute for it). Postgres identifiers can be much
+# longer, but nothing legitimate here needs more than this.
+_DQI_SAFE_KEY_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+
+
+def get_dqi_live_only_field_keys(db) -> dict:
+    """Equipment columns that exist in the LIVE Postgres `equipment` table
+    but are NOT mapped by the Equipment ORM class above — the raw-SQL-
+    fallback counterpart to get_dqi_available_field_keys' ORM-mapped list,
+    so a column added directly to the database (no models.py change at
+    all) still becomes a usable DQI check. Same nullable/exclude-list
+    filtering as the ORM-mapped list, plus _DQI_SAFE_KEY_RE since these
+    names can end up interpolated into SQL text (see
+    dqi_fetch_raw_field_values below) — anything that doesn't look like a
+    plain identifier is silently dropped rather than offered.
+
+    Every caller of this function passes ITS OWN live `db` session and
+    gets a result reflecting the database at that exact moment — nothing
+    here is cached across requests, so a column dropped from Postgres
+    stops being offered immediately, not just a stale label lingering.
+    """
+    mapped = {c.name for c in Equipment.__table__.columns}
+    try:
+        live_cols = inspect(db.get_bind()).get_columns("equipment", schema="public")
+    except Exception:
+        # Live introspection can only fail from a bad connection/permission
+        # issue, not "column doesn't exist" (that's just absent from the
+        # list) — degrade to "nothing extra found" rather than 500 the
+        # whole DQI rollup over what's meant to be a supplementary feature.
+        return {}
+    return {
+        c["name"]: _humanize_column_name(c["name"])
+        for c in live_cols
+        if c["name"] not in mapped
+        and c.get("nullable", True)
+        and c["name"] not in DQI_EXCLUDED_EQUIPMENT_COLUMNS
+        and _DQI_SAFE_KEY_RE.match(c["name"])
+    }
+
+
+def dqi_fetch_raw_field_values(db, keys, equipment_ids) -> dict:
+    """Batch-fetch one or more live-only (non-ORM-mapped) Equipment column
+    values, keyed by equipment id — the only way to read such a column at
+    all, since getattr(orm_object, key) can't see something the ORM class
+    never declared.
+
+    SECURITY: column names can't be SQL bound parameters, so `keys` is
+    interpolated directly into the query text. Every key is re-validated
+    against _DQI_SAFE_KEY_RE AND the live schema (get_dqi_live_only_field_keys)
+    immediately before this runs — raising rather than silently dropping a
+    bad one, since a key that fails this check this late means a caller
+    skipped the validation it's required to do first. `equipment_ids` goes
+    through as a normal bound parameter, same as any other query value.
+    """
+    if not keys or not equipment_ids:
+        return {}
+    live_only = get_dqi_live_only_field_keys(db)
+    for k in keys:
+        if k not in live_only or not _DQI_SAFE_KEY_RE.match(k):
+            raise ValueError(f"'{k}' is not a validated live-only DQI column key")
+    cols_sql = ", ".join(f'"{k}"' for k in keys)
+    rows = db.execute(
+        text(f'SELECT id, {cols_sql} FROM public.equipment WHERE id = ANY(:ids)'),
+        {"ids": list(equipment_ids)},
+    ).all()
+    result = {k: {} for k in keys}
+    for row in rows:
+        eid = row[0]
+        for i, k in enumerate(keys):
+            result[k][eid] = row[i + 1]
+    return result
+
+
+# str.title() mangles known acronyms in a snake_case column name (e.g.
+# "ct_ratio_actual" -> "Ct Ratio Actual") — fixed up word-by-word rather
+# than hand-curating a label per key, so this still works for a column
+# that didn't exist when this was written.
+_DQI_LABEL_ACRONYM_FIXUPS = {"Ct": "CT", "Pt": "PT", "Scada": "SCADA", "Gps": "GPS"}
+
+
+def _humanize_column_name(name: str) -> str:
+    words = name.replace("_", " ").title().split()
+    return " ".join(_DQI_LABEL_ACRONYM_FIXUPS.get(w, w) for w in words)
+
+
+# The 2 checks that aren't a raw Equipment field — routers/dashboard_kpi.py
+# has dedicated logic for exactly these two (test-result/test-request
+# history), nothing else, so no other special key is valid. Not schema-
+# derived (there's no column to introspect), so this one stays a fixed dict.
+DQI_SPECIAL_KEY_LABELS = {
+    "test_history": "Has Test History",
+    "overdue_test": "Not Overdue for a Test",
+}
+
+
+def get_dqi_all_key_labels(db=None) -> dict:
+    """Every key the DQI computation can evaluate: ORM-mapped Equipment
+    fields (always included) + the 2 special checks, plus — when `db` is
+    given — any live-only column discovered directly from Postgres
+    (get_dqi_live_only_field_keys), so a raw-SQL-added column shows up
+    here too without ever touching models.py. `db` is optional only for
+    call sites that genuinely have no session available; omitting it just
+    means live-only columns aren't offered, not an error.
+    """
+    result = {**get_dqi_available_field_keys(), **DQI_SPECIAL_KEY_LABELS}
+    if db is not None:
+        result = {**get_dqi_live_only_field_keys(db), **result}
+    return result
+
+
+class DqiRuleConfig(Base):
+    """Admin-configurable toggles for which checks count toward the Data
+    Quality Index (DQI) shown on the Overall Dashboard's "Data Quality" tile
+    and remediation list (routers/dashboard_kpi.py's _scope_counts and
+    _dqi_issues_list) — replaces what used to be a hardcoded list of 5
+    required Equipment nameplate fields plus the has-test-history and
+    not-overdue checks.
+
+    Rows ARE creatable/deletable from the UI, but only with a `key` drawn
+    from get_dqi_all_key_labels() above — enforced server-side
+    (routers/threshold_config.py's create endpoint), since dashboard_kpi.py's
+    DQI computation only knows how to evaluate exactly those keys (a real,
+    nullable Equipment column via getattr, or the 2 special test-history/
+    overdue checks). An arbitrary free-text key would silently evaluate to
+    "always missing" (getattr(..., key, None) → always None) or worse, so
+    the admin UI presents this as a dropdown, not a text field.
+    Seeded once by alter_dqi_rule_config.py.
+
+    No org scoping (mirrors EquipmentHealthBandThreshold and every other
+    table of this shape in this file — global, not per-org).
+
+    `equipment_type_ids` NULL/empty means the check applies to every
+    equipment type (the original, global behavior) — a non-empty list
+    restricts it to just those CategoryMaster ids (Equipment.equipment_type_id).
+    This exists because DQI runs the same active checks over ALL active
+    equipment regardless of type: a genuinely CT/PT/Power-Transformer-
+    specific field (vector_group, ct_ratio_actual, ...) requires this
+    scoping to avoid incorrectly flagging every OTHER type as failing a
+    check that was never meant for it (see routers/dashboard_kpi.py's
+    per-equipment evaluation, which checks e.equipment_type_id against
+    this list before applying the rule at all).
+    """
+    __tablename__ = "dqi_rule_configs"
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_dqi_rule_key"),
+        {"schema": "public"},
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    key       = Column(String(50), nullable=False)   # e.g. "manufacturer", "test_history"
+    label     = Column(String(60), nullable=False)    # display text, e.g. "Manufacturer"
+    is_active = Column(Boolean, default=True)
+    notes     = Column(Text, nullable=True)
+    equipment_type_ids = Column(ARRAY(Integer), nullable=True)
 
     created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)

@@ -19,6 +19,7 @@ from schemas import (
 )
 from services.testing_service import TestingService
 from services.test_result_pdf_service import TestResultPDFService
+from utils.upload_limits import read_and_validate_upload
 
 router = APIRouter(
     prefix="/testing",
@@ -825,7 +826,7 @@ def create_structured_result(
 
 
 @router.post("/results/{result_id}/images", response_model=List[TestResultImageResponse])
-def upload_result_images(
+async def upload_result_images(
     result_id: UUID,
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
@@ -833,7 +834,7 @@ def upload_result_images(
 ):
     """Upload multiple images for a test result."""
     service = TestingService(db)
-    images = service.upload_result_images(result_id, files, tester_id=current_user.id)
+    images = await service.upload_result_images(result_id, files, tester_id=current_user.id)
     return [
         TestResultImageResponse(
             id=img.id,
@@ -1797,7 +1798,7 @@ async def upload_request_import(
 
     tpl = _template_for_request(req)
 
-    file_bytes = await file.read()
+    file_bytes = await read_and_validate_upload(file, category="spreadsheet")
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 

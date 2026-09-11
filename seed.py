@@ -2662,6 +2662,9 @@ def seed_test_type_categories(session, master_ids):
                 "Insulation Diagnostics (IDAX)",
                 "Dielectric Frequency Response (DFR) — Routine",
                 "Sweep Frequency Response Analysis (SFRA) — Routine",
+                "WTI / OTI Functional Test",
+                "Pressure Relief Valve (PRV) Functional Test",
+                "Buchholz Relay Functional Test",
             ],
             "maintenance": [
                 "Routine Preventive Maintenance",
@@ -8053,6 +8056,13 @@ def seed_annual_audit_templates(session) -> int:
             "name": template_name,
             "description": f"{category_name} annual audit observation template",
             "template_type": "annual_audit",
+            # Not tied to any specific equipment - without this, the
+            # Template Designer's equipment_type fallback labels these
+            # "Other" instead of correctly excluding them from the
+            # per-equipment-type Test Templates browser (see
+            # _nonEquipmentMasters in template_designer_page.dart, which
+            # matches on this exact string).
+            "equipment_type": "Annual Audit Categories",
             "sections": category_sections + [
                 {
                     "title": "Observation Assessment",
@@ -8706,6 +8716,7 @@ def seed_transformer_dga_template(session) -> int:
         name="Transformer Dissolved Gas Analysis (DGA)",
         category_master_id=master.id,
         description="Standalone DGA sampling — gas concentration analysis per IS 10593:2017 / IEC 60599",
+        category_type="test",
         is_active=True,
     )
 
