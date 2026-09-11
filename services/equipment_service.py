@@ -768,6 +768,32 @@ class EquipmentService:
         span_days = (ordered[-1] - ordered[0]).total_seconds() / 86400.0
         return span_days / (len(ordered) - 1)
 
+    @staticmethod
+    def _failure_event_date(is_fr: bool, form_data: Optional[dict],
+                             completed_at, requested_date, cts):
+        """
+        The date a failure actually happened, not the date the paperwork
+        was filed. For a Failure Registry submission, completed_at/
+        requested_date/cts are all administrative timestamps —
+        DirectSubmissionService stamps requested_date with the moment of
+        submission (`now`) regardless of how long ago the failure itself
+        occurred, and completed_at is null until approved. The field
+        officer's own reported date — form_data['failure_date'], the FR
+        template's "failure date" field — is what should date the event
+        for MTBF/failure-rate purposes instead; falls back to the
+        administrative chain when it's missing/unparseable, and for
+        CRITICAL-result events (is_fr=False), which have no such field at
+        all.
+        """
+        if is_fr and form_data:
+            raw = form_data.get("failure_date")
+            if raw:
+                try:
+                    return datetime.strptime(str(raw)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                except (ValueError, TypeError):
+                    pass
+        return completed_at or requested_date or cts
+
     @classmethod
     def compute_failure_stats(cls, db: Session, equipment_id: UUID) -> dict:
         """
@@ -779,9 +805,12 @@ class EquipmentService:
         "Equipment Performance Report" / "Equipment Failure Performance
         Analysis" reports (seed.py): a TestingRequest whose
         request_category is 'failure_registry', OR any of its TestResults
-        carrying evaluation_result->>'overall' == 'CRITICAL'. Event date is
-        COALESCE(completed_at, requested_date, cts), matching those same
-        reports.
+        carrying evaluation_result->>'overall' == 'CRITICAL'. Event date
+        prefers the FR's own reported form_data['failure_date'] (see
+        _failure_event_date) over the administrative
+        completed_at/requested_date/cts chain those reports use, so a
+        failure logged today but reported as having happened months ago
+        is dated by when it happened, not when it was filed.
 
         MTBF is the mean gap, in days, between consecutive failure-event
         dates — a real interval needs at least 2 events, so with 0 or 1
@@ -808,7 +837,7 @@ class EquipmentService:
         rows = (
             db.query(TestingRequest.id, TestingRequest.completed_at,
                       TestingRequest.requested_date, TestingRequest.cts,
-                      TestingRequest.request_category)
+                      TestingRequest.request_category, TestingRequest.form_data)
             .filter(TestingRequest.equipment_id == equipment_id)
             .all()
         )
@@ -826,13 +855,12 @@ class EquipmentService:
                 )
             }
             for r in rows:
-                is_failure = (
-                    (r.request_category is not None and r.request_category.value == "failure_registry")
-                    or r.id in critical_tr_ids
-                )
+                is_fr = r.request_category is not None and r.request_category.value == "failure_registry"
+                is_failure = is_fr or r.id in critical_tr_ids
                 if not is_failure:
                     continue
-                event_date = r.completed_at or r.requested_date or r.cts
+                event_date = cls._failure_event_date(
+                    is_fr, r.form_data, r.completed_at, r.requested_date, r.cts)
                 if event_date is not None:
                     event_dates.append(event_date)
         event_dates.sort()
@@ -935,7 +963,8 @@ class EquipmentService:
         tr_rows = (
             db.query(TestingRequest.id, TestingRequest.equipment_id,
                       TestingRequest.completed_at, TestingRequest.requested_date,
-                      TestingRequest.cts, TestingRequest.request_category)
+                      TestingRequest.cts, TestingRequest.request_category,
+                      TestingRequest.form_data)
             .filter(TestingRequest.equipment_id.in_(eq_ids))
             .all()
         )
@@ -963,7 +992,8 @@ class EquipmentService:
             is_crit = r.id in critical_tr_ids
             if not (is_fr or is_crit):
                 continue
-            event_date = r.completed_at or r.requested_date or r.cts
+            event_date = cls._failure_event_date(
+                is_fr, r.form_data, r.completed_at, r.requested_date, r.cts)
             if event_date is None:
                 continue
             events_by_unit.setdefault(r.equipment_id, []).append((event_date, is_fr, is_crit))
