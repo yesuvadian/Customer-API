@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     TestingRequest,
+    TestRequestSchedule,
     TrWfDefinition,
     TrWfInstance,
     TrWfInstanceResolvedRole,
@@ -425,6 +426,7 @@ class WorkflowRoutingService:
         comment: Optional[str] = None,
         assigned_user_id: Optional[UUID] = None,
         assigned_role_id: Optional[UUID] = None,
+        overwrite_schedule_ids: Optional[list[str]] = None,
     ) -> TrWfInstance:
         """
         Execute an action on the current stage of a workflow instance.
@@ -498,12 +500,16 @@ class WorkflowRoutingService:
             # Null to_stage → explicitly terminal
             is_terminal = True
 
-        # Resolve terminal status code
+        # Resolve terminal status code (+ display name, for the status-changed
+        # notification — status_code alone is the stable API identifier like
+        # "closed", not something to show a user).
+        terminal_status_name: Optional[str] = None
         if is_terminal:
             if terminal_status_id:
                 ts = self.db.query(TrWfStatus).filter(TrWfStatus.id == terminal_status_id).first()
                 if ts:
                     terminal_status_code = ts.status_code
+                    terminal_status_name = ts.status_name
             if not terminal_status_code:
                 # Fallback: last TrWfStatus (by sequence) for this definition
                 _last = (
@@ -514,6 +520,7 @@ class WorkflowRoutingService:
                 )
                 if _last:
                     terminal_status_code = _last.status_code
+                    terminal_status_name = _last.status_name
 
         # Close current stage instance
         current_stage_inst: Optional[TrWfStageInstance] = (
@@ -534,6 +541,7 @@ class WorkflowRoutingService:
             current_stage_inst.comment = comment
 
         to_status_code: Optional[str] = None
+        to_status_name: Optional[str] = None
 
         if is_terminal:
             instance.status = "terminated" if transition.is_rejection else "completed"
@@ -541,6 +549,26 @@ class WorkflowRoutingService:
             instance.current_status_code = terminal_status_code
             instance.completed_at = datetime.now(timezone.utc)
             to_status_code = terminal_status_code
+            to_status_name = terminal_status_name
+
+            # If this ticket was auto-generated from a one-off schedule (a
+            # single ad-hoc test, not a recurring cadence), that schedule
+            # was deliberately kept visible (deactivated but not deleted)
+            # until this ticket's workflow actually closed. Retire it now.
+            if testing_request.source_schedule_id:
+                _src_sched = (
+                    self.db.query(TestRequestSchedule)
+                    .filter(
+                        TestRequestSchedule.id == testing_request.source_schedule_id,
+                        TestRequestSchedule.is_recurring.is_(False),
+                        TestRequestSchedule.is_deleted.is_(False),
+                    )
+                    .first()
+                )
+                if _src_sched:
+                    _src_sched.is_deleted = True
+                    _src_sched.deleted_at = datetime.now(timezone.utc)
+                    _src_sched.deleted_by = performed_by_id
         else:
             # If next stage has the @originator token role, auto-assign to the request creator
             effective_assigned_user_id = assigned_user_id
@@ -560,6 +588,7 @@ class WorkflowRoutingService:
             self.db.add(new_stage_inst)
 
             next_status_code = to_stage.status.status_code if to_stage.status else None
+            next_status_name = to_stage.status.status_name if to_stage.status else None
             if not next_status_code:
                 # Stage has no status linked — fall back to WF definition's next status by sequence
                 _cur_seq = (
@@ -578,9 +607,11 @@ class WorkflowRoutingService:
                     .first()
                 )
                 next_status_code = _next_status.status_code if _next_status else None
+                next_status_name = _next_status.status_name if _next_status else None
             instance.current_stage_id = to_stage.id
             instance.current_status_code = next_status_code
             to_status_code = next_status_code
+            to_status_name = next_status_name
 
         # Audit log
         is_send_back = (
@@ -633,6 +664,7 @@ class WorkflowRoutingService:
                     "comment": comment,
                     "is_terminal": is_terminal,
                     "to_status_code": to_status_code,
+                    "overwrite_schedule_ids": overwrite_schedule_ids,
                 },
             )
 
@@ -681,6 +713,7 @@ class WorkflowRoutingService:
                     action_code=action_code,
                     stage_name=to_stage.name if to_stage else "",
                     status_code=to_status_code,
+                    status_name=to_status_name,
                     performed_by=_performer_name,
                     comment=comment,
                     is_terminal=is_terminal,
@@ -715,7 +748,10 @@ class WorkflowRoutingService:
                     self.db.flush()
                     try:
                         from services.workflow_dispatch_service import WorkflowDispatchService
-                        WorkflowDispatchService(self.db).dispatch(testing_request, rec, performed_by_id)
+                        WorkflowDispatchService(self.db).dispatch(
+                            testing_request, rec, performed_by_id,
+                            overwrite_schedule_ids=overwrite_schedule_ids,
+                        )
                     except Exception as _de:
                         log.warning("Dispatch after terminal action failed (non-fatal): %s", _de)
                         testing_request.status = _TRS.closed
@@ -895,6 +931,21 @@ class WorkflowRoutingService:
                     if to_stage.status:
                         to_status_code = to_stage.status.status_code
 
+            # Same terminal check advance_stage() actually uses at commit
+            # time: no to_stage_id, or a to_stage with zero assignable
+            # roles, both mean this action closes/dispatches the request
+            # rather than moving it to another stage. Computed live from
+            # the current routing config, so it stays correct as stages
+            # are added or removed — never hardcode a specific stage name.
+            is_terminal = True
+            if t.to_stage_id and to_stage:
+                active_roles = (
+                    self.db.query(func.count(TrWfStageRole.id))
+                    .filter(TrWfStageRole.stage_id == to_stage.id)
+                    .scalar()
+                )
+                is_terminal = active_roles == 0
+
             # Prefer the transition's custom label; fall back to the action-code map.
             display_label = (
                 t.label.strip()
@@ -909,5 +960,6 @@ class WorkflowRoutingService:
                 "to_stage_id": t.to_stage_id,
                 "to_stage_name": to_stage_name,
                 "to_status_code": to_status_code,
+                "is_terminal": is_terminal,
             })
         return result

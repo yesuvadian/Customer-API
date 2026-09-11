@@ -112,11 +112,22 @@ def _band_rank(label: str, rank_words: dict[str, int]) -> int:
     ConditionBandRankWord table, same word-matching convention
     services/evaluation_service.py's own _cond_rank uses) — not a
     hardcoded copy, so a template's bands are ranked the same way here as
-    they are at test-evaluation time, from the same source."""
+    they are at test-evaluation time, from the same source.
+
+    Checks the LONGEST matching word first, not table/insertion order —
+    confirmed live: "Abnormal" (sfra_transformer/sfra_routine's own worst
+    band label) contains "normal" as a substring, so with a plain
+    dict-order scan, the rank-0 "normal" entry matched before the
+    correctly-configured rank-2 "abnormal" entry was ever reached,
+    silently classifying the worst SFRA band as the best one. Same
+    latent risk already flagged for "not ok" vs "ok" in the table's own
+    docstring — sorting by length fixes both without needing the word
+    list curated in any particular order.
+    """
     low = (label or "").lower()
-    for word, rank in rank_words.items():
+    for word in sorted(rank_words, key=len, reverse=True):
         if word in low:
-            return rank
+            return rank_words[word]
     return 1  # unrecognized band name — treat as a middle tier, not best/worst
 
 
@@ -159,10 +170,41 @@ def _table_row_id(parameter_key: str) -> str:
     """ParameterAnalytics.parameter_key for a table-row field is a 3-part
     composite key: "{table_field_key}.{row_id}.{column_key}" (confirmed
     live, e.g. "oil_test_results.Acidity.measured_value"). Extracts just
-    the row_id — what ParameterThresholdBand.parameter_key stores — since
-    a flat field's parameter_key has no dots and passes through unchanged."""
+    the row_id — what ParameterThresholdBand.parameter_key stores for
+    THRESHOLD-style tables (Acidity, DGA: cutoff varies PER ROW/substance)
+    — since a flat field's parameter_key has no dots and passes through
+    unchanged."""
     parts = parameter_key.split(".")
     return parts[1] if len(parts) == 3 else parameter_key
+
+
+def _table_column_key(parameter_key: str) -> str:
+    """The COLUMN portion of the same 3-part composite key — what
+    ParameterThresholdBand.parameter_key stores for WORST_OF_BANDS-style
+    tables instead (sfra_transformer/sfra_routine's Correlation
+    Coefficient Analysis: cutoff varies PER COLUMN/frequency-band, e.g.
+    "cc_mf", shared across every row/winding-pair, not per row). Callers
+    try _table_row_id first (the more common shape) and fall back to this
+    one when no bands are found for the row id — see
+    alter_parameter_threshold_band.py's _worst_of_bands_rows."""
+    parts = parameter_key.split(".")
+    return parts[2] if len(parts) == 3 else parameter_key
+
+
+def _table_field_key(parameter_key: str) -> Optional[str]:
+    """The TABLE FIELD portion of the same composite key — e.g.
+    "winding_test_results" out of "winding_test_results.TV-GND.
+    df_corrected_20c". Confirmed live several templates reuse the exact
+    same row id or column key across two or more DIFFERENT table fields
+    in the SAME template with DIFFERENT cutoffs (capacitance_tandelta_
+    transformer's five bushing voltage-class tables all use 'R'/'Y'/'B'
+    Phase; tan_delta_capacitance_idax's 220kV vs 66kV bushing tables,
+    same collision) — template_key + parameter_key alone can't tell those
+    apart, so every ParameterThresholdBand lookup must also scope by this.
+    None for a flat (non-table) parameter_key, matching
+    ParameterThresholdBand.table_field_key's own NULL convention there."""
+    parts = parameter_key.split(".")
+    return parts[0] if len(parts) == 3 else None
 
 
 def _next_worse_boundary(bands: list, current_value: float, slope_per_day: float,
@@ -200,6 +242,26 @@ def _next_worse_boundary(bands: list, current_value: float, slope_per_day: float
             if ub(r) <= current_value and _band_rank(r.band_label, rank_words) > current_rank:
                 return ub(r), r.band_label
     return None, None
+
+
+def _watch_reason(row: ParameterAnalytics, forecast: Optional[dict]) -> str:
+    """Human-readable synthesis of why one parameter is on the
+    Deterioration Watch List (TSMS-236's "reason" field for each item).
+    Composed entirely from fields _real_breach_forecast/ParameterAnalytics
+    already compute — not a new detection signal, just a presentation of
+    the existing one."""
+    direction = "rising" if row.trend == "Increasing" else "falling"
+    label = row.parameter_label or row.parameter_key
+    if not forecast or forecast.get("breach_value") is None:
+        return (f"{label} has a sustained {direction} trend across "
+                f"{row.history_count} reading(s), with no threshold band "
+                f"configured to project a crossing against")
+    if forecast.get("is_overdue_for_retest"):
+        return (f"{label} is {direction} toward {forecast['breach_band']} — "
+                f"the trend implied a crossing before the last retest; "
+                f"retest is overdue")
+    return (f"{label} is {direction} toward {forecast['breach_band']}, "
+            f"projected in {forecast['days_to_breach']} day(s)")
 
 
 def _parse_capacity_mva(raw) -> float | None:
@@ -1931,6 +1993,33 @@ def get_deterioration_watch_list(
         c.id: c.name for c in db.query(CategoryMaster).all()
     }
 
+    # TSMS-236 "owner" — Equipment has no per-asset owner field of its own;
+    # the department's manager (org_departments.manager_id) is the existing
+    # responsible-person concept the rest of the app already uses. Bulk
+    # resolve both hops once for this batch of equipment rather than a
+    # query per row.
+    department_ids = {eq.department_id for eq in equipment_rows if eq.department_id}
+    departments_by_id = {
+        d.id: d for d in db.query(OrgDepartment).filter(OrgDepartment.id.in_(department_ids)).all()
+    } if department_ids else {}
+    manager_ids = {d.manager_id for d in departments_by_id.values() if d.manager_id}
+    managers_by_id = {
+        u.id: u for u in db.query(User).filter(User.id.in_(manager_ids)).all()
+    } if manager_ids else {}
+
+    def _owner_for(eq: Equipment) -> Optional[dict]:
+        dept = departments_by_id.get(eq.department_id) if eq.department_id else None
+        manager = managers_by_id.get(dept.manager_id) if dept and dept.manager_id else None
+        if not manager:
+            return None
+        # Same "firstname/lastname, fall back to email" display-name
+        # convention services/repair_report_service.py's _uname already uses.
+        return {
+            "user_id": str(manager.id),
+            "name": f"{manager.firstname or ''} {manager.lastname or ''}".strip() or manager.email,
+            "department": dept.name,
+        }
+
     # Minimum readings before a trend counts as a real signal at all, not
     # the engine's own bare computational minimum (2 points — services/
     # analytics_engine.py's MIN_TREND_POINTS = 1, i.e. 1 prior + current).
@@ -1982,6 +2071,12 @@ def get_deterioration_watch_list(
 
         row_id = _table_row_id(row.parameter_key)
         candidate_bands = bands_by_param.get((row.template_key, row_id), [])
+        if not candidate_bands:
+            # Fall back to column-keyed thresholds — see
+            # _table_column_key's docstring (WORST_OF_BANDS-style tables).
+            column_key = _table_column_key(row.parameter_key)
+            if column_key != row_id:
+                candidate_bands = bands_by_param.get((row.template_key, column_key), [])
         forecast = None
         if candidate_bands:
             eq_for_row = eq_by_id.get(row.equipment_id)
@@ -2023,6 +2118,7 @@ def get_deterioration_watch_list(
             "breach_predicted_at":   forecast["breach_predicted_at"] if forecast else None,
             "days_to_breach":        forecast["days_to_breach"] if forecast else None,
             "is_overdue_for_retest": forecast["is_overdue_for_retest"] if forecast else False,
+            "reason":                _watch_reason(row, forecast),
             "history_count":         row.history_count,
             # Real last-test date this snapshot is based on — how the
             # overdue-review scheduler (main.py's daily job) ages a pending
@@ -2032,6 +2128,71 @@ def get_deterioration_watch_list(
                 tested_at_map.get(row.test_result_id).isoformat()
                 if tested_at_map.get(row.test_result_id) else None
             ),
+        })
+
+    # ── Duval Triangle findings ─────────────────────────────────────────
+    # A second, categorical kind of finding alongside the numeric-trend
+    # ones above: classify each equipment's LATEST transformer_dga reading
+    # and surface it here when the resulting zone is watch-list-worthy per
+    # the template's own duval_watchlist_severity config (test_templates.py,
+    # editable through the Template Designer) — not a numeric trend, so it
+    # has no ParameterAnalytics row and bypasses that machinery entirely.
+    from services.duval_triangle import classify_duval_triangle, gas_values_from_test_data
+    from services.evaluation_service import EvaluationService
+
+    dga_rows = (
+        db.query(TestResult, TestingRequest.equipment_id)
+        .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
+        .filter(TestResult.template_key == "transformer_dga")
+        .filter(TestingRequest.equipment_id.in_(eq_ids))
+        .order_by(TestResult.tested_at.asc())
+        .all()
+    )
+    dga_by_equipment: dict = {}
+    for tr_result, equipment_id in dga_rows:
+        dga_by_equipment.setdefault(equipment_id, []).append(tr_result)
+
+    duval_template = EvaluationService.get_template_data("transformer_dga", db, org_id) or {}
+    duval_severity: dict = {}
+    for sec in (duval_template.get("sections") or []):
+        for f in (sec.get("fields") or []):
+            if f.get("is_duval_triangle_source"):
+                duval_severity = f.get("duval_watchlist_severity") or {}
+                break
+
+    for eq_id, eq_dga_results in dga_by_equipment.items():
+        latest = eq_dga_results[-1]  # already ordered tested_at asc
+        gas_values = gas_values_from_test_data(latest.test_data)
+        duval = classify_duval_triangle(
+            gas_values.get("ch4") or 0,
+            gas_values.get("c2h4") or 0,
+            gas_values.get("c2h2") or 0,
+        )
+        zone = duval["zone"]
+        severity_tier = duval_severity.get(zone) if zone else None
+        if not severity_tier:
+            continue  # no zone, or a zone not marked watch-list-worthy (PD/T1)
+
+        flagged_by_equipment.setdefault(eq_id, []).append({
+            "analytics_id":          None,
+            "parameter_key":         "duval_zone",
+            "parameter_label":       "Duval Triangle Classification",
+            "template_key":          "transformer_dga",
+            "unit":                  None,
+            "current_value":         None,
+            "trend":                 None,
+            "annual_change":         None,
+            "breach_threshold":      None,
+            "breach_band":           None,
+            "breach_predicted_at":   None,
+            "days_to_breach":        None,
+            "is_overdue_for_retest": False,
+            "reason":                f"Zone {zone} — {duval['meaning']}",
+            "history_count":         len(eq_dga_results),
+            "tested_at":             latest.tested_at.isoformat() if latest.tested_at else None,
+            "zone":                  zone,
+            "zone_meaning":          duval["meaning"],
+            "severity_tier":         severity_tier,
         })
 
     # Officer review state (KPTCL spec §14.3: "Deterioration Watch List
@@ -2082,6 +2243,7 @@ def get_deterioration_watch_list(
             "equipment_label": eq.ueic,
             "equipment_type":  equipment_type_names.get(eq.equipment_type_id),
             "department_id":   str(eq.department_id) if eq.department_id else None,
+            "owner":           _owner_for(eq),
             "health_score":    float(ea.health_score) if ea and ea.health_score is not None else None,
             "risk_level":      ea.risk_level if ea and ea.risk_level else "Unknown",
             "soonest_days_to_breach": soonest_days,
@@ -2137,17 +2299,41 @@ def review_deterioration_advisory(
     # Resolve the CURRENT history_count server-side — never trust a value
     # from the client — so a stale client can't "review" a snapshot that's
     # already been superseded by a newer test.
-    latest = (
-        db.query(ParameterAnalytics)
-        .filter(
-            ParameterAnalytics.equipment_id == body.equipment_id,
-            ParameterAnalytics.parameter_key == body.parameter_key,
+    #
+    # Duval Triangle findings (get_deterioration_watch_list's second,
+    # categorical finding type) have no ParameterAnalytics row at all — they
+    # bypass that machinery entirely — so history_count is re-derived the
+    # same way it was there: the count of this equipment's transformer_dga
+    # TestResults so far. A plain SimpleNamespace stands in for the
+    # ParameterAnalytics row the rest of this function reads from below.
+    if body.parameter_key == "duval_zone" and body.template_key == "transformer_dga":
+        dga_count = (
+            db.query(TestResult)
+            .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
+            .filter(TestResult.template_key == "transformer_dga")
+            .filter(TestingRequest.equipment_id == body.equipment_id)
+            .count()
         )
-        .order_by(ParameterAnalytics.history_count.desc(), ParameterAnalytics.calculated_at.desc())
-        .first()
-    )
-    if not latest:
-        raise HTTPException(status_code=404, detail="No analytics found for this equipment/parameter")
+        if dga_count == 0:
+            raise HTTPException(status_code=404, detail="No DGA test results found for this equipment")
+        latest = SimpleNamespace(
+            history_count=dga_count,
+            parameter_label="Duval Triangle Classification",
+            trend=None,
+            id=None,
+        )
+    else:
+        latest = (
+            db.query(ParameterAnalytics)
+            .filter(
+                ParameterAnalytics.equipment_id == body.equipment_id,
+                ParameterAnalytics.parameter_key == body.parameter_key,
+            )
+            .order_by(ParameterAnalytics.history_count.desc(), ParameterAnalytics.calculated_at.desc())
+            .first()
+        )
+        if not latest:
+            raise HTTPException(status_code=404, detail="No analytics found for this equipment/parameter")
 
     org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
     reviewer_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
@@ -2932,16 +3118,41 @@ def _real_breach_forecast(
     if db is None or row.trend not in ("Increasing", "Decreasing") or row.current_value is None or row.trend_slope is None:
         return out
     row_id = _table_row_id(row.parameter_key)
+    field_key = _table_field_key(row.parameter_key)
     if candidate_bands is None:
         candidate_bands = (
             db.query(ParameterThresholdBand)
             .filter(
                 ParameterThresholdBand.template_key == row.template_key,
+                ParameterThresholdBand.table_field_key == field_key,
                 ParameterThresholdBand.parameter_key == row_id,
                 ParameterThresholdBand.is_active.is_(True),
             )
             .all()
         )
+        if not candidate_bands:
+            # Fall back to column-keyed thresholds (WORST_OF_BANDS-style
+            # tables, e.g. sfra_transformer/sfra_routine's cc_lf/cc_mf/
+            # cc_hf — cutoff varies by column, not by row) — see
+            # _table_column_key's docstring.
+            column_key = _table_column_key(row.parameter_key)
+            if column_key != row_id:
+                candidate_bands = (
+                    db.query(ParameterThresholdBand)
+                    .filter(
+                        ParameterThresholdBand.template_key == row.template_key,
+                        ParameterThresholdBand.table_field_key == field_key,
+                        ParameterThresholdBand.parameter_key == column_key,
+                        ParameterThresholdBand.is_active.is_(True),
+                    )
+                    .all()
+                )
+    else:
+        # Bulk-fetched by the caller (Deterioration Watch List) keyed only
+        # by (template_key, parameter_key) — same cross-table-field
+        # collision _table_field_key's docstring describes, so narrow to
+        # bands from THIS row's own table field before using them.
+        candidate_bands = [b for b in candidate_bands if b.table_field_key == field_key]
     if not candidate_bands:
         return out
     context_keys = sorted({b.context_key for b in candidate_bands if b.context_key})

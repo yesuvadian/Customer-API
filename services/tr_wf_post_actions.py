@@ -81,7 +81,10 @@ class RecommendationFinalizeAction(BaseWfAction):
                     db.flush()
 
                 from services.workflow_dispatch_service import WorkflowDispatchService
-                WorkflowDispatchService(db).dispatch(testing_request, rec, approver_id)
+                WorkflowDispatchService(db).dispatch(
+                    testing_request, rec, approver_id,
+                    overwrite_schedule_ids=context.get("overwrite_schedule_ids"),
+                )
                 _log.getLogger(__name__).info(
                     "recommendation_finalize: dispatch completed for request %s", testing_request.id
                 )

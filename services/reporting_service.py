@@ -779,7 +779,7 @@ class ReportingService:
         duval_advisory column.
         """
         from models import TestResult, TestingRequest, Equipment, CategoryMaster, OrgDepartment
-        from services.duval_triangle import classify_duval_triangle
+        from services.duval_triangle import classify_duval_triangle, gas_values_from_test_data
 
         months = int(_p(p, "months", 12))
         cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
@@ -798,22 +798,6 @@ class ReportingService:
         eq_type_names = {c.id: c.name for c in self.db.query(CategoryMaster).all()}
         dept_names = {d.id: d.name for d in self.db.query(OrgDepartment).all()}
 
-        # Key gases the Duval Triangle and generation-rate tracking use.
-        # value_bottom mirrors the transformer_dga template's own THRESHOLD
-        # rule (test_templates.py), which reads value_bottom as the
-        # authoritative reading for per-gas Normal/Alert/Critical status —
-        # kept consistent here rather than picking a different column.
-        KEY_GASES = {"Methane": "ch4", "Ethylene": "c2h4", "Acetylene": "c2h2"}
-
-        def _gas_values(test_data: dict) -> dict:
-            out = {}
-            for row in (test_data or {}).get("dga_results", []) or []:
-                gas = row.get("gas")
-                if gas in KEY_GASES:
-                    val = row.get("value_bottom")
-                    out[KEY_GASES[gas]] = float(val) if val is not None else None
-            return out
-
         # Sort per-equipment so consecutive readings can be diffed for a
         # ppm/month generation rate and an acceleration flag (this test's
         # rate vs. that same equipment's own previous rate) — both
@@ -828,7 +812,7 @@ class ReportingService:
             prev_tested_at = None
             prev_rates = {}
             for tr_result, tr_req, eq in eq_rows:
-                gas_values = _gas_values(tr_result.test_data)
+                gas_values = gas_values_from_test_data(tr_result.test_data)
                 duval = classify_duval_triangle(
                     gas_values.get("ch4") or 0,
                     gas_values.get("c2h4") or 0,
@@ -851,7 +835,7 @@ class ReportingService:
                         # test-over-test, independent of whether any single
                         # concentration has crossed an absolute threshold
                         # yet — the spec's own framing for this flag.
-                        if prior_rate is not None and rate > 0 and rate > prior_rate * 1.25:
+                        if prior_rate is not None and prior_rate > 0 and rate > prior_rate * 1.25:
                             accelerating_gases.append(key)
 
                 out_rows.append({
@@ -866,7 +850,7 @@ class ReportingService:
                     "c2h4_rate_ppm_per_month": rates.get("c2h4"),
                     "c2h2_rate_ppm_per_month": rates.get("c2h2"),
                     "accelerating_gases": ", ".join(accelerating_gases) if accelerating_gases else None,
-                    "duval_zone":     duval["zone"],
+                    "duval_zone":     duval["zone"] if duval["zone"] is not None else "No Bottom (ppm) reading",
                     "duval_meaning":  duval["meaning"],
                     "duval_pct_ch4":  duval["pct_ch4"],
                     "duval_pct_c2h4": duval["pct_c2h4"],

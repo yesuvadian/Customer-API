@@ -3114,11 +3114,39 @@ TEST_TEMPLATES = {
                     "type": "table",
                     "allow_add_rows": False,
                     "allow_delete_rows": False,
+                    "is_duval_triangle_source": True,
+                    # Self-contained marker: "this table field is the one
+                    # Duval Triangle classification reads gas values from."
+                    # Not a template-key check — transformer_oil_test's own
+                    # embedded DGA section uses this identical field key
+                    # ("dga_results") but is unrelated to this feature; a
+                    # flag on the actual field data avoids relying on which
+                    # template/field happens to be named what, and survives
+                    # a rename or a Template-Designer-made clone.
+                    "duval_watchlist_severity": {
+                        # Zone -> severity tier shown on the Deterioration
+                        # Watch List (services/duval_triangle.py has the
+                        # zone classification math + plain-language
+                        # meanings; this is a separate, much simpler lookup
+                        # of which zones are worth an officer's attention).
+                        # Only zones listed here are watch-list-worthy — PD
+                        # and T1 (not listed) are common/mild enough (trace
+                        # corona, simple hot spots) that flagging every
+                        # occurrence would be noisy; they stay visible in
+                        # the DGA Trend Report only. NOT a THRESHOLD rule —
+                        # those compare one numeric value to a numeric
+                        # range (feeds ParameterThresholdBand); a Duval
+                        # zone is a categorical code derived from a 3-gas
+                        # ratio, a different shape, so this is a plain
+                        # lookup, not a reused rule type.
+                        "T2": "High", "T3": "Critical",
+                        "D1": "High", "D2": "Critical", "DT": "High",
+                    },
                     "columns": [
                         {"key": "gas",         "label": "Gas",            "type": "readonly"},
                         {"key": "formula",     "label": "Formula",        "type": "readonly"},
-                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number"},
-                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number"},
+                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number", "required": True},
+                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number", "required": True},
                         {
                             "key": "condition",
                             "label": "Status",
@@ -7091,6 +7119,7 @@ TEST_TEMPLATES = {
                         "analytics_skip": True,
                         "label": "SFRA Measurements (Amplitude vs Frequency)",
                         "type": "table",
+                        "required": True,
                         "allow_add_rows": True,
                         "allow_delete_rows": True,
                         "columns": [

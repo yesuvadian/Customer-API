@@ -1,0 +1,124 @@
+
+=== GE SR760 (Shorten) ===
+ r1: A='GE Multilin SR760 — the exact dashboard example' B=None
+ r3: A='Cohort identity' B=None
+ r4: A='Test type:' B='Protection Relay Calibration and History'
+ r5: A='Manufacturer / Model:' B='GE Multilin / SR760'
+ r6: A='Cohort = every unit of this make+model, pooled:' B='5 different relays (BN-DEVA-11 through 15), one calibration cycle each'
+ r8: A='Every calibration cycle in this cohort (real data)' B=None
+ r9: A='Equipment (UEIC)' B='Tested at'
+ r10: A='BN-DEVA-11-400-RL-GEMultilin-SR760' B=datetime.datetime(2026, 9, 6, 14, 32, 32)
+ r11: A='BN-DEVA-12-400-RL-GEMultilin-SR760' B=datetime.datetime(2026, 9, 6, 14, 32, 32)
+ r12: A='BN-DEVA-13-400-RL-GEMultilin-SR760' B=datetime.datetime(2026, 9, 6, 14, 32, 32)
+ r13: A='BN-DEVA-14-400-RL-GEMultilin-SR760' B=datetime.datetime(2026, 9, 6, 14, 32, 32)
+ r14: A='BN-DEVA-15-400-RL-GEMultilin-SR760' B=datetime.datetime(2026, 9, 6, 14, 32, 32)
+ r16: A='Live computation (formulas reference the table above)' B=None
+ r17: A='Sample size' B='=COUNTA(C10:C14)'
+ r18: A='Fail count' B='=COUNTIF(C10:C14,"fail")'
+ r19: A='Fail rate %' B='=ROUND(B18/B17*100,1)'
+ r20: A='Current validity (months) — MODE.SNGL()' B='=MODE.SNGL(D10:D14)'
+ r21: A='Min cycles required (config)' B=5
+ r22: A='Extend cut-off % (config)' B=0
+ r23: A='Shorten cut-off % (config)' B=20
+ r24: A='Step size, months (config)' B=6
+ r25: A='Min months allowed (config)' B=6
+ r26: A='Max months allowed (config)' B=60
+ r27: A='Direction' B='=IF(B17<B21,"no advisory (too few cycles)",IF(B19<=B22,"extend",IF(B19>=B23,"shorten","no advisory (mid-range)")))'
+ r28: A='Suggested validity (months)' B='=IF(B27="extend",MIN(B20+B24,B26),IF(B27="shorten",MAX(B20-B24,B25),B20))'
+ r29: A='Rationale (matches the dashboard text)' B='=B18&" fail(s) in the last "&B17&" calibration cycles ("&B19&"%) — consider "&IF(B27="extend","extending","shortening")&" the validity period from "&B20&" to "&B28&" months."'
+ r31: A='Note' B=None
+ r32: A='This is the cohort behind the panel text you saw: "5 fail(s) in the last 5 calibration cycles (100.0%) — consider shortening the validity period from 18 to 12 months." All 5 units share the same 18-month certificate and all 5 failed calibration — a clean, unambiguous case: MODE.SNGL() correctly returns 18 since every reading agrees.' B=None
+
+=== ABB REF615 (Shorten edge case) ===
+ r1: A='ABB REF615 — every unit certified at a DIFFERENT validity' B=None
+ r3: A='Cohort identity' B=None
+ r4: A='Test type:' B='Protection Relay Calibration and History'
+ r5: A='Manufacturer / Model:' B='ABB / REF615'
+ r6: A='Cohort:' B='5 units, all failed, but validity_months = 12, 14, 10, 9, 8 — five different values, none repeated'
+ r8: A='Every calibration cycle in this cohort (real data)' B=None
+ r9: A='Equipment (UEIC)' B='Tested at'
+ r10: A='BN-DEVA-05-400-RL-Unknown-1234' B=datetime.datetime(2026, 9, 3, 15, 57, 41)
+ r11: A='BN-DEVA-05-400-RL-Unknown-1234-2' B=datetime.datetime(2026, 9, 3, 15, 59, 25)
+ r12: A='BN-DEVA-04-400-RL-Unknown-1234' B=datetime.datetime(2026, 9, 3, 16, 0, 15)
+ r13: A='BN-DEVA-04-400-RL-Unknown-1234-2' B=datetime.datetime(2026, 9, 3, 16, 1, 3)
+ r14: A='BN-DEVA-05-400-RL-Unknown-1234-3' B=datetime.datetime(2026, 9, 3, 16, 1, 45)
+ r16: A='Live computation (formulas reference the table above)' B=None
+ r17: A='Sample size' B='=COUNTA(C10:C14)'
+ r18: A='Fail count' B='=COUNTIF(C10:C14,"fail")'
+ r19: A='Fail rate %' B='=ROUND(B18/B17*100,1)'
+ r20: A='Current validity (months) — MODE.SNGL()' B='=IFERROR(MODE.SNGL(D10:D14),"#N/A – no repeated value")'
+ r21: A="Excel's own MODE.SNGL() returns #N/A here — with every unit on a different validity, there IS no repeated value to call a majority. " B=None
+ r22: A="What the backend actually used (Python's tie-break)" B=8
+ r23: A='Min cycles required (config)' B=5
+ r24: A='Extend cut-off % (config)' B=0
+ r25: A='Shorten cut-off % (config)' B=20
+ r26: A='Step size, months (config)' B=6
+ r27: A='Min months allowed (config)' B=6
+ r28: A='Max months allowed (config)' B=60
+ r29: A='Direction' B='=IF(B17<B23,"no advisory (too few cycles)",IF(B19<=B24,"extend",IF(B19>=B25,"shorten","no advisory (mid-range)")))'
+ r30: A='Suggested validity (months)' B='=IF(B29="extend",MIN(B22+B26,B28),IF(B29="shorten",MAX(B22-B26,B27),B22))'
+ r31: A='Rationale (matches the dashboard text)' B='=B18&" fail(s) in the last "&B17&" calibration cycles ("&B19&"%) — consider "&IF(B29="extend","extending","shortening")&" the validity period from "&B22&" to "&B30&" months."'
+ r33: A='Note' B=None
+ r34: A='Every one of the 5 cycles has a DIFFERENT validity_months on file — there is no real majority. Python\'s actual line of code is max(set(validities), key=validities.count): when every value is tied at a count of 1, Python just returns whichever value its set happens to iterate first — here, that resolved to 8, giving "consider shortening the validity period from 8 to 6 months." That 8 is NOT "the current validity" in any meaningful sense — it\'s an artifact of how ties are broken, because the underlying data itself is inconsistent (this make+model\'s certificates were never standardised to one interval in the first place). Worth flagging to whoever owns this data: the real fix is standardising REF615\'s certificates to one validity period, not the advisory logic.' B=None
+
+=== Areva P443 (Extend) ===
+ r1: A='Areva P443 — a perfect record, EXTEND example' B=None
+ r3: A='Cohort identity' B=None
+ r4: A='Test type:' B='Protection Relay Calibration and History'
+ r5: A='Manufacturer / Model:' B='Areva / P443'
+ r6: A='Cohort:' B='5 units, all passed, all certified at 18 months'
+ r8: A='Every calibration cycle in this cohort (real data)' B=None
+ r9: A='Equipment (UEIC)' B='Tested at'
+ r10: A='BN-DEVA-06-400-RL-Areva-P443' B=datetime.datetime(2026, 9, 6, 14, 29, 22)
+ r11: A='BN-DEVA-08-400-RL-Areva-P443' B=datetime.datetime(2026, 9, 6, 14, 29, 22)
+ r12: A='BN-DEVA-09-400-RL-Areva-P443' B=datetime.datetime(2026, 9, 6, 14, 29, 22)
+ r13: A='BN-DEVA-10-400-RL-Areva-P443' B=datetime.datetime(2026, 9, 6, 14, 29, 22)
+ r14: A='BN-DEVA-07-400-RL-Areva-P443' B=datetime.datetime(2026, 9, 6, 14, 29, 22)
+ r16: A='Live computation (formulas reference the table above)' B=None
+ r17: A='Sample size' B='=COUNTA(C10:C14)'
+ r18: A='Fail count' B='=COUNTIF(C10:C14,"fail")'
+ r19: A='Fail rate %' B='=ROUND(B18/B17*100,1)'
+ r20: A='Current validity (months) — MODE.SNGL()' B='=MODE.SNGL(D10:D14)'
+ r21: A='Min cycles required (config)' B=5
+ r22: A='Extend cut-off % (config)' B=0
+ r23: A='Shorten cut-off % (config)' B=20
+ r24: A='Step size, months (config)' B=6
+ r25: A='Min months allowed (config)' B=6
+ r26: A='Max months allowed (config)' B=60
+ r27: A='Direction' B='=IF(B17<B21,"no advisory (too few cycles)",IF(B19<=B22,"extend",IF(B19>=B23,"shorten","no advisory (mid-range)")))'
+ r28: A='Suggested validity (months)' B='=IF(B27="extend",MIN(B20+B24,B26),IF(B27="shorten",MAX(B20-B24,B25),B20))'
+ r29: A='Rationale (matches the dashboard text)' B='=B18&" fail(s) in the last "&B17&" calibration cycles ("&B19&"%) — consider "&IF(B27="extend","extending","shortening")&" the validity period from "&B20&" to "&B28&" months."'
+ r31: A='Note' B=None
+ r32: A='Fail rate is 0.0%, at or below the EXTEND cut-off (0.0%), so this cohort is advised to EXTEND: 18 + 6 = 24 months. Read literally, the rule only relaxes an interval on a perfect record — a single failure anywhere in the pooled cycles (fail rate > 0%, but still < 20%) would drop this into the untouched "no advisory" middle band, not partially extend it.' B=None
+
+=== Siemens 7SJ82 (Extend) ===
+ r1: A='Siemens 7SJ82 — mostly-uniform record, EXTEND example' B=None
+ r3: A='Cohort identity' B=None
+ r4: A='Test type:' B='Protection Relay Calibration and History'
+ r5: A='Manufacturer / Model:' B='Siemens / 7SJ82'
+ r6: A='Cohort:' B='7 cycles across the fleet, all passed; 6 certified at 12 months, 1 outlier at 10 months'
+ r8: A='Every calibration cycle in this cohort (real data)' B=None
+ r9: A='Equipment (UEIC)' B='Tested at'
+ r10: A='BN-DEVA-01-400-RL-Siemens-9000' B=datetime.datetime(2026, 9, 4, 10, 57, 47)
+ r11: A='BN-DEVA-02-400-RL-Siemens-9000' B=datetime.datetime(2026, 9, 4, 10, 57, 47)
+ r12: A='BN-DEVA-03-400-RL-Siemens-9000' B=datetime.datetime(2026, 9, 4, 10, 57, 47)
+ r13: A='BN-DEVA-04-400-RL-Siemens-9000' B=datetime.datetime(2026, 9, 4, 10, 57, 47)
+ r14: A='BN-DEVA-05-400-RL-Siemens-9000' B=datetime.datetime(2026, 9, 4, 10, 57, 47)
+ r15: A='BN-DEVA-05-400-RL-Siemens-9000' B=datetime.datetime(2026, 9, 7, 12, 15, 15)
+ r16: A='BN-DEVA-04-400-RL-SEIM-9000' B=datetime.datetime(2026, 9, 7, 12, 20, 50)
+ r18: A='Live computation (formulas reference the table above)' B=None
+ r19: A='Sample size' B='=COUNTA(C10:C16)'
+ r20: A='Fail count' B='=COUNTIF(C10:C16,"fail")'
+ r21: A='Fail rate %' B='=ROUND(B20/B19*100,1)'
+ r22: A='Current validity (months) — MODE.SNGL()' B='=MODE.SNGL(D10:D16)'
+ r23: A='Min cycles required (config)' B=5
+ r24: A='Extend cut-off % (config)' B=0
+ r25: A='Shorten cut-off % (config)' B=20
+ r26: A='Step size, months (config)' B=6
+ r27: A='Min months allowed (config)' B=6
+ r28: A='Max months allowed (config)' B=60
+ r29: A='Direction' B='=IF(B19<B23,"no advisory (too few cycles)",IF(B21<=B24,"extend",IF(B21>=B25,"shorten","no advisory (mid-range)")))'
+ r30: A='Suggested validity (months)' B='=IF(B29="extend",MIN(B22+B26,B28),IF(B29="shorten",MAX(B22-B26,B27),B22))'
+ r31: A='Rationale (matches the dashboard text)' B='=B20&" fail(s) in the last "&B19&" calibration cycles ("&B21&"%) — consider "&IF(B29="extend","extending","shortening")&" the validity period from "&B22&" to "&B30&" months."'
+ r33: A='Note' B=None
+ r34: A='Unlike the ABB case, MODE.SNGL() works cleanly here: 12 appears 6 times out of 7, a genuine majority, so "current validity" = 12 months is a meaningful number — the one outlier certificate at 10 months (a data-entry slip, or a unit re-tested early) doesn\'t distort it. Fail rate is 0.0% → EXTEND to 12 + 6 = 18 months.' B=None
