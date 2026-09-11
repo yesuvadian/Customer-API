@@ -771,9 +771,9 @@ class EquipmentService:
     @classmethod
     def compute_failure_stats(cls, db: Session, equipment_id: UUID) -> dict:
         """
-        Per-unit cumulative failure count + MTBF (KPTCL spec §2: "maintain
-        cumulative failure count, failure rate, and mean time between
-        failures (MTBF) per equipment unit").
+        Per-unit cumulative failure count + failure rate + MTBF (KPTCL spec
+        §2: "maintain cumulative failure count, failure rate, and mean time
+        between failures (MTBF) per equipment unit").
 
         A failure event is the same definition already used by the seeded
         "Equipment Performance Report" / "Equipment Failure Performance
@@ -788,8 +788,22 @@ class EquipmentService:
         failures mtbf_days is None (not 0, not "N/A" hidden as a number)
         rather than a manufactured statistic off a sample too small to mean
         anything.
+
+        failure_rate_per_year is failures / years in service since
+        commissioning. A single unit has no unit-count to divide by the way
+        a cohort does (there's only one), so the rate that means something
+        at this granularity is temporal instead. None whenever
+        commissioned_date isn't recorded, or the unit has been in service
+        under FAILURE_RATE_MIN_SERVICE_YEARS — a unit commissioned last
+        month with one failure isn't "12x/year," it's a sample of one over
+        a window too short to mean anything (same materiality rule as MTBF
+        needing >= 2 events).
         """
+        import config as _config
         from models import TestingRequest, TestResult
+
+        equipment = cls.get_equipment(db, equipment_id)
+        commissioned_date = equipment.commissioned_date if equipment else None
 
         rows = (
             db.query(TestingRequest.id, TestingRequest.completed_at,
@@ -798,44 +812,47 @@ class EquipmentService:
             .filter(TestingRequest.equipment_id == equipment_id)
             .all()
         )
-        if not rows:
-            return {
-                "cumulative_failure_count": 0,
-                "mtbf_days": None,
-                "first_failure_date": None,
-                "last_failure_date": None,
-            }
-
-        tr_ids = [r.id for r in rows]
-        critical_tr_ids = {
-            tid for (tid,) in (
-                db.query(TestResult.testing_request_id)
-                .filter(TestResult.testing_request_id.in_(tr_ids))
-                .filter(TestResult.evaluation_result["overall"].astext == "CRITICAL")
-                .distinct()
-                .all()
-            )
-        }
 
         event_dates = []
-        for r in rows:
-            is_failure = (
-                (r.request_category is not None and r.request_category.value == "failure_registry")
-                or r.id in critical_tr_ids
-            )
-            if not is_failure:
-                continue
-            event_date = r.completed_at or r.requested_date or r.cts
-            if event_date is not None:
-                event_dates.append(event_date)
-
+        if rows:
+            tr_ids = [r.id for r in rows]
+            critical_tr_ids = {
+                tid for (tid,) in (
+                    db.query(TestResult.testing_request_id)
+                    .filter(TestResult.testing_request_id.in_(tr_ids))
+                    .filter(TestResult.evaluation_result["overall"].astext == "CRITICAL")
+                    .distinct()
+                    .all()
+                )
+            }
+            for r in rows:
+                is_failure = (
+                    (r.request_category is not None and r.request_category.value == "failure_registry")
+                    or r.id in critical_tr_ids
+                )
+                if not is_failure:
+                    continue
+                event_date = r.completed_at or r.requested_date or r.cts
+                if event_date is not None:
+                    event_dates.append(event_date)
         event_dates.sort()
+
         mtbf_raw = cls._mtbf_days_from_dates(event_dates)
         mtbf_days = round(mtbf_raw, 1) if mtbf_raw is not None else None
+
+        failure_rate_per_year = None
+        if commissioned_date is not None:
+            cd = commissioned_date
+            if cd.tzinfo is None:
+                cd = cd.replace(tzinfo=timezone.utc)
+            years_in_service = (datetime.now(timezone.utc) - cd).total_seconds() / (365.25 * 86400)
+            if years_in_service >= _config.FAILURE_RATE_MIN_SERVICE_YEARS:
+                failure_rate_per_year = round(len(event_dates) / years_in_service, 3)
 
         return {
             "cumulative_failure_count": len(event_dates),
             "mtbf_days": mtbf_days,
+            "failure_rate_per_year": failure_rate_per_year,
             "first_failure_date": event_dates[0].isoformat() if event_dates else None,
             "last_failure_date": event_dates[-1].isoformat() if event_dates else None,
         }

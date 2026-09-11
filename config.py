@@ -291,3 +291,12 @@ FAILURE_COHORT_TREND_MAX_SERIES = int(os.getenv("FAILURE_COHORT_TREND_MAX_SERIES
 # so the tag lands on exactly the rows already shown as red — no new
 # threshold concept, just naming the existing one.
 DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE = float(os.getenv("DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE", 1.0))
+
+# Per-unit failure rate (KPTCL spec §2: "... per equipment unit"). A single
+# unit has no unit-count to divide by (there's only one), so the rate that
+# means something here is temporal: failures per year since commissioning.
+# Below this many years in service, a rate would be dividing by a window
+# too short to mean anything (one failure in a unit's first month reads as
+# an absurd "12x/year" otherwise) — failure_rate_per_year is None below it,
+# same materiality rule as MTBF needing >= 2 events.
+FAILURE_RATE_MIN_SERVICE_YEARS = float(os.getenv("FAILURE_RATE_MIN_SERVICE_YEARS", 0.5))

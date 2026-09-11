@@ -2746,9 +2746,10 @@ def get_equipment_failure_stats(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Cumulative failure count + MTBF for one equipment unit (KPTCL spec §2).
-    Lightweight and cheap by design — meant to be called on-demand when the
-    equipment actions menu is opened, not eagerly for every row in a list.
+    Cumulative failure count + failure rate + MTBF for one equipment unit
+    (KPTCL spec §2). Lightweight and cheap by design — meant to be called
+    on-demand when the equipment actions menu is opened, not eagerly for
+    every row in a list.
     """
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
