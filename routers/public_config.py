@@ -13,6 +13,8 @@ import os
 
 from fastapi import APIRouter
 
+from config import MAX_DOCUMENT_UPLOAD_MB, ALLOWED_UPLOAD_TYPES
+
 router = APIRouter(tags=["Public Config"])
 
 
@@ -20,4 +22,9 @@ router = APIRouter(tags=["Public Config"])
 def get_public_config():
     return {
         "max_upload_mb": int(os.getenv("MAX_UPLOAD_MB", 5)),
+        "max_document_upload_mb": MAX_DOCUMENT_UPLOAD_MB,
+        "allowed_upload_types": {
+            category: sorted({ext for exts in mime_map.values() for ext in exts})
+            for category, mime_map in ALLOWED_UPLOAD_TYPES.items()
+        },
     }

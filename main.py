@@ -4,10 +4,11 @@ load_dotenv()
 import os
 import logging
 import anyio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer
+from config import MAX_UPLOAD_MB, MAX_DOCUMENT_UPLOAD_MB
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
@@ -1477,6 +1478,32 @@ app.add_middleware(
 )
 
 # ── Global Middleware ─────────────────────────────────────────────────────────
+
+# Early-rejection backstop: reject an oversized request by its Content-Length
+# header before it reaches any route handler. This is defense-in-depth only —
+# every upload endpoint enforces its own (lower) per-category cap via
+# utils.upload_limits.read_and_validate_upload; this just catches anything
+# that slips past a route that forgot to. A generous ceiling is safe for
+# every request type (a JSON POST body never approaches this size).
+_MAX_REQUEST_BODY_MB = max(MAX_UPLOAD_MB, MAX_DOCUMENT_UPLOAD_MB) + 10
+_MAX_REQUEST_BODY_BYTES = _MAX_REQUEST_BODY_MB * 1024 * 1024
+
+
+async def max_body_size_middleware(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"Request body exceeds the {_MAX_REQUEST_BODY_MB} MB limit"},
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
+
+
+app.middleware("http")(max_body_size_middleware)
 app.middleware("http")(auth_and_privilege_middleware)
 
 security = HTTPBearer()

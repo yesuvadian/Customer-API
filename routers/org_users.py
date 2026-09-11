@@ -14,7 +14,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 from database import get_db
 from middleware.org_auth import require_org_member, require_org_admin
-from utils.upload_limits import read_upload_capped
+from utils.upload_limits import read_and_validate_upload
 from models import User, OrgRole, OrgUserRole, OrgDepartment
 from schemas import (
     OrgUserCreate,
@@ -166,13 +166,7 @@ async def bulk_import_users(
     Department matched by name; role matched by name or created.
     Passwords not updated for existing users; new users get 'Welcome@123'.
     """
-    if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only .xlsx or .xls files are accepted"
-        )
-
-    content = await read_upload_capped(file)
+    content = await read_and_validate_upload(file, category="spreadsheet")
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     except Exception:

@@ -28,7 +28,12 @@ from schemas import (
     EquipmentCountResponse,
 )
 from services.equipment_service import EquipmentService
-from utils.upload_limits import read_upload_capped
+from utils.upload_limits import (
+    read_and_validate_upload,
+    detect_mime,
+    safe_extension_for_mime,
+)
+from config import MAX_DOCUMENT_UPLOAD_MB
 
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "analysis_reports")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -676,7 +681,7 @@ async def bulk_validate(
     Returns {department_id, equipment_type_id, rows: [{row, status, errors, data}]}
     """
     _enforce_org_scope(current_user)
-    contents = await read_upload_capped(file)
+    contents = await read_and_validate_upload(file, category="spreadsheet")
     try:
         meta, rows = _parse_bulk_excel(contents)
     except Exception as exc:
@@ -713,7 +718,7 @@ async def bulk_import(
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_add")
 
-    contents = await read_upload_capped(file)
+    contents = await read_and_validate_upload(file, category="spreadsheet")
     try:
         meta, rows = _parse_bulk_excel(contents)
     except Exception as exc:
@@ -1887,7 +1892,7 @@ async def bulk_import_testing_kits(
 
     _require_permission(db, current_user, "can_import")
 
-    content = (await read_upload_capped(file)).decode("utf-8-sig")
+    content = (await read_and_validate_upload(file, category="spreadsheet")).decode("utf-8-sig")
     def _is_comment_or_blank(line: str) -> bool:
         s = line.strip()
         return not s or s.startswith("#") or s.startswith('"#')
@@ -2494,10 +2499,13 @@ async def replace_equipment(
 
     report_path: Optional[str] = None
     if analysis_report is not None:
-        file_ext = os.path.splitext(analysis_report.filename or "report.pdf")[1] or ".pdf"
+        content = await read_and_validate_upload(
+            analysis_report, category="document", max_mb=MAX_DOCUMENT_UPLOAD_MB
+        )
+        detected_type = detect_mime(content, analysis_report.filename)
+        file_ext = safe_extension_for_mime(detected_type, default=".pdf")
         safe_name = f"{_uuid.uuid4()}{file_ext}"
         dest = os.path.join(UPLOADS_DIR, safe_name)
-        content = await analysis_report.read()
         with open(dest, "wb") as f:
             f.write(content)
         report_path = f"uploads/analysis_reports/{safe_name}"
@@ -2802,24 +2810,38 @@ async def upload_nameplate_file(
         raise HTTPException(status_code=404, detail="Equipment not found.")
     field_def = _resolve_nameplate_file_field(db, equipment, field_key)
     accepted = set(field_def.get("accept", ["image/jpeg", "application/pdf"]))
-    content_type = file.content_type or ""
-    if content_type not in accepted:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type '{content_type}' not allowed. Accepted: {sorted(accepted)}",
-        )
     max_bytes = field_def.get("max_size_kb", 10240) * 1024
-    content = await file.read()
-    if len(content) > max_bytes:
+
+    # Bounded chunked read (byte-precise, since the per-field cap is
+    # configured in KB and may not be a round MB value).
+    chunks = bytearray()
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        chunks.extend(chunk)
+        if len(chunks) > max_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File exceeds maximum size of {field_def.get('max_size_kb', 10240)} KB.",
+            )
+    content = bytes(chunks)
+
+    # Sniff the real content type instead of trusting the client-supplied
+    # Content-Type header, and validate against the field's accept list.
+    detected_type = detect_mime(content, file.filename)
+    if detected_type not in accepted:
         raise HTTPException(
             status_code=400,
-            detail=f"File exceeds maximum size of {field_def.get('max_size_kb', 10240)} KB.",
+            detail=f"File type '{detected_type}' not allowed. Accepted: {sorted(accepted)}",
         )
+    content_type = detected_type
+
     eq_dir = os.path.join(NAMEPLATE_FILES_DIR, str(equipment_id))
     os.makedirs(eq_dir, exist_ok=True)
-    ext = os.path.splitext(file.filename or "upload")[1] or (
-        ".jpg" if "jpeg" in content_type else ".pdf"
-    )
+    # Derive the stored extension from the detected content, never from the
+    # client-supplied filename, to prevent extension spoofing on disk.
+    ext = safe_extension_for_mime(detected_type)
     stored_name = f"{field_key}_{_uuid.uuid4()}{ext}"
     dest = os.path.join(eq_dir, stored_name)
     with open(dest, "wb") as fh:

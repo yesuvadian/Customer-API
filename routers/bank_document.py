@@ -15,13 +15,13 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from services.companybankdocument_service import CompanyBankDocumentService
+from config import MAX_DOCUMENT_UPLOAD_MB
+from utils.upload_limits import read_and_validate_upload
 
 # -----------------------------------------------------
 # ENV
 # -----------------------------------------------------
 load_dotenv()
-MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 10000))
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_KB * 1024
 
 router = APIRouter(
     prefix="/bank_documents",
@@ -74,15 +74,8 @@ async def upload_bank_document(
     db: Session = Depends(get_db),
 ):
     try:
-        # ✅ SAFE READ (Excel compatible)
-        file_data = await file.read()
-
-        # ✅ FILE SIZE CHECK (same as TAX)
-        if len(file_data) > MAX_FILE_SIZE_BYTES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} MB"
-            )
+        # ✅ Bounded, content-sniffed read
+        file_data = await read_and_validate_upload(file, category="document", max_mb=MAX_DOCUMENT_UPLOAD_MB)
 
         doc = service.create_document(
             db=db,

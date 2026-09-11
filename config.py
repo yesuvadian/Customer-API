@@ -147,7 +147,23 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", EMAIL_USER or "noreply@example.com")
 # ==============================
 # FILE UPLOAD LIMITS
 # ==============================
-MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 10000))
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", 5))
+MAX_DOCUMENT_UPLOAD_MB = int(os.getenv("MAX_DOCUMENT_UPLOAD_MB", 10))
+
+ALLOWED_UPLOAD_TYPES = {
+    "document":    {"application/pdf": {".pdf"}, "image/jpeg": {".jpg", ".jpeg"}, "image/png": {".png"}},
+    "image":       {"image/jpeg": {".jpg", ".jpeg"}, "image/png": {".png"}},
+    "spreadsheet": {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {".xlsx"},
+        "application/vnd.ms-excel": {".xls"},
+        "application/zip": {".xlsx"},
+        "text/csv": {".csv"}, "text/plain": {".csv"},
+    },
+}
+DANGEROUS_EXTENSIONS = {
+    ".exe", ".dll", ".bat", ".cmd", ".sh", ".msi", ".js", ".vbs", ".ps1",
+    ".jar", ".com", ".scr", ".php", ".py", ".rb", ".pl", ".jsp", ".app", ".apk",
+}
 # ==============================
 # ZOHO BOOKS CONFIGURATION
 # ==============================
