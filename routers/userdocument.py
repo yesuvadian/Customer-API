@@ -9,6 +9,7 @@ from datetime import datetime,timezone
 from schemas import UserDocumentCreate, UserDocumentResponse, UserDocumentUpdate
 from services.userdocumentservice import UserDocumentService
 from utils.common_service import UTCDateTimeMixin
+from utils.upload_limits import read_upload_capped
 import magic
 import mimetypes
 
@@ -34,7 +35,7 @@ async def create_user_document(
     service = UserDocumentService(db)
 
     # Read file
-    contents = await file.read()
+    contents = await read_upload_capped(file)
 
     # 🔥 Detect MIME type from actual content
     try:

@@ -5,6 +5,7 @@ from services.sales_order_service import SalesOrderService
 from services.zoho_auth_service import get_zoho_access_token
 import zohoschemas
 from fastapi import UploadFile, File, Form
+from utils.upload_limits import read_upload_capped
 
 router = APIRouter(
     prefix="/zohoorders",
@@ -37,19 +38,21 @@ def request_sales_order(payload: zohoschemas.RequestSalesOrder, current_user=Dep
 # ─── GRN ─────────────────────────────────────────────────────────────────────
 
 @router.post("/{salesorder_id}/grn", status_code=status.HTTP_201_CREATED)
-def upload_grn(
+async def upload_grn(
     salesorder_id: str,
     cf_grn_number: str = Form(...),
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
     access_token = get_zoho_access_token()
+    content = await read_upload_capped(file)
     try:
         result = sales_order_service.upload_grn_attachment(
             access_token=access_token,
             salesorder_id=salesorder_id,
             cf_grn_number=cf_grn_number,
             file=file,
+            content=content,
             uploaded_by=current_user.email,
         )
     except HTTPException as e:
@@ -61,19 +64,21 @@ def upload_grn(
 
 
 @router.put("/{salesorder_id}/grn", status_code=status.HTTP_200_OK)
-def update_grn(
+async def update_grn(
     salesorder_id: str,
     cf_grn_number: str = Form(...),
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
     access_token = get_zoho_access_token()
+    content = await read_upload_capped(file)
     try:
         sales_order_service.update_grn_attachment(
             access_token=access_token,
             salesorder_id=salesorder_id,
             cf_grn_number=cf_grn_number,
             file=file,
+            content=content,
             uploaded_by=current_user.email,
         )
     except HTTPException as e:
@@ -171,19 +176,21 @@ def get_grn_pdf(salesorder_id: str, current_user=Depends(get_current_user)):
 # ─── PO ──────────────────────────────────────────────────────────────────────
 
 @router.post("/{salesorder_id}/po", status_code=status.HTTP_201_CREATED)
-def upload_po(
+async def upload_po(
     salesorder_id: str,
     cf_customer_po_no: str = Form(...),
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
     access_token = get_zoho_access_token()
+    content = await read_upload_capped(file)
     try:
         result = sales_order_service.upload_po_attachment(
             access_token=access_token,
             salesorder_id=salesorder_id,
             file=file,
             po_number=cf_customer_po_no,
+            content=content,
             uploaded_by=current_user.email,
         )
     except HTTPException as e:

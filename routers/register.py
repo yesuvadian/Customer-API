@@ -10,6 +10,7 @@ from services.plan_service import PlanService
 from auth_utils import get_registration_user
 from config import MAX_FILE_SIZE_KB, NOMINATIM_URL
 from database import get_db
+from utils.upload_limits import read_upload_capped
 import schemas
 from services import user_service
 from services.companybankdocument_service import CompanyBankDocumentService
@@ -338,7 +339,7 @@ async def upload_bank_document_reg(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    file_data = await file.read()
+    file_data = await read_upload_capped(file)
 
     return CompanyBankDocumentService.create_document(
         db=db,
@@ -361,7 +362,7 @@ async def upload_tax_document_reg(
     try:
         print("📌 DEBUG RECEIVED category_detail_id =", category_detail_id)
         # Read file content
-        file_data = await file.read()
+        file_data = await read_upload_capped(file)
 
      
 

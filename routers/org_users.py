@@ -14,6 +14,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 from database import get_db
 from middleware.org_auth import require_org_member, require_org_admin
+from utils.upload_limits import read_upload_capped
 from models import User, OrgRole, OrgUserRole, OrgDepartment
 from schemas import (
     OrgUserCreate,
@@ -153,7 +154,7 @@ def _write_example_row(ws, department_name, font):
 
 
 @router.post("/bulk-import", response_model=BulkUserImportResponse)
-def bulk_import_users(
+async def bulk_import_users(
     org_id: UUID,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -171,7 +172,7 @@ def bulk_import_users(
             detail="Only .xlsx or .xls files are accepted"
         )
 
-    content = file.file.read()
+    content = await read_upload_capped(file)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     except Exception:
