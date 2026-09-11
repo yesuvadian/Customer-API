@@ -21,13 +21,18 @@ unrelated row on another.
    "Short Circuit & Open Circuit Test (HV-LV)" form — reactivating them
    would reintroduce duplicate test types alongside their replacement.
 
-2. transformer_ttr_test (Transformer Turns Ratio) and oltc_drm_test (OLTC
-   Dynamic Resistance Measurement) — both had is_active:False AND
-   test_type_id:None (never linked to their own CategoryDetails row at
-   all, so the Template Designer's category-type grouping filed them
-   under "Other" even if activated). Fixes both: sets template_data
-   is_active True, links test_type_id, and activates the CategoryDetails
-   row.
+2. Templates that had is_active:False AND test_type_id:None (never linked
+   to their own CategoryDetails row at all, so the Template Designer's
+   category-type grouping filed them under "Other" even if activated):
+   transformer_ttr_test, oltc_drm_test, plus the Test+Maintenance pair for
+   Potential Transformer, Battery Charger, LTAC Panel, PLCC Panel, and
+   Digital Communication Panel (5 of the 11 brand-new equipment types from
+   commit ac3166c — confirmed via manual Template Designer activation on
+   local, replicated here so other environments match). Fixes each: sets
+   template_data is_active True, links test_type_id, and activates the
+   CategoryDetails row. The other 6 of the 11 (Isolator, Control & Relay
+   Panel, Station Auxiliary Transformer, DG Set, Wave Trap, Fire Fighting
+   System) are deliberately NOT included — still pending review.
 
 3. partial_discharge_test — shared by name across 4 equipment types
    (Power Transformer, Current Transformer, Potential Transformer,
@@ -77,6 +82,16 @@ POWER_TRANSFORMER_NAMES_TO_ACTIVATE = [
 LINK_AND_ACTIVATE = [
     ("transformer_ttr_test", "Transformer Turns Ratio (TTR)", "Power Transformer"),
     ("oltc_drm_test", "OLTC Dynamic Resistance Measurement (DRM)", "Power Transformer"),
+    ("potential_transformer_test", "Potential Transformer Test", "Potential Transformer"),
+    ("potential_transformer_maintenance", "Potential Transformer Preventive Maintenance", "Potential Transformer"),
+    ("battery_charger_test", "Battery Charger Output & Ripple Test", "Battery Charger"),
+    ("battery_charger_maintenance", "Battery Charger Preventive Maintenance", "Battery Charger"),
+    ("ltac_panel_test", "LTAC Panel Tuning & Insertion Loss Test", "LTAC Panel"),
+    ("ltac_panel_maintenance", "LTAC Panel Preventive Maintenance", "LTAC Panel"),
+    ("plcc_panel_test", "PLCC Panel Carrier & Signal Test", "PLCC Panel"),
+    ("plcc_panel_maintenance", "PLCC Panel Preventive Maintenance", "PLCC Panel"),
+    ("comm_panel_test", "Digital Communication Panel Functional Test", "Digital Communication Panel"),
+    ("comm_panel_maintenance", "Digital Communication Panel Preventive Maintenance", "Digital Communication Panel"),
 ]
 
 # ── 3. Shared-by-name template across multiple equipment types ──
