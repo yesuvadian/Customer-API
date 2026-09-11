@@ -1720,7 +1720,6 @@ class Equipment(Base):
 
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
-    gps_coordinates = Column(String(100), nullable=True)
 
     # SCADA integration
     scada_tag = Column(String(120), nullable=True, index=True)
