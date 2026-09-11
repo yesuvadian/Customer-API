@@ -4333,7 +4333,20 @@ TEST_TEMPLATES = {
                             {"key": "reading_2",     "label": "Reading 2 (µΩ)", "type": "number"},
                             {"key": "average",       "label": "Average (µΩ)",   "type": "number"},
                             {"key": "max_limit",     "label": "Max Limit (µΩ)", "type": "number"},
-                            {"key": "result",        "label": "Result",         "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
+                            {
+                                "key": "result", "label": "Result", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "average",
+                                        "right_field": "max_limit",
+                                        "operator": "<=",
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
+                                "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
+                            },
                         ],
                         "default_rows": [
                             {"pole": "R Phase"},
@@ -7308,11 +7321,25 @@ TEST_TEMPLATES = {
                         "lock_default_rows": False,
                         "columns": [
                             {"key": "test_point",         "label": "Test Point",              "type": "readonly"},
+                            # Nameplate setpoint differs per transformer - tester enters the
+                            # actual value from the equipment's nameplate/OEM datasheet here;
+                            # this is NOT auto-populated from a fixed lookup.
                             {"key": "rated_setpoint_c",   "label": "Rated Setpoint (Nameplate)", "type": "number", "unit": "°C"},
                             {"key": "actual_value_c",     "label": "Actual Value Observed",   "type": "number", "unit": "°C"},
                             {
-                                "key": "result", "label": "Contact Operation", "type": "dropdown",
-                                "options": ["Pass", "Fail"],
+                                "key": "result", "label": "Contact Operation", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "actual_value_c",
+                                        "right_field": "rated_setpoint_c",
+                                        "operator": "<=",
+                                        "row_id_field": "test_point",
+                                        "row_operators": {},
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
                                 "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
                             },
                         ],
@@ -7341,11 +7368,25 @@ TEST_TEMPLATES = {
                         "lock_default_rows": False,
                         "columns": [
                             {"key": "test_point",         "label": "Test Point",              "type": "readonly"},
+                            # Nameplate setpoint differs per transformer - tester enters the
+                            # actual value from the equipment's nameplate/OEM datasheet here;
+                            # this is NOT auto-populated from a fixed lookup.
                             {"key": "rated_setpoint_c",   "label": "Rated Setpoint (Nameplate)", "type": "number", "unit": "°C"},
                             {"key": "actual_value_c",     "label": "Actual Value Observed",   "type": "number", "unit": "°C"},
                             {
-                                "key": "result", "label": "Contact Operation", "type": "dropdown",
-                                "options": ["Pass", "Fail"],
+                                "key": "result", "label": "Contact Operation", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "actual_value_c",
+                                        "right_field": "rated_setpoint_c",
+                                        "operator": "<=",
+                                        "row_id_field": "test_point",
+                                        "row_operators": {},
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
                                 "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
                             },
                         ],
@@ -7408,11 +7449,31 @@ TEST_TEMPLATES = {
                         "lock_default_rows": False,
                         "columns": [
                             {"key": "test_point",       "label": "Test Point",                 "type": "readonly"},
-                            {"key": "rated_value",      "label": "Rated Value (Nameplate)",     "type": "number", "unit": "kg/cm²"},
+                            {
+                                "key": "rated_value",   "label": "Rated Value (Nameplate)",     "type": "calculated", "unit": "kg/cm²",
+                                # Locked value sourced from the CM/PM master template - set the
+                                # per-test-point rated value in the Template Designer before this
+                                # table is used; left empty here since real nameplate values vary
+                                # by equipment and must not be guessed.
+                                "rule": {"type": "LOOKUP", "config": {"field": "test_point", "mapping": {}}},
+                            },
                             {"key": "actual_value",     "label": "Actual Value Observed",       "type": "number", "unit": "kg/cm²"},
                             {
-                                "key": "result", "label": "Result", "type": "dropdown",
-                                "options": ["Pass", "Fail"],
+                                "key": "result", "label": "Result", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "actual_value",
+                                        "right_field": "rated_value",
+                                        "operator": "<=",
+                                        "row_id_field": "test_point",
+                                        # e.g. "Reseal (drops to 0 after operation)" needs its own
+                                        # direction/limit - configure per row in the Template Designer.
+                                        "row_operators": {},
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
                                 "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
                             },
                         ],
@@ -7485,8 +7546,27 @@ TEST_TEMPLATES = {
                             {"key": "test_point",   "label": "Test Point",                       "type": "readonly"},
                             {"key": "test_value",   "label": "Air Injected / Surge Applied",      "type": "number", "unit": "cc"},
                             {
-                                "key": "result", "label": "Contact Operation", "type": "dropdown",
-                                "options": ["Pass", "Fail"],
+                                "key": "rated_value", "label": "Standard Test Value", "type": "calculated", "unit": "cc",
+                                # Locked value sourced from the CM/PM master template - set the
+                                # per-test-point standard air/oil-surge volume (per IS 3637) in the
+                                # Template Designer before this table is used; left empty here since
+                                # it must not be guessed.
+                                "rule": {"type": "LOOKUP", "config": {"field": "test_point", "mapping": {}}},
+                            },
+                            {
+                                "key": "result", "label": "Contact Operation", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "test_value",
+                                        "right_field": "rated_value",
+                                        "operator": "<=",
+                                        "row_id_field": "test_point",
+                                        "row_operators": {},
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
                                 "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
                             },
                         ],
@@ -9237,7 +9317,7 @@ TEST_TEMPLATES = {
         "name": "OLTC Dynamic Resistance Measurement (DRM)",
         "equipment_type": "Power Transformer",
         "description": "Dynamic contact resistance measurement across OLTC tap positions — detects contact pitting, coking, and transition-timing anomalies during tap-change operation.",
-        "is_active": False,
+        "is_active": True,
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
@@ -9321,7 +9401,7 @@ TEST_TEMPLATES = {
         "name": "Transformer Turns Ratio (TTR)",
         "equipment_type": "Power Transformer",
         "description": "Turns ratio measurement across all winding pairs and tap positions, compared against nameplate ratio.",
-        "is_active": False,
+        "is_active": True,
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
@@ -9403,7 +9483,7 @@ TEST_TEMPLATES = {
         "name": "Partial Discharge Measurement",
         "equipment_type": "Power Transformer",
         "description": "Partial discharge measurement (IEC 60270 conventional / UHF / acoustic) — apparent charge, inception/extinction voltage, and PD pattern classification.",
-        "is_active": False,
+        "is_active": True,
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
@@ -9443,8 +9523,23 @@ TEST_TEMPLATES = {
                             {"key": "phase",              "label": "Phase",             "type": "dropdown", "options": ["R", "Y", "B"]},
                             {"key": "applied_voltage_kv", "label": "Applied Voltage",   "type": "number", "unit": "kV"},
                             {"key": "apparent_charge_pc", "label": "Apparent Charge",   "type": "number", "unit": "pC"},
+                            # Threshold varies by voltage class / test method - tester enters
+                            # the applicable limit here; not auto-populated from a fixed lookup.
                             {"key": "threshold_pc",       "label": "Threshold",         "type": "number", "unit": "pC"},
-                            {"key": "row_result",         "label": "Result",            "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
+                            {
+                                "key": "row_result", "label": "Result", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "apparent_charge_pc",
+                                        "right_field": "threshold_pc",
+                                        "operator": "<=",
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
+                                "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
+                            },
                         ],
                         "default_rows": [{"phase": "R"}, {"phase": "Y"}, {"phase": "B"}],
                     },

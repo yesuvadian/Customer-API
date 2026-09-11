@@ -199,18 +199,21 @@ class EvaluationService:
         Evaluate a table field using any combination of:
           • table_evaluation.column_evaluations  — numeric threshold per column
           • table_evaluation aggregate rules     — aggregate threshold
-          • column_evaluation on column def      — dropdown severity map per column
-                                                   (template-driven, no table_evaluation
-                                                    block required for this path)
+          • column_evaluation on column def      — dropdown/calculated severity map per
+                                                   column (template-driven, no
+                                                   table_evaluation block required for
+                                                   this path)
         """
         ev = field.get("table_evaluation") or {}
         table_ev_enabled = bool(ev.get("enabled"))
 
-        # Also fire when any column carries a dropdown column_evaluation map
+        # Also fire when any column carries a column_evaluation map — dropdown/radio
+        # (manually selected) or calculated (e.g. a ROW_COMPARE-derived Pass/Fail
+        # computed client-side from a rated-setpoint LOOKUP column) alike.
         has_col_ev = any(
             col.get("column_evaluation")
             for col in field.get("columns", [])
-            if col.get("type") in ("dropdown", "radio")
+            if col.get("type") in ("dropdown", "radio", "calculated")
         )
 
         if not table_ev_enabled and not has_col_ev:
@@ -277,10 +280,10 @@ class EvaluationService:
                     except (ValueError, TypeError):
                         continue
 
-        # Dropdown per-column evaluation — reads column_evaluation from column defs
+        # Dropdown/calculated per-column evaluation — reads column_evaluation from column defs
         if has_col_ev:
             for col in field.get("columns", []):
-                if col.get("type") not in ("dropdown", "radio"):
+                if col.get("type") not in ("dropdown", "radio", "calculated"):
                     continue
                 col_ev = col.get("column_evaluation")
                 if not col_ev:
