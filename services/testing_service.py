@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from models import TestingRequest, TestingRequestStatus, TestResult, TestResultImage, CategoryDetails, Recommendation, RecommendationType, TestSession
 from utils.common_service import UTCDateTimeMixin
+from utils.upload_limits import read_and_validate_upload
 
 logger = logging.getLogger(__name__)
 
@@ -1019,7 +1020,7 @@ class TestingService:
 
         return result
 
-    def upload_result_images(self, result_id: UUID, files: list, tester_id: UUID) -> List[TestResultImage]:
+    async def upload_result_images(self, result_id: UUID, files: list, tester_id: UUID) -> List[TestResultImage]:
         """Upload multiple images for a test result."""
         result = self.db.query(TestResult).filter(TestResult.id == result_id).first()
         if not result:
@@ -1027,7 +1028,7 @@ class TestingService:
 
         images = []
         for i, file in enumerate(files):
-            file_data = file.file.read()
+            file_data = await read_and_validate_upload(file, category="image")
             img = TestResultImage(
                 test_result_id=result_id,
                 file_name=file.filename,

@@ -147,7 +147,23 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", EMAIL_USER or "noreply@example.com")
 # ==============================
 # FILE UPLOAD LIMITS
 # ==============================
-MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 10000))
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", 5))
+MAX_DOCUMENT_UPLOAD_MB = int(os.getenv("MAX_DOCUMENT_UPLOAD_MB", 10))
+
+ALLOWED_UPLOAD_TYPES = {
+    "document":    {"application/pdf": {".pdf"}, "image/jpeg": {".jpg", ".jpeg"}, "image/png": {".png"}},
+    "image":       {"image/jpeg": {".jpg", ".jpeg"}, "image/png": {".png"}},
+    "spreadsheet": {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {".xlsx"},
+        "application/vnd.ms-excel": {".xls"},
+        "application/zip": {".xlsx"},
+        "text/csv": {".csv"}, "text/plain": {".csv"},
+    },
+}
+DANGEROUS_EXTENSIONS = {
+    ".exe", ".dll", ".bat", ".cmd", ".sh", ".msi", ".js", ".vbs", ".ps1",
+    ".jar", ".com", ".scr", ".php", ".py", ".rb", ".pl", ".jsp", ".app", ".apk",
+}
 # ==============================
 # ZOHO BOOKS CONFIGURATION
 # ==============================
@@ -291,3 +307,12 @@ FAILURE_COHORT_TREND_MAX_SERIES = int(os.getenv("FAILURE_COHORT_TREND_MAX_SERIES
 # so the tag lands on exactly the rows already shown as red — no new
 # threshold concept, just naming the existing one.
 DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE = float(os.getenv("DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE", 1.0))
+
+# Per-unit failure rate (KPTCL spec §2: "... per equipment unit"). A single
+# unit has no unit-count to divide by (there's only one), so the rate that
+# means something here is temporal: failures per year since commissioning.
+# Below this many years in service, a rate would be dividing by a window
+# too short to mean anything (one failure in a unit's first month reads as
+# an absurd "12x/year" otherwise) — failure_rate_per_year is None below it,
+# same materiality rule as MTBF needing >= 2 events.
+FAILURE_RATE_MIN_SERVICE_YEARS = float(os.getenv("FAILURE_RATE_MIN_SERVICE_YEARS", 0.5))

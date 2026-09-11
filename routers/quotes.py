@@ -7,6 +7,7 @@ from services.quote_service import QuoteService
 from services.zoho_auth_service import get_zoho_access_token
 import zohoschemas
 from services.sales_order_service import SalesOrderService
+from utils.upload_limits import read_and_validate_upload
 
 router = APIRouter(
     prefix="/zohoquotes",
@@ -212,7 +213,7 @@ def create_quotes_for_vendors(
     "/{estimate_id}/attachment",
     status_code=status.HTTP_201_CREATED
 )
-def upload_quote_attachment(
+async def upload_quote_attachment(
     estimate_id: str,
     file: UploadFile = File(...),
     current_user=Depends(get_current_user)
@@ -221,12 +222,14 @@ def upload_quote_attachment(
     Upload attachment to a Zoho Books Estimate (Quote)
     """
     access_token = get_zoho_access_token()
+    content = await read_and_validate_upload(file, category="document")
 
     try:
         result = quote_service.upload_attachment(
             access_token=access_token,
             estimate_id=estimate_id,
             file=file,
+            content=content,
             uploaded_by=current_user.email
         )
     except Exception as e:
@@ -245,7 +248,7 @@ def upload_quote_attachment(
     response_model=zohoschemas.QuoteResponse,
     status_code=status.HTTP_201_CREATED
 )
-def request_quote_with_attachments(
+async def request_quote_with_attachments(
     contact_id: str = Form(...),
     enquiry_description: str = Form(...),
     notes: str | None = Form(None),
@@ -256,6 +259,11 @@ def request_quote_with_attachments(
     Create enquiry draft quote + upload attachments
     """
     access_token = get_zoho_access_token()
+
+    # Validate every attached file up front (size cap + real-content type
+    # check) before creating anything in Zoho.
+    for f in files:
+        await read_and_validate_upload(f, category="document")
 
     try:
         # 1️⃣ Create enquiry quote

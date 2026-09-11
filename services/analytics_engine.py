@@ -738,18 +738,27 @@ class HealthScorer:
                         ru    = row.get("unit", "")
                         rs    = row.get("status", "")
                         name  = row.get("row_id", "")
+                        # Prefix with the table's own label so two tables in
+                        # the same template that happen to reuse a row name
+                        # (e.g. both the OTI and WTI functional-test tables
+                        # have an "Alarm" / "Trip" row) don't produce two
+                        # identical, undistinguishable critical findings -
+                        # same disambiguation convention already used for
+                        # per-row trend parameters (see row_label below).
+                        table_label   = field.get("label") or fkey
+                        display_name  = f"{table_label} — {name}" if table_label else name
                         # Use stored breach_limit if available; fall back to template lookup
                         rl    = row.get("breach_limit") or _tmpl_limits.get(name.lower())
                         u     = f" {ru}" if ru else ""
                         if rv is not None and rl is not None:
-                            r_reason = f"{name}: {rv}{u} — allowable {rl}{u} ({rs})"
+                            r_reason = f"{display_name}: {rv}{u} — allowable {rl}{u} ({rs})"
                         elif rv is not None:
-                            r_reason = f"{name}: {rv}{u} — {rs}"
+                            r_reason = f"{display_name}: {rv}{u} — {rs}"
                         else:
-                            r_reason = f"{name} — evaluated as {rs}"
+                            r_reason = f"{display_name} — evaluated as {rs}"
                         critical_findings.append({
                             "key":          f"{fkey}.{name}",
-                            "label":        name,
+                            "label":        display_name,
                             "condition":    "Poor",
                             "status":       rs,
                             "unit":         ru or None,
@@ -846,7 +855,7 @@ class AnalyticsEngine:
             return None
 
         # Load historical test data for trend analysis
-        history_map = self._fetch_history_map(
+        history_map, categorical_history_map = self._fetch_history_map(
             equipment_id, template_key, test_result_id,
             before=result.tested_at or result.cts,
             template_data=template_data,
@@ -1045,7 +1054,19 @@ class AnalyticsEngine:
                     )
 
                     for col in cols:
-                        if col.get("type") not in ("number", "calculated"):
+                        col_type = col.get("type")
+                        # Dropdown/radio/calculated columns carrying a
+                        # column_evaluation map (e.g. Pass/Fail, Trip/No
+                        # Trip) are categorical, not numeric — no float
+                        # series to trend, but still worth tracking for
+                        # status-flip anomalies below. Numeric-only columns
+                        # without this map are unaffected.
+                        col_ev = (
+                            col.get("column_evaluation")
+                            if col_type in ("dropdown", "radio", "calculated")
+                            else None
+                        )
+                        if col_type not in ("number", "calculated") and not col_ev:
                             continue
                         col_key   = col.get("key", "")
                         col_label = col.get("label") or col_key
@@ -1055,7 +1076,10 @@ class AnalyticsEngine:
                         col_results = field_ev.get("column_results", []) if field_ev else []
                         row_results = field_ev.get("row_results", []) if field_ev else []
 
-                        # Track per-row separately when a row-identifier exists
+                        # Track per-row separately when a row-identifier exists.
+                        # Each entry is (row_id, current_val, row_idx, row_unit,
+                        # raw_str) — current_val is None for a categorical
+                        # (non-numeric) cell, raw_str is None for a numeric one.
                         rows_to_track = []
                         if id_col:
                             for row_idx, row in enumerate(table_data):
@@ -1063,22 +1087,24 @@ class AnalyticsEngine:
                                 raw     = row.get(col_key)
                                 if raw is None or raw == "":
                                     continue
+                                row_unit = row.get("unit") or None
                                 try:
-                                    row_unit = row.get("unit") or None
-                                    rows_to_track.append((row_id, float(raw), row_idx, row_unit))
+                                    rows_to_track.append((row_id, float(raw), row_idx, row_unit, None))
                                 except (ValueError, TypeError):
-                                    continue
+                                    if col_ev:
+                                        rows_to_track.append((row_id, None, row_idx, row_unit, str(raw)))
                         else:
                             # No identifier — aggregate last non-null value
                             for row_idx, row in enumerate(table_data):
                                 raw = row.get(col_key)
                                 if raw is None or raw == "":
                                     continue
+                                row_unit = row.get("unit") or None
                                 try:
-                                    row_unit = row.get("unit") or None
-                                    rows_to_track.append((str(row_idx), float(raw), row_idx, row_unit))
+                                    rows_to_track.append((str(row_idx), float(raw), row_idx, row_unit, None))
                                 except (ValueError, TypeError):
-                                    continue
+                                    if col_ev:
+                                        rows_to_track.append((str(row_idx), None, row_idx, row_unit, str(raw)))
 
                         table_label = field.get("label") or field_key
 
@@ -1094,7 +1120,7 @@ class AnalyticsEngine:
                         if len(set(row_ids)) < len(row_ids):
                             continue
 
-                        for row_id, current_val, row_idx, row_unit in rows_to_track:
+                        for row_id, current_val, row_idx, row_unit, raw_str in rows_to_track:
                             # Build a stable parameter key scoped to this row
                             param_key = f"{field_key}.{row_id}.{col_key}"
                             # Prefixed with the table's own label because row
@@ -1122,6 +1148,14 @@ class AnalyticsEngine:
                             status    = next((r.get("status") for r in reversed(row_matches) if r.get("status")), None)
                             row_breach_limit = next((r.get("breach_limit") for r in reversed(row_matches) if r.get("breach_limit") is not None), None)
                             row_remedial_text = next((r.get("remedial_action_text") for r in reversed(row_matches) if r.get("remedial_action_text")), None)
+
+                            # A categorical cell (raw_str set) has no col_results
+                            # entry from _eval_table_field unless table_evaluation
+                            # is separately enabled on this field, so classify it
+                            # directly off the column's own column_evaluation map.
+                            if raw_str is not None and status is None and col_ev:
+                                status = col_ev.get(raw_str, NORMAL)
+
                             condition = condition_labels.get(status, "Poor") if status else None
                             score     = max(0.0, condition_scores.get(condition, 50.0)) if condition else None
 
@@ -1131,12 +1165,41 @@ class AnalyticsEngine:
                             if effective_unit:
                                 synth_field["unit"] = effective_unit
 
-                            history  = history_map.get(param_key, [])
-                            analysis = ParameterAnalyzer.analyse(
-                                history, {},
-                                current_value=current_val,
-                                current_date=result.tested_at or result.cts,
-                            )
+                            if raw_str is not None:
+                                # Categorical column — no numeric series to
+                                # trend. Flag an anomaly only when this
+                                # reading's status is worse than the previous
+                                # reading's (e.g. Pass -> Fail), not merely
+                                # because it differs (e.g. re-affirming Fail
+                                # twice in a row isn't a new event).
+                                prev_raw = categorical_history_map.get(param_key)
+                                # categorical_history_map only retains the single
+                                # most recent prior reading (not a full series),
+                                # so history_count here is just "have we seen
+                                # this row+column categorically before" (1 or 2),
+                                # not a true lifetime count like the numeric path.
+                                analysis = {
+                                    "history_count":      2 if prev_raw is not None else 1,
+                                    "trend": None, "trend_slope": None, "trend_r_squared": None,
+                                    "annual_change": None, "pct_change_annual": None,
+                                    "breach_threshold": None, "breach_predicted_at": None,
+                                    "days_to_breach": None,
+                                    "is_anomaly": False, "anomaly_type": None, "anomaly_detail": None,
+                                }
+                                if prev_raw is not None and prev_raw != raw_str:
+                                    prev_status = col_ev.get(prev_raw, NORMAL) if col_ev else NORMAL
+                                    from services.evaluation_service import _STATUS_RANK as _flip_rank
+                                    if _flip_rank.get(status, 0) > _flip_rank.get(prev_status, 0):
+                                        analysis["is_anomaly"]    = True
+                                        analysis["anomaly_type"]  = "status_flip"
+                                        analysis["anomaly_detail"] = f"{row_label} changed from '{prev_raw}' to '{raw_str}'"
+                            else:
+                                history  = history_map.get(param_key, [])
+                                analysis = ParameterAnalyzer.analyse(
+                                    history, {},
+                                    current_value=current_val,
+                                    current_date=result.tested_at or result.cts,
+                                )
 
                             pa = self._upsert_parameter_analytics(
                                 test_result_id  = test_result_id,
@@ -1390,11 +1453,17 @@ class AnalyticsEngine:
         exclude_result:  uuid.UUID,
         before:          Optional[datetime] = None,
         template_data:   Optional[dict] = None,
-    ) -> dict[str, list[tuple[datetime, float]]]:
+    ) -> tuple[dict[str, list[tuple[datetime, float]]], dict[str, str]]:
         """
-        Returns {param_key: [(tested_at, value), ...]} sorted oldest-first
-        for all historical results of this equipment + template, excluding
-        the current test result.
+        Returns ({param_key: [(tested_at, value), ...]}, {param_key: last_raw_str})
+        sorted oldest-first for all historical results of this equipment +
+        template, excluding the current test result.
+
+        The second dict tracks the most recent *non-numeric* raw value seen
+        per param_key (e.g. "Pass"/"Fail" for a categorical table column) —
+        used by run_for_test()'s status-flip detection for
+        column_evaluation-style columns, which have no numeric series to
+        trend and so are absent from the first dict entirely.
 
         [before] must be the current test's own tested_at (or cts fallback).
         Without it, "history" means every *other* result regardless of its
@@ -1450,6 +1519,10 @@ class AnalyticsEngine:
         rows = q.order_by(TestResult.tested_at.asc()).all()
 
         history_map: dict[str, list[tuple[datetime, float]]] = {}
+        # Last non-numeric raw value per param_key, overwritten as rows are
+        # walked oldest-first, so it ends up holding the most recent reading —
+        # the "previous value" a flip comparison needs.
+        categorical_map: dict[str, str] = {}
         for row in rows:
             dt = row.tested_at or row.cts
             if not dt:
@@ -1494,14 +1567,18 @@ class AnalyticsEngine:
                         for col_key, col_val in row_dict.items():
                             if col_val is None or col_val == "":
                                 continue
+                            composite = f"{key}.{row_id}.{col_key}"
                             try:
                                 fval = float(col_val)
-                                composite = f"{key}.{row_id}.{col_key}"
                                 history_map.setdefault(composite, []).append((dt, fval))
                             except (ValueError, TypeError):
-                                continue
+                                # Non-numeric cell (e.g. "Pass"/"Fail") — keep
+                                # only the latest raw string, keyed the same
+                                # way run_for_test()'s column loop builds
+                                # param_key for this column.
+                                categorical_map[composite] = str(col_val)
 
-        return history_map
+        return history_map, categorical_map
 
     def _resolve_level_type(self, dept: OrgDepartment) -> Optional[str]:
         """Attempt to determine hierarchy level from department type."""
