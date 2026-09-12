@@ -4,10 +4,11 @@ load_dotenv()
 import os
 import logging
 import anyio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer
+from config import MAX_UPLOAD_MB, MAX_DOCUMENT_UPLOAD_MB
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
@@ -1461,17 +1462,44 @@ async def custom_redoc():
 """)
 
 # ── Global Middleware ─────────────────────────────────────────────────────────
+
+# Early-rejection backstop: reject an oversized request by its Content-Length
+# header before it reaches any route handler. This is defense-in-depth only —
+# every upload endpoint enforces its own (lower) per-category cap via
+# utils.upload_limits.read_and_validate_upload; this just catches anything
+# that slips past a route that forgot to. A generous ceiling is safe for
+# every request type (a JSON POST body never approaches this size).
+_MAX_REQUEST_BODY_MB = max(MAX_UPLOAD_MB, MAX_DOCUMENT_UPLOAD_MB) + 10
+_MAX_REQUEST_BODY_BYTES = _MAX_REQUEST_BODY_MB * 1024 * 1024
+
+
+async def max_body_size_middleware(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"Request body exceeds the {_MAX_REQUEST_BODY_MB} MB limit"},
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
+
+
+app.middleware("http")(max_body_size_middleware)
 app.middleware("http")(auth_and_privilege_middleware)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# Registered AFTER auth_and_privilege_middleware so it ends up OUTERMOST —
+# Registered LAST so it ends up OUTERMOST, wrapping both middlewares above —
 # Starlette wraps middleware in reverse registration order, last added =
-# outermost. CORS must be outermost: any response the auth middleware
-# returns directly (a 401/403, or an unhandled exception bubbling to a bare
-# 500) never reaches an inner CORSMiddleware at all, so it comes back with
-# no Access-Control-Allow-Origin header — the browser then blocks it and
-# reports a CORS error, masking the real 401/403/500 entirely. Confirmed
-# live: a 401 response had zero CORS headers with this order reversed.
+# outermost. CORS must be outermost: any response either of those returns
+# directly (a 401/403 from auth, a 413 from the body-size guard, or an
+# unhandled exception bubbling to a bare 500) never reaches an inner
+# CORSMiddleware at all, so it comes back with no Access-Control-Allow-Origin
+# header — the browser then blocks it and reports a CORS error, masking the
+# real 401/403/413/500 entirely. Confirmed live: a 401 response had zero CORS
+# headers with this order reversed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

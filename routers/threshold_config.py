@@ -1,38 +1,45 @@
 """
 Router: /threshold-config
 
-Admin CRUD for the 4 lookup tables that back the configurable EHS
-(Equipment Health Score) computation pipeline (KPTCL spec §12.1):
+Admin CRUD for the lookup tables that back the configurable EHS
+(Equipment Health Score) computation pipeline (KPTCL spec §12.1), plus the
+Data Quality Index rule toggles:
 
     /threshold-config/health-bands       -> EquipmentHealthBandThreshold
     /threshold-config/condition-scores   -> ParameterConditionScore
     /threshold-config/status-conditions  -> TestStatusCondition
     /threshold-config/condition-bands    -> EquipmentConditionBandThreshold
+    /threshold-config/dqi-rules          -> DqiRuleConfig (key constrained to
+                                            an allow-list, see DqiRuleCreate)
 
 These replace the previously hardcoded _RISK_BANDS / _SCORE / _CONDITION
-constants in services/analytics_engine.py, and the _condition_from_score
-cutoffs in routers/ai_graph.py (see alter_equipment_health_band_threshold.py,
-alter_parameter_condition_score.py, alter_test_status_condition.py,
-alter_equipment_condition_band_threshold.py for the seed history). Menu-level
-visibility is gated by the "Threshold Config" module (see
-seed_threshold_config_module.py); this router itself only requires an
-authenticated user, same as the other lookup-table CRUD routers (e.g.
-equipment_type_kit_mappings.py).
+constants in services/analytics_engine.py, the _condition_from_score
+cutoffs in routers/ai_graph.py, and the hardcoded DQI nameplate-field/
+test-history/overdue-test checks in routers/dashboard_kpi.py (see
+alter_equipment_health_band_threshold.py, alter_parameter_condition_score.py,
+alter_test_status_condition.py, alter_equipment_condition_band_threshold.py,
+alter_dqi_rule_config.py for the seed history). Menu-level visibility is
+gated by the "Threshold Config" module (see seed_threshold_config_module.py);
+this router itself only requires an authenticated user, same as the other
+lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py).
 """
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
 from models import (
+    DqiRuleConfig,
     EquipmentConditionBandThreshold,
     EquipmentHealthBandThreshold,
     ParameterConditionScore,
     TestStatusCondition,
     User,
+    get_dqi_all_key_labels,
 )
 
 router = APIRouter(
@@ -142,6 +149,46 @@ class ConditionBandResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# DqiRuleConfig's `key` is still constrained server-side to
+# get_dqi_all_key_labels() (models.py, discovered live from the Equipment
+# model + the 2 special checks) — dashboard_kpi.py's DQI computation only
+# knows how to evaluate exactly those keys — so unlike the 4 tables above,
+# create takes a `key` but no arbitrary free-text is accepted for it.
+class DqiRuleCreate(BaseModel):
+    key: str
+    label: Optional[str] = None  # defaults to get_dqi_all_key_labels()[key] if omitted
+    is_active: bool = True
+    notes: Optional[str] = None
+    # None/empty = applies to every equipment type — see DqiRuleConfig's own
+    # docstring in models.py for why this scoping exists at all.
+    equipment_type_ids: Optional[List[int]] = None
+
+
+class DqiRuleUpdate(BaseModel):
+    label: Optional[str] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+    equipment_type_ids: Optional[List[int]] = None
+
+
+class DqiRuleResponse(BaseModel):
+    id: int
+    key: str
+    label: str
+    is_active: bool
+    notes: Optional[str]
+    equipment_type_ids: Optional[List[int]]
+
+    class Config:
+        from_attributes = True
+
+
+class DqiAvailableKeyResponse(BaseModel):
+    key: str
+    label: str
+    in_use: bool
 
 
 # ── Health bands ──────────────────────────────────────────────────────────────
@@ -449,5 +496,100 @@ def delete_condition_band(band_id: int, db: Session = Depends(get_db)):
     ).first()
     if not row:
         raise HTTPException(status_code=404, detail="Condition band not found")
+    db.delete(row)
+    db.commit()
+
+
+# ── DQI rules (Data Quality Index checks — routers/dashboard_kpi.py) ──────────
+# `key` is constrained to get_dqi_all_key_labels() (models.py) — see
+# DqiRuleCreate's comment above — everything else (toggle/edit label+
+# notes/delete) works like the 4 tables above.
+
+@router.get("/dqi-rules", response_model=List[DqiRuleResponse])
+def list_dqi_rules(db: Session = Depends(get_db)):
+    return db.query(DqiRuleConfig).order_by(DqiRuleConfig.id).all()
+
+
+@router.get("/dqi-rules/available-keys", response_model=List[DqiAvailableKeyResponse])
+def list_dqi_available_keys(db: Session = Depends(get_db)):
+    """Every key the DQI computation actually knows how to evaluate, plus
+    whether a rule for it already exists — powers the "Add Rule" dropdown
+    so the admin picks from real options instead of typing a key that would
+    silently never match anything in dashboard_kpi.py.
+    """
+    used = {row[0] for row in db.query(DqiRuleConfig.key).all()}
+    return [
+        {"key": k, "label": v, "in_use": k in used}
+        for k, v in get_dqi_all_key_labels(db).items()
+    ]
+
+
+@router.post(
+    "/dqi-rules",
+    response_model=DqiRuleResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_dqi_rule(
+    payload: DqiRuleCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    available_keys = get_dqi_all_key_labels(db)
+    if payload.key not in available_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{payload.key}' isn't a key the Data Quality computation "
+                   f"knows how to evaluate.",
+        )
+    if db.query(DqiRuleConfig).filter(DqiRuleConfig.key == payload.key).first():
+        raise HTTPException(status_code=409, detail="A rule for this key already exists")
+
+    row = DqiRuleConfig(
+        key=payload.key,
+        label=payload.label or available_keys[payload.key],
+        is_active=payload.is_active,
+        notes=payload.notes,
+        equipment_type_ids=payload.equipment_type_ids or None,
+        created_by=current_user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        # The .first() check above isn't atomic with this insert — a
+        # concurrent request for the same key can still slip past it and
+        # hit uq_dqi_rule_key here. Same intended 409 either way, not a 500.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A rule for this key already exists")
+    db.refresh(row)
+    return row
+
+
+@router.patch("/dqi-rules/{rule_id}", response_model=DqiRuleResponse)
+def update_dqi_rule(
+    rule_id: int,
+    payload: DqiRuleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = db.query(DqiRuleConfig).filter(DqiRuleConfig.id == rule_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="DQI rule not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(row, field, value)
+    row.modified_by = current_user.id
+
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/dqi-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dqi_rule(rule_id: int, db: Session = Depends(get_db)):
+    row = db.query(DqiRuleConfig).filter(DqiRuleConfig.id == rule_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="DQI rule not found")
     db.delete(row)
     db.commit()

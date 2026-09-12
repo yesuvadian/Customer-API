@@ -5,7 +5,7 @@ from services.sales_order_service import SalesOrderService
 from services.zoho_auth_service import get_zoho_access_token
 import zohoschemas
 from fastapi import UploadFile, File, Form
-from utils.upload_limits import read_upload_capped
+from utils.upload_limits import read_and_validate_upload
 
 router = APIRouter(
     prefix="/zohoorders",
@@ -45,7 +45,7 @@ async def upload_grn(
     current_user=Depends(get_current_user),
 ):
     access_token = get_zoho_access_token()
-    content = await read_upload_capped(file)
+    content = await read_and_validate_upload(file, category="document")
     try:
         result = sales_order_service.upload_grn_attachment(
             access_token=access_token,
@@ -71,7 +71,7 @@ async def update_grn(
     current_user=Depends(get_current_user),
 ):
     access_token = get_zoho_access_token()
-    content = await read_upload_capped(file)
+    content = await read_and_validate_upload(file, category="document")
     try:
         sales_order_service.update_grn_attachment(
             access_token=access_token,
@@ -183,7 +183,7 @@ async def upload_po(
     current_user=Depends(get_current_user),
 ):
     access_token = get_zoho_access_token()
-    content = await read_upload_capped(file)
+    content = await read_and_validate_upload(file, category="document")
     try:
         result = sales_order_service.upload_po_attachment(
             access_token=access_token,
@@ -207,19 +207,21 @@ async def upload_po(
 
 
 @router.put("/{salesorder_id}/po", status_code=status.HTTP_200_OK)
-def update_po(
+async def update_po(
     salesorder_id: str,
     cf_customer_po_no: str = Form(...),
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
     access_token = get_zoho_access_token()
+    content = await read_and_validate_upload(file, category="document")
     try:
         sales_order_service.upload_po_attachment(
             access_token=access_token,
             salesorder_id=salesorder_id,
             file=file,
             po_number=cf_customer_po_no,
+            content=content,
             uploaded_by=current_user.email,
         )
     except HTTPException as e:

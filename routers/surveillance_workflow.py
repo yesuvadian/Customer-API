@@ -34,7 +34,7 @@ from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitReq
 from services.repair_workflow_service import RepairWorkflowService
 from services.surveillance_template_service import SurveillanceTemplateService
 from utils.common_service import get_user_dept_scope
-from utils.upload_limits import read_upload_capped
+from utils.upload_limits import read_and_validate_upload
 
 router = APIRouter(
     prefix="/surveillance-workflows",
@@ -737,7 +737,7 @@ async def upload_stage_file(
     """
     _check_workflow_access(db, workflow_id, user)
     try:
-        file_bytes = await read_upload_capped(file)
+        file_bytes = await read_and_validate_upload(file, category="document")
         return RepairWorkflowService(db).upload_stage_file(
             workflow_id=workflow_id,
             stage_id=stage_id,
