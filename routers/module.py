@@ -97,6 +97,9 @@ async def list_modules(
 async def create_module(
     body: ModuleCreateRequest,
     db: Session = Depends(get_db),
+    # Authorization is enforced by the global middleware's OrgRolePermission
+    # check (can_add on the "App Modules" module) — same as every other
+    # router. No extra dependency needed here.
     current_user=Depends(get_current_user)
 ):
     try:

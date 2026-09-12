@@ -1,4 +1,5 @@
 from fastapi import Request, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Module, UserRole, RoleModulePrivilege, User, OrgUserRole, OrgRolePermission
@@ -15,11 +16,17 @@ async def auth_and_privilege_middleware(request: Request, call_next):
 
 # --------------------------------------------------
 # Public endpoints (NO authentication required)
+#
+# CRITICAL: every real path starts with "/", so a bare "/" or "/api" entry
+# here makes `path.startswith(p)` true for EVERY request, bypassing auth and
+# the whole privilege system for the entire API — not just the literal root.
+# The true root ("/", "/api", "/api/" exactly) is already handled correctly
+# above by exact match, so those entries never belonged in a startswith()
+# list and have been removed. Keep every future entry here either an exact
+# leaf path or a genuine "/namespace/" prefix — never a path fragment that
+# could also be the start of something unrelated.
 # --------------------------------------------------
 PUBLIC_ENDPOINTS = [
-    "/",            # local root
-    "/api",         # production root
-    "/api/",        # production root with slash
     "/token",
     "/docs",
     "/openapi.json",
@@ -30,7 +37,6 @@ PUBLIC_ENDPOINTS = [
     "/zoho_register/",
     "/zohocontacts/",
     "/health",      # external load-test monitoring poll - no auth token available
-    "/public-config",   # safe non-secret settings (e.g. max_upload_mb) - fetched by the UI before login
     "/billing/webhook",   # Razorpay webhook — no auth
     "/billing/plans",     # Plan list — no auth needed
 ]
@@ -38,6 +44,18 @@ ZOHO_PREFIXES = (
     "/zoho",
     "/webhooks/zoho",
 )
+
+# --------------------------------------------------
+# Optional-auth endpoints: never require a token (no 401 for a missing or
+# invalid one), but if a valid Bearer token IS present, current_user gets
+# resolved onto request.state.user same as a normal authenticated request —
+# so a route can personalize its response for a logged-in caller while still
+# answering an anonymous one. Different from PUBLIC_ENDPOINTS, which never
+# even attempts to resolve a user.
+# --------------------------------------------------
+AUTH_PUBLIC_ENDPOINTS = [
+    "/public-config",   # safe non-secret settings (e.g. max_upload_mb) - fetched by the UI before login
+]
 
 # --------------------------------------------------
 # HTTP method → privilege mapping
@@ -94,6 +112,30 @@ async def auth_and_privilege_middleware(request: Request, call_next):
     # 4. Allow public endpoints
     # --------------------------------------------------
     if any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
+        return await call_next(request)
+
+    # --------------------------------------------------
+    # 4b. Optional-auth endpoints — resolve current_user if a valid token
+    # happens to be present, but never reject the request for a missing or
+    # invalid one.
+    # --------------------------------------------------
+    if any(path.startswith(p) for p in AUTH_PUBLIC_ENDPOINTS):
+        auth_header = (
+            request.headers.get("Authorization")
+            or request.headers.get("authorization")
+        )
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+            payload = auth_utils.decode_access_token(token)
+            user_id = payload.get("sub") if payload else None
+            if user_id:
+                db = SessionLocal()
+                try:
+                    user = db.query(User).filter_by(id=user_id).first()
+                    if user:
+                        request.state.user = user
+                finally:
+                    db.close()
         return await call_next(request)
 
     # --------------------------------------------------
@@ -200,9 +242,19 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             return await call_next(request)
 
         # --------------------------------------------------
-        # Skip privilege check for /modules/**
+        # /modules/** — GET only skips the privilege check
+        #
+        # GET /modules/user (list_user_modules) returns each caller's own
+        # permitted module list for their sidebar — every role needs it, and
+        # gating "which modules can you see" behind "do you have can_view on
+        # modules" is circular. GET /modules itself is already covered by
+        # the single-segment-GET rule below, so this only adds /modules/user.
+        # POST/PUT/DELETE (create/update/delete Module rows — platform-wide,
+        # affecting every org) fall through to the normal OrgRolePermission
+        # check like any other module: grant can_add/can_edit/can_delete on
+        # the "App Modules" module (id=2) to whichever role should manage it.
         # --------------------------------------------------
-        if module_name == "modules":
+        if module_name == "modules" and request.method == "GET":
             return await call_next(request)
 
         # --------------------------------------------------
@@ -294,5 +346,17 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # --------------------------------------------------
         return await call_next(request)
 
+    except HTTPException as exc:
+        # A middleware registered via app.middleware("http") sits OUTSIDE
+        # Starlette's ExceptionMiddleware, so an HTTPException raised in here
+        # (every 401/403 above) is NOT auto-converted to a response the way
+        # one raised inside a route handler is — left uncaught, it propagates
+        # to ServerErrorMiddleware and surfaces to the caller as a bare 500,
+        # masking the real 401/403 entirely. Convert it explicitly.
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=exc.headers or {},
+        )
     finally:
         db.close()

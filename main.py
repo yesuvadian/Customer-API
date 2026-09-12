@@ -1267,7 +1267,7 @@ def _billing_notification_job():
                 admins = db.query(User).filter(
                     User.organization_id == org.id,
                     User.usertype == "org_admin",
-                    User.is_active == True,
+                    User.isactive == True,
                 ).all()
                 for admin in admins:
                     try:
@@ -1303,7 +1303,7 @@ def _billing_notification_job():
             admins = db.query(User).filter(
                 User.organization_id == org.id,
                 User.usertype == "org_admin",
-                User.is_active == True,
+                User.isactive == True,
             ).all()
             for admin in admins:
                 try:
@@ -1365,7 +1365,7 @@ def _billing_anomaly_nag_job():
 
         super_admins = db.query(User).filter(
             User.usertype == "super_admin",
-            User.is_active == True,
+            User.isactive == True,
         ).all()
 
         count = len(unresolved)
@@ -1460,7 +1460,18 @@ async def custom_redoc():
 </html>
 """)
 
+# ── Global Middleware ─────────────────────────────────────────────────────────
+app.middleware("http")(auth_and_privilege_middleware)
+
 # ── CORS ──────────────────────────────────────────────────────────────────────
+# Registered AFTER auth_and_privilege_middleware so it ends up OUTERMOST —
+# Starlette wraps middleware in reverse registration order, last added =
+# outermost. CORS must be outermost: any response the auth middleware
+# returns directly (a 401/403, or an unhandled exception bubbling to a bare
+# 500) never reaches an inner CORSMiddleware at all, so it comes back with
+# no Access-Control-Allow-Origin header — the browser then blocks it and
+# reports a CORS error, masking the real 401/403/500 entirely. Confirmed
+# live: a 401 response had zero CORS headers with this order reversed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -1475,9 +1486,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Payment-Token", "X-Org-Name", "X-Dept-Name", "X-Dept-Id", "X-Plan-Id", "X-Trial-Expired-Dept-Mode", "X-Billing-Mode", "X-Dept-Pricing-Ready", "X-Report-Filename"],
 )
-
-# ── Global Middleware ─────────────────────────────────────────────────────────
-app.middleware("http")(auth_and_privilege_middleware)
 
 security = HTTPBearer()
 
