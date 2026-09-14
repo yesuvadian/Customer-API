@@ -230,6 +230,20 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             return await call_next(request)
 
         # --------------------------------------------------
+        # Skip privilege check for logout
+        #
+        # POST /users/logout was being gated on can_add for the "users"
+        # module (POST -> can_add per METHOD_ACTION_MAP) — a role with no
+        # user-creation permission (i.e. most roles) couldn't log out at
+        # all. Logging out only needs a valid, already-authenticated user
+        # (enforced above and by routers/users.py's own get_current_user
+        # dependency) — it must never depend on a module permission, same
+        # reasoning as the KYC exemption above.
+        # --------------------------------------------------
+        if path == "/users/logout":
+            return await call_next(request)
+
+        # --------------------------------------------------
         # Extract module name
         # Example:
         #   /addresses/5 -> addresses
