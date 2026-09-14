@@ -1,4 +1,3 @@
-import threading
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, text
 from models import TestResult
 from datetime import datetime, timedelta
+from utils.sequence_locks import TESTING_REQUEST_NUMBER_LOCK
 
 from models import (
     TestingRequest, TestingRequestStatus, User,
@@ -48,18 +48,6 @@ _LEGACY_STATUS_CATALOG = {
     "closed":                   {"label": "Closed",                 "color": "#6B7280"},
     "pending_assignment":       {"label": "Pending Assignment",     "color": "#0891B2"},
 }
-
-
-# Serializes request_number generation (see create_request) across threads
-# within this process. WEB_CONCURRENCY=1 and sync route handlers run in a
-# shared thread pool (THREAD_POOL_SIZE), so every concurrent request in this
-# deployment is a thread in the SAME process - a module-level lock is
-# therefore sufficient to make the "read current max, then insert" sequence
-# atomic. It would NOT protect against a second worker PROCESS or a second
-# server instance also writing this table; that would need a database-level
-# equivalent (e.g. SELECT ... FOR UPDATE on a per-org/year counter row)
-# instead, since a Python lock only ever spans one process's memory.
-_request_number_lock = threading.Lock()
 
 
 class TestingRequestService:
@@ -259,12 +247,14 @@ class TestingRequestService:
         # identical "next" number, which the unique constraint on
         # request_number then rejects with an IntegrityError. A real
         # concurrent load test (5+ simultaneous creates) reproduced this;
-        # the same requests run sequentially never collide. _request_number_
-        # lock serializes generate-then-insert-then-commit across threads in
-        # this process, so no two threads can ever read the same MAX before
-        # one of them has committed - the race is prevented outright rather
-        # than retried after the fact.
-        with _request_number_lock:
+        # the same requests run sequentially never collide.
+        # TESTING_REQUEST_NUMBER_LOCK (see utils/sequence_locks.py) - shared
+        # with every other service that also writes TestingRequest.
+        # request_number (approval_service's repair-TR auto-create,
+        # direct_submission_service) - serializes generate-then-insert-then-
+        # commit across ALL of them, not just this function, so no two
+        # threads anywhere can read the same MAX before one has committed.
+        with TESTING_REQUEST_NUMBER_LOCK:
             request_number = self._generate_request_number(org_id=data.get("organization_id"))
             request = TestingRequest(
                 request_number=request_number,
