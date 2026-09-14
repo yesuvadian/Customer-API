@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
@@ -47,6 +48,18 @@ _LEGACY_STATUS_CATALOG = {
     "closed":                   {"label": "Closed",                 "color": "#6B7280"},
     "pending_assignment":       {"label": "Pending Assignment",     "color": "#0891B2"},
 }
+
+
+# Serializes request_number generation (see create_request) across threads
+# within this process. WEB_CONCURRENCY=1 and sync route handlers run in a
+# shared thread pool (THREAD_POOL_SIZE), so every concurrent request in this
+# deployment is a thread in the SAME process - a module-level lock is
+# therefore sufficient to make the "read current max, then insert" sequence
+# atomic. It would NOT protect against a second worker PROCESS or a second
+# server instance also writing this table; that would need a database-level
+# equivalent (e.g. SELECT ... FOR UPDATE on a per-org/year counter row)
+# instead, since a Python lock only ever spans one process's memory.
+_request_number_lock = threading.Lock()
 
 
 class TestingRequestService:
@@ -231,7 +244,6 @@ class TestingRequestService:
         return False
 
     def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
-        request_number = self._generate_request_number(org_id=data.get("organization_id"))
         test_type_id = data.get("test_type_id")
         is_cumulative = self._resolve_is_cumulative(test_type_id)
         is_calibration = self._resolve_is_calibration(test_type_id)
@@ -240,48 +252,62 @@ class TestingRequestService:
         _is_multi = data.get("is_multi_session") or _tpl_multi
         _total    = data.get("total_sessions_planned") or _tpl_sessions
         _interval = data.get("session_interval_days") or _tpl_interval
-        request = TestingRequest(
-            request_number=request_number,
-            title=data["title"],
-            description=data.get("description"),
-            transformer_type=data.get("transformer_type"),
-            transformer_rating=data.get("transformer_rating"),
-            manufacturer=data.get("manufacturer"),
-            serial_number=data.get("serial_number"),
-            equipment_type_id=data.get("equipment_type_id"),
-            test_type_id=test_type_id,
-            equipment_id=data.get("equipment_id"),
-            request_category=data.get("request_category", "test"),
-            organization_id=data.get("organization_id"),
-            department_id=data.get("department_id"),
-            zone=data.get("zone"),
-            ce_circle=data.get("ce_circle"),
-            se_division=data.get("se_division"),
-            ee_subdivision=data.get("ee_subdivision"),
-            aee_section=data.get("aee_section"),
-            ae_je=data.get("ae_je"),
-            assigned_tester_id=data.get("assigned_tester_id"),
-            priority=data.get("priority", "normal"),
-            requested_date=data.get("requested_date"),
-            due_date=data.get("due_date"),
-            scheduled_start_date=data.get("scheduled_start_date"),
-            notes=data.get("notes"),
-            status=TestingRequestStatus.draft,
-            originator_id=originator_id,
-            created_by=originator_id,
-            is_multi_session=bool(_is_multi),
-            total_sessions_planned=_total,
-            session_interval_days=_interval,
-            is_cumulative=is_cumulative,
-            is_calibration=is_calibration,
-            is_schedule_template=data.get("is_schedule_template", False),
-            source_schedule_id=data.get("source_schedule_id"),
-            surveillance_workflow_id=data.get("surveillance_workflow_id"),
-            surveillance_quarter=data.get("surveillance_quarter"),
-        )
-        self.db.add(request)
-        self.db.commit()
-        self.db.refresh(request)
+
+        # _generate_request_number() reads the current MAX sequence and adds
+        # 1 - not atomic, so two concurrent creates for the same org/year
+        # could read the same MAX before either commits and compute the
+        # identical "next" number, which the unique constraint on
+        # request_number then rejects with an IntegrityError. A real
+        # concurrent load test (5+ simultaneous creates) reproduced this;
+        # the same requests run sequentially never collide. _request_number_
+        # lock serializes generate-then-insert-then-commit across threads in
+        # this process, so no two threads can ever read the same MAX before
+        # one of them has committed - the race is prevented outright rather
+        # than retried after the fact.
+        with _request_number_lock:
+            request_number = self._generate_request_number(org_id=data.get("organization_id"))
+            request = TestingRequest(
+                request_number=request_number,
+                title=data["title"],
+                description=data.get("description"),
+                transformer_type=data.get("transformer_type"),
+                transformer_rating=data.get("transformer_rating"),
+                manufacturer=data.get("manufacturer"),
+                serial_number=data.get("serial_number"),
+                equipment_type_id=data.get("equipment_type_id"),
+                test_type_id=test_type_id,
+                equipment_id=data.get("equipment_id"),
+                request_category=data.get("request_category", "test"),
+                organization_id=data.get("organization_id"),
+                department_id=data.get("department_id"),
+                zone=data.get("zone"),
+                ce_circle=data.get("ce_circle"),
+                se_division=data.get("se_division"),
+                ee_subdivision=data.get("ee_subdivision"),
+                aee_section=data.get("aee_section"),
+                ae_je=data.get("ae_je"),
+                assigned_tester_id=data.get("assigned_tester_id"),
+                priority=data.get("priority", "normal"),
+                requested_date=data.get("requested_date"),
+                due_date=data.get("due_date"),
+                scheduled_start_date=data.get("scheduled_start_date"),
+                notes=data.get("notes"),
+                status=TestingRequestStatus.draft,
+                originator_id=originator_id,
+                created_by=originator_id,
+                is_multi_session=bool(_is_multi),
+                total_sessions_planned=_total,
+                session_interval_days=_interval,
+                is_cumulative=is_cumulative,
+                is_calibration=is_calibration,
+                is_schedule_template=data.get("is_schedule_template", False),
+                source_schedule_id=data.get("source_schedule_id"),
+                surveillance_workflow_id=data.get("surveillance_workflow_id"),
+                surveillance_quarter=data.get("surveillance_quarter"),
+            )
+            self.db.add(request)
+            self.db.commit()
+            self.db.refresh(request)
         return request
 
     def get_request(self, request_id: UUID) -> TestingRequest:
