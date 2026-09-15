@@ -1,10 +1,70 @@
+import re
+
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from database import SessionLocal
-from models import Module, UserRole, RoleModulePrivilege, User, OrgUserRole, OrgRolePermission
+from models import (
+    Module, UserRole, RoleModulePrivilege, User, OrgUserRole, OrgRolePermission,
+    TestingRequest, TrWfInstance, TrWfStageRole,
+)
 import auth_utils
 from fastapi import Request
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+
+# --------------------------------------------------
+# Modules whose access, for a call scoped to one specific TestingRequest,
+# is decided by tr_wf_stage_roles.can_act_as_tester on that request's
+# current active workflow stage — NOT by OrgRolePermission. A call to one
+# of these modules that isn't scoped to a specific request (no TestingRequest
+# UUID in the path — list/reference endpoints like /testing/my-assignments
+# or /equipment/types-by-category/12) still falls back to OrgRolePermission,
+# since there's no stage to check against.
+# --------------------------------------------------
+STAGE_BASED_MODULES = {"testing", "testing_requests", "equipment"}
+
+
+def _find_stage_gate(db, parts, org_role_ids):
+    """
+    Look for a TestingRequest.id among the URL's path segments. If one is
+    found, return True/False for whether the caller's org role(s) have
+    can_act_as_tester on that request's current active workflow stage —
+    this REPLACES the OrgRolePermission check entirely for that call.
+    Returns None if no TestingRequest is named in the path, meaning the
+    caller should fall back to the normal OrgRolePermission check.
+    """
+    for segment in parts[1:]:
+        if not _UUID_RE.match(segment):
+            continue
+        testing_request = db.query(TestingRequest).filter_by(id=segment).first()
+        if not testing_request:
+            continue
+
+        instance = (
+            db.query(TrWfInstance)
+            .filter(
+                TrWfInstance.testing_request_id == testing_request.id,
+                TrWfInstance.status == "active",
+            )
+            .first()
+        )
+        if not instance or not instance.current_stage_id:
+            return None
+
+        allowed = (
+            db.query(TrWfStageRole)
+            .filter(
+                TrWfStageRole.stage_id == instance.current_stage_id,
+                TrWfStageRole.role_id.in_(org_role_ids),
+                TrWfStageRole.can_act_as_tester == True,
+            )
+            .first()
+        )
+        return bool(allowed)
+    return None
 
 async def auth_and_privilege_middleware(request: Request, call_next):
 
@@ -298,6 +358,22 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         org_user_roles = db.query(OrgUserRole).filter_by(user_id=user.id, is_active=True).all()
         if org_user_roles:
             org_role_ids = [r.org_role_id for r in org_user_roles]
+
+            if module_name in STAGE_BASED_MODULES:
+                stage_verdict = _find_stage_gate(db, parts, org_role_ids)
+                if stage_verdict is not None:
+                    if not stage_verdict:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=(
+                                f"Access denied: role is not the active tester "
+                                f"for this request's current stage ('{module_name}')"
+                            ),
+                        )
+                    return await call_next(request)
+                # No TestingRequest named in this path (list/reference call) —
+                # fall through to the normal OrgRolePermission check below.
+
             allowed = (
                 db.query(OrgRolePermission)
                 .filter(
