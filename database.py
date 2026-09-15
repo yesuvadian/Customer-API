@@ -84,10 +84,29 @@ if not all([VENDOR_DB_HOST, VENDOR_DB_PORT, VENDOR_DB_NAME, VENDOR_DB_USER, VEND
 # freeze for a fast, visible failure instead.
 VENDOR_DB_STATEMENT_TIMEOUT_MS = os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000")
 
+# `statement_timeout` only bounds an ACTIVELY EXECUTING query - it does
+# nothing for a session that finished its query and then never committed,
+# rolled back, or closed (Postgres shows this as state='idle in
+# transaction', wait_event='ClientRead' - waiting for the CLIENT to speak
+# next). A real 100-concurrent-thread load test found 75 of 79 total
+# connections stuck exactly like this, some for 39+ minutes, spread across
+# many unrelated endpoints - almost certainly a Session cleanup (db.close())
+# that gets skipped when a request is cancelled mid-flight under load (a
+# known class of bug with Starlette's BaseHTTPMiddleware, which
+# auth_privilege.py uses - see the separate middleware fix). Each stuck
+# session permanently occupies a pool slot until the process restarts, so
+# under sustained load the pool doesn't just get busy, it leaks away to
+# nothing. idle_in_transaction_session_timeout (ms) is the DB-side safety
+# net: Postgres kills any such session on its own, freeing the pool slot,
+# regardless of whether the app-level leak is ever fixed.
+VENDOR_DB_IDLE_IN_TXN_TIMEOUT_MS = os.getenv("DB_IDLE_IN_TXN_TIMEOUT_MS", "60000")
+
 VENDOR_DATABASE_URL = (
     f"postgresql+psycopg2://{VENDOR_DB_USER}:{VENDOR_DB_PASSWORD}"
     f"@{VENDOR_DB_HOST}:{VENDOR_DB_PORT}/{VENDOR_DB_NAME}"
-    f"?options=-csearch_path=public%20-cstatement_timeout={VENDOR_DB_STATEMENT_TIMEOUT_MS}"
+    f"?options=-csearch_path=public"
+    f"%20-cstatement_timeout={VENDOR_DB_STATEMENT_TIMEOUT_MS}"
+    f"%20-cidle_in_transaction_session_timeout={VENDOR_DB_IDLE_IN_TXN_TIMEOUT_MS}"
 )
 
 vendor_engine = create_engine(
@@ -102,6 +121,39 @@ VendorSessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=vendor_engine,
+    future=True,
+)
+
+# Scheduled background jobs (main.py's APScheduler jobs - notification
+# dispatch/retry, etc.) previously shared vendor_engine's pool with live web
+# requests. Under real concurrent load, that pool fills up with request
+# traffic and the background job's own checkout attempt times out
+# ("QueuePool limit ... connection timed out") - confirmed via a real
+# 100-concurrent-thread load test. A separate, small, dedicated pool means
+# a scheduled job always gets a connection immediately regardless of how
+# busy request traffic is, at the cost of a handful of extra idle Postgres
+# connections (default 5+5=10) on top of the main pool - comfortably within
+# this DB's max_connections headroom.
+BG_DATABASE_URL = (
+    f"postgresql+psycopg2://{VENDOR_DB_USER}:{VENDOR_DB_PASSWORD}"
+    f"@{VENDOR_DB_HOST}:{VENDOR_DB_PORT}/{VENDOR_DB_NAME}"
+    f"?options=-csearch_path=public"
+    f"%20-cstatement_timeout={VENDOR_DB_STATEMENT_TIMEOUT_MS}"
+    f"%20-cidle_in_transaction_session_timeout={VENDOR_DB_IDLE_IN_TXN_TIMEOUT_MS}"
+)
+
+bg_engine = create_engine(
+    BG_DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=int(os.getenv("DB_BACKGROUND_POOL_SIZE", 5)),
+    max_overflow=int(os.getenv("DB_BACKGROUND_MAX_OVERFLOW", 5)),
+    future=True,
+)
+
+BackgroundSessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=bg_engine,
     future=True,
 )
 

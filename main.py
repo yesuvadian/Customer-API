@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer
 from config import MAX_UPLOAD_MB, MAX_DOCUMENT_UPLOAD_MB
-from database import Base, engine, SessionLocal
+from database import Base, engine, SessionLocal, BackgroundSessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
 from routers.health import router as health_router
@@ -205,7 +205,7 @@ scheduler.add_job(
 # fire() only enqueues (status='pending'); this job does the actual sending.
 # Keeps notification logic completely out of the core API request path.
 def _process_pending_notifications():
-    db = SessionLocal()
+    db = BackgroundSessionLocal()
     try:
         from services.notification_service import NotificationService
         result = NotificationService(db).process_pending_notifications()
@@ -232,7 +232,7 @@ scheduler.add_job(
 
 # ── Retry failed notifications (every 5 minutes) ─────────────────────────────
 def _retry_failed_notifications():
-    db = SessionLocal()
+    db = BackgroundSessionLocal()
     try:
         from services.notification_service import NotificationService
         count = NotificationService(db).retry_failed()
