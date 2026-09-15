@@ -23,6 +23,19 @@ whichever roles already show it in their sidebar. Safe to re-run: the
 INSERT ON CONFLICT only ever sets can_view = true, never touches add/
 edit/delete/approve/assign/export/import, and never overwrites an existing
 grant with anything weaker.
+
+Part 2 fixes the general case this bug is one instance of: a role whose
+default_module_id (its post-login landing page) doesn't have can_view on
+that same module lands somewhere it can't actually load data for — exactly
+what services/org_role_service.py's update_role/update_role_permission/
+set_role_permissions now refuse to let a fresh save create. But those
+guards are forward-only; they don't retroactively fix a role that was
+already saved into that state before the guards existed. Confirmed live:
+Sample Organization's AEE_MAINTENANCE had default_module_id="asset_dashboard"
+with no can_view grant at all — audited platform-wide, it was the only
+other role in this state. Grants can_view on a role's own default module,
+platform-wide, for any role where that's missing; same safe-to-re-run
+ON CONFLICT shape as part 1.
 """
 from database import SessionLocal
 from sqlalchemy import text
@@ -57,6 +70,32 @@ def run():
     except Exception as e:
         db.rollback()
         print(f"Migration failed: {e}")
+        raise
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        result = db.execute(text("""
+            INSERT INTO public.org_role_permissions
+                (id, org_role_id, module_id, can_view, can_add, can_edit,
+                 can_delete, can_approve, can_assign, can_export, can_import,
+                 cts, mts)
+            SELECT gen_random_uuid(), r.id, r.default_module_id, true, false,
+                   false, false, false, false, false, false, now(), now()
+            FROM public.org_roles r
+            WHERE r.default_module_id IS NOT NULL
+            ON CONFLICT (org_role_id, module_id)
+                DO UPDATE SET can_view = true, mts = now()
+                WHERE public.org_role_permissions.can_view IS DISTINCT FROM true
+        """))
+        db.commit()
+        print(f"Migration 043 part 2 complete: {result.rowcount} org_role_permissions "
+              f"row(s) granted/updated so every role's default_module_id has "
+              f"can_view=True, platform-wide.")
+    except Exception as e:
+        db.rollback()
+        print(f"Migration part 2 failed: {e}")
         raise
     finally:
         db.close()
