@@ -75,10 +75,19 @@ VENDOR_DB_PASSWORD = os.getenv("DB_PASSWORD")
 if not all([VENDOR_DB_HOST, VENDOR_DB_PORT, VENDOR_DB_NAME, VENDOR_DB_USER, VENDOR_DB_PASSWORD]):
     raise RuntimeError("[ERROR] Missing required Vendor PostgreSQL environment variables!")
 
+# A real 50-concurrent-thread load test showed ALL threads simultaneously
+# stall for ~44 of a 58-minute run then recover together - too long to be
+# SQLAlchemy's own 30s pool-checkout timeout (that fails fast with a
+# QueuePool error), so it's a query stuck on the Postgres side with no
+# timeout to bound it. `statement_timeout` (ms) caps how long any single
+# query may run before Postgres kills it - trades a silent multi-minute
+# freeze for a fast, visible failure instead.
+VENDOR_DB_STATEMENT_TIMEOUT_MS = os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000")
+
 VENDOR_DATABASE_URL = (
     f"postgresql+psycopg2://{VENDOR_DB_USER}:{VENDOR_DB_PASSWORD}"
     f"@{VENDOR_DB_HOST}:{VENDOR_DB_PORT}/{VENDOR_DB_NAME}"
-    "?options=-csearch_path=public"
+    f"?options=-csearch_path=public%20-cstatement_timeout={VENDOR_DB_STATEMENT_TIMEOUT_MS}"
 )
 
 vendor_engine = create_engine(
