@@ -125,6 +125,14 @@ class OrgRoleService(UTCDateTimeMixin):
                     detail="Cannot modify admin flags of default roles"
                 )
 
+        # A default module the role can't even view is a broken landing
+        # page — the role lands there on login and every data call the
+        # page makes 403s (confirmed live: EE-R&T defaulted to "AI
+        # Analytic Dashboard" with can_view unset). Require can_view on
+        # the new default before allowing the switch.
+        if role_data.default_module_id is not None and role_data.default_module_id != role.default_module_id:
+            self._require_view_permission(role_id, role_data.default_module_id)
+
         update_data = role_data.dict(exclude_unset=True)
         for key, value in update_data.items():
             setattr(role, key, value)
@@ -141,6 +149,23 @@ class OrgRoleService(UTCDateTimeMixin):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to update role"
+            )
+
+    def _require_view_permission(self, role_id: UUID, module_id: int) -> None:
+        """Raise 400 unless the role already has can_view=True on module_id.
+        Shared by the "set as default module" and "keep the current
+        default viewable" checks below — both enforce the same invariant:
+        a role's default_module_id must always be a module it can view."""
+        perm = self.db.query(OrgRolePermission).filter(
+            OrgRolePermission.org_role_id == role_id,
+            OrgRolePermission.module_id == module_id
+        ).first()
+        if not perm or not perm.can_view:
+            module = self.db.query(Module).filter(Module.id == module_id).first()
+            module_name = module.name if module else f"id {module_id}"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Grant View permission on '{module_name}' before setting it as the default module."
             )
 
     def delete_role(self, role_id: UUID) -> bool:
@@ -167,6 +192,22 @@ class OrgRoleService(UTCDateTimeMixin):
     ) -> List[OrgRolePermission]:
         """Set permissions for a role (replaces existing permissions)."""
         role = self.get_role(role_id)
+
+        # This replaces the whole permission set, so a default module left
+        # out of `permissions` (or included with can_view=False) would
+        # silently lose view access — same broken-landing-page invariant
+        # as _require_view_permission, checked against the incoming set
+        # instead of the current one since existing rows are deleted below.
+        if role.default_module_id is not None:
+            default_perm = next((p for p in permissions if p.module_id == role.default_module_id), None)
+            if default_perm is None or not default_perm.can_view:
+                module = self.db.query(Module).filter(Module.id == role.default_module_id).first()
+                module_name = module.name if module else f"id {role.default_module_id}"
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"'{module_name}' is this role's default module and must keep View "
+                           f"permission. Change the default module first if you want to remove it."
+                )
 
         # Delete existing permissions
         self.db.query(OrgRolePermission).filter(
@@ -222,6 +263,18 @@ class OrgRoleService(UTCDateTimeMixin):
     ) -> OrgRolePermission:
         """Update a specific module permission for a role."""
         role = self.get_role(role_id)
+
+        # Same invariant as set_role_permissions: don't let the role's
+        # current default module lose View permission out from under it.
+        if (role.default_module_id == module_id
+                and permission_data.get("can_view") is False):
+            module = self.db.query(Module).filter(Module.id == module_id).first()
+            module_name = module.name if module else f"id {module_id}"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{module_name}' is this role's default module and must keep View "
+                       f"permission. Change the default module first if you want to remove it."
+            )
 
         # Check if permission exists
         perm = self.db.query(OrgRolePermission).filter(

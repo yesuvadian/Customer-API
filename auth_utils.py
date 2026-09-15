@@ -268,8 +268,10 @@ def check_active_billing(user, org, db):
 
     now = datetime.now(timezone.utc)
 
-    # Active trial covers all access — no dept subscription required yet
-    if org.is_trial and org.trial_end_date and org.trial_end_date > now:
+    # Active trial covers all access — no dept subscription required yet.
+    # No trial_end_date set yet means an open-ended trial, not an expired one
+    # (matches the None-is-not-expired handling in auth_privilege.py).
+    if org.is_trial and (org.trial_end_date is None or org.trial_end_date > now):
         return
 
     # Resolve billing unit: use denormalized field when recompute is not pending
@@ -392,8 +394,10 @@ def _check_dept_level_billing(user, org, db, now):
     """
     from routers.billing import get_dept_depth, walk_up_tree
 
-    # Trial still active → skip all dept billing checks
-    if org.is_trial and org.trial_end_date and org.trial_end_date >= now:
+    # Trial still active → skip all dept billing checks.
+    # No trial_end_date set yet means an open-ended trial, not an expired one
+    # (matches the None-is-not-expired handling in auth_privilege.py).
+    if org.is_trial and (org.trial_end_date is None or org.trial_end_date >= now):
         return
 
     # Trial expired in dept-level mode
