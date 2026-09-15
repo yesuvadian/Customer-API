@@ -22,6 +22,41 @@ from models import (
     TrWfStatus,
 )
 from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
+from services.redis_cache import RedisCacheService
+
+# equipment_types/all-test-types/dropdown/*/department_ancestors are
+# admin-configured reference data (CategoryMaster/CategoryDetails/
+# OrgTestTemplate/OrgDepartment) that changes rarely, but a real
+# 50-concurrent-thread load test showed these exact lookup endpoints
+# dominating the slow-endpoint list under load - each one runs several
+# joined queries per call. LOOKUP_CACHE_TTL is a safety-net upper bound on
+# staleness (same 15-min TTL dashboard_service.py already uses); the CRUD
+# routers for this data (category_master.py, category_details.py,
+# org_test_templates.py, org_departments.py) also call
+# invalidate_lookup_cache() on every write so edits show up immediately
+# rather than waiting out the TTL.
+LOOKUP_CACHE_TTL = 900
+_LOOKUP_CACHE_PREFIX = "org::"
+
+
+def _cached_lookup(key: str, compute_fn):
+    cached = RedisCacheService.get(key)
+    if cached is not None:
+        return cached
+    result = compute_fn()
+    RedisCacheService.set(key, result, ttl=LOOKUP_CACHE_TTL)
+    return result
+
+
+def invalidate_lookup_cache() -> None:
+    """Clear every cached lookup (equipment_types/all_test_types/dropdown/
+    department_ancestors) across ALL orgs. Called from the CRUD routers for
+    CategoryMaster, CategoryDetails, OrgTestTemplate, and OrgDepartment -
+    edits to this reference data are rare admin operations, so a broad
+    flush (rather than precisely targeting just the affected org/master) is
+    the simpler, safer choice: correctness here matters far more than
+    saving a few cache rebuilds on an infrequent write path."""
+    RedisCacheService.delete_pattern(f"{_LOOKUP_CACHE_PREFIX}*")
 
 # Legacy TestingRequestStatus enum -> display label/color, used to label
 # get_breakdown() buckets for requests that never entered the tr_wf_* engine
@@ -1389,6 +1424,12 @@ class TestingRequestService:
         exclusion list AND that either carries description='Testing Equipment' OR
         has at least one active CategoryDetail — so newly created equipment types
         appear here as soon as they have test/maintenance types defined."""
+        return _cached_lookup(
+            f"org::{org_id or 'global'}::equipment_types",
+            lambda: self._compute_equipment_types(org_id),
+        )
+
+    def _compute_equipment_types(self, org_id=None) -> list:
         masters = (
             self.db.query(CategoryMaster)
             .filter(
@@ -1482,13 +1523,24 @@ class TestingRequestService:
                 })
         return result
 
-    def list_all_test_types(self, category: str = None) -> list:
+    def list_all_test_types(self, category: str = None, org_id=None) -> list:
         """Return all CategoryDetails (test types) across ALL equipment types,
         with lifecycle flags resolved from OrgTestTemplate.
 
         Optionally filtered by category_type (test / maintenance / inspection /
         repair_lifecycle).  Used by the form when no equipment type is selected.
+
+        org_id only partitions the CACHE key here (defense against ever
+        serving one org's cached response to another) - CategoryMaster/
+        CategoryDetails have no organization_id column, so the underlying
+        query itself is org-agnostic by design, same as before caching.
         """
+        return _cached_lookup(
+            f"org::{org_id or 'global'}::all_test_types::{category or 'all'}",
+            lambda: self._compute_all_test_types(category),
+        )
+
+    def _compute_all_test_types(self, category: str = None) -> list:
         query = (
             self.db.query(CategoryDetails, CategoryMaster)
             .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
@@ -1586,8 +1638,17 @@ class TestingRequestService:
 
         return result
 
-    def get_dropdown_values(self, master_desc: str) -> list:
-        """Return CategoryDetails for the CategoryMaster identified by description."""
+    def get_dropdown_values(self, master_desc: str, org_id=None) -> list:
+        """Return CategoryDetails for the CategoryMaster identified by description.
+
+        org_id only partitions the CACHE key (see list_all_test_types for why -
+        CategoryMaster has no organization_id column)."""
+        return _cached_lookup(
+            f"org::{org_id or 'global'}::dropdown::{master_desc}",
+            lambda: self._compute_dropdown_values(master_desc),
+        )
+
+    def _compute_dropdown_values(self, master_desc: str) -> list:
         master = (
             self.db.query(CategoryMaster)
             .filter(

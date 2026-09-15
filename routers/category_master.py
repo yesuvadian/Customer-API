@@ -11,6 +11,7 @@ from schemas import (
     CategoryMasterResponse,
 )
 from services.category_master_service import CategoryMasterService
+from services.testing_request_service import invalidate_lookup_cache
 from models import CategoryMaster, CategoryDetails
 
 router = APIRouter(
@@ -32,13 +33,15 @@ def create_category_master(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    return CategoryMasterService.create_master_category(
+    result = CategoryMasterService.create_master_category(
         db=db,
         name=category.name,
         description=category.description,
         is_active=category.is_active,   # ✅ ADD
         created_by=current_user.id
     )
+    invalidate_lookup_cache()
+    return result
 
 @router.get(
     "/masters/equipment",
@@ -117,11 +120,13 @@ def update_category_master(
     updates = category_update.dict(exclude_unset=True)
     updates["modified_by"] = current_user.id
 
-    return CategoryMasterService.update_master_category(
+    result = CategoryMasterService.update_master_category(
         db=db,
         category_id=master_id,
         updates=updates
     )
+    invalidate_lookup_cache()
+    return result
 
 # ============================================================
 # DELETE MASTER CATEGORY
@@ -146,4 +151,5 @@ def delete_category_master(
 
     db.delete(master)
     db.commit()
+    invalidate_lookup_cache()
     return {"status": "success", "message": "Category deleted successfully"}

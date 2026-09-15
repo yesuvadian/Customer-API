@@ -9,6 +9,7 @@ from schemas import (
     CategoryDetailsCreate, CategoryDetailsUpdate, CategoryDetailsResponse
 )
 from services.category_details_service import CategoryDetailsService
+from services.testing_request_service import invalidate_lookup_cache
 
 router = APIRouter(
     prefix="/category_details",
@@ -59,7 +60,7 @@ def create_category_detail(
     current_user = Depends(get_current_user)
 ):
     """Create a new Category Detail linked to a Master"""
-    return CategoryDetailsService.create_category_detail(
+    result = CategoryDetailsService.create_category_detail(
         db=db,
         master_id=detail.category_master_id,
         name=detail.name,
@@ -67,6 +68,8 @@ def create_category_detail(
         is_active=detail.is_active,   # ✅ ADD
         created_by=current_user.id
     )
+    invalidate_lookup_cache()
+    return result
 
 # ---------------------------
 # LIST CATEGORY DETAILS
@@ -116,12 +119,14 @@ def update_category_detail(
     """Update a Category Detail"""
     updates = detail_update.dict(exclude_unset=True)
     updates['modified_by'] = current_user.id
-    
-    return CategoryDetailsService.update_category_detail(
-        db=db, 
-        detail_id=detail_id, 
+
+    result = CategoryDetailsService.update_category_detail(
+        db=db,
+        detail_id=detail_id,
         updates=updates
     )
+    invalidate_lookup_cache()
+    return result
 
 # ---------------------------
 # DELETE CATEGORY DETAIL
@@ -132,4 +137,6 @@ def delete_category_detail(detail_id: int, db: Session = Depends(get_db)):
     Delete a Category Detail by ID.
     Returns 404 if not found or 500 if deletion fails.
     """
-    return CategoryDetailsService.delete_category_detail(db=db, detail_id=detail_id)
+    result = CategoryDetailsService.delete_category_detail(db=db, detail_id=detail_id)
+    invalidate_lookup_cache()
+    return result

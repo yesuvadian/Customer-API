@@ -25,6 +25,7 @@ from schemas import (
     User as UserSchema
 )
 from services.org_department_service import OrgDepartmentService
+from services.testing_request_service import invalidate_lookup_cache
 from utils.upload_limits import read_and_validate_upload
 
 
@@ -78,6 +79,7 @@ def create_department(
                 db.commit()
                 run_billing_unit_recompute_job(str(org_id))
 
+    invalidate_lookup_cache()
     return new_dept
 
 
@@ -158,7 +160,9 @@ def update_department(
             detail="This department is an active billing unit. Remove it as a billing unit before deactivating.",
         )
 
-    return service.update_department(dept_id, dept_data, modified_by=current_user.id)
+    result = service.update_department(dept_id, dept_data, modified_by=current_user.id)
+    invalidate_lookup_cache()
+    return result
 
 
 @router.delete("/{dept_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -203,6 +207,7 @@ def delete_department(
         )
 
     service.delete_department(dept_id)
+    invalidate_lookup_cache()
     return None
 
 
@@ -517,4 +522,6 @@ async def bulk_import_departments(
         raise HTTPException(status_code=500, detail=f"Database error during commit: {exc}")
 
     imported_rows = total - failed - skipped
+    if imported_rows > 0:
+        invalidate_lookup_cache()
     return BulkDeptImportResult(total=total, created=imported_rows, skipped=skipped, failed=failed, errors=errors[:50])
