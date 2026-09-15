@@ -132,7 +132,7 @@ def date_add(calibration_date_str: str, validity_months: int) -> date:
     return cal_date + relativedelta(months=validity_months)
 
 
-def compute_interval_advisories(db: Session, org_id) -> list[dict]:
+def compute_interval_advisories(db: Session, org_id, department_ids: Optional[list] = None) -> list[dict]:
     """
     KPTCL spec §14.6: "AI calibration interval optimisation advisories."
     An AI Advisory only — per the spec's own blanket rule (§12 intro) that
@@ -161,6 +161,15 @@ def compute_interval_advisories(db: Session, org_id) -> list[dict]:
     advisory — same materiality discipline as the Deterioration Watch
     List's MIN_WATCH_HISTORY guard (a handful of data points proves
     nothing either way).
+
+    department_ids optionally narrows calibration cycles to one department
+    + its descendants (a leaf/branch dashboard scope) instead of the whole
+    organization. A department-scoped cohort is naturally more likely to
+    fall short of CALIBRATION_INTERVAL_MIN_CYCLES than the org-wide view —
+    that's the existing materiality gate doing its job, not a bug; it just
+    means fewer (or no) advisories for a small scope rather than a diluted
+    one. Leave it None for the org-wide view (the default every call site
+    used before this parameter existed).
     """
     import config as _config
 
@@ -172,10 +181,12 @@ def compute_interval_advisories(db: Session, org_id) -> list[dict]:
     max_months     = _config.CALIBRATION_INTERVAL_MAX_MONTHS
     min_months     = _config.CALIBRATION_INTERVAL_MIN_MONTHS
 
-    rows = (
+    query = (
         db.query(
             TestingRequest.test_type_id,
             CategoryDetails.name.label("test_type_name"),
+            Equipment.id.label("equipment_id"),
+            Equipment.ueic,
             Equipment.manufacturer,
             Equipment.model_number,
             TestResult.test_data,
@@ -188,11 +199,13 @@ def compute_interval_advisories(db: Session, org_id) -> list[dict]:
             TestingRequest.organization_id == org_id,
             TestingRequest.is_calibration.is_(True),
         )
-        .all()
     )
+    if department_ids:
+        query = query.filter(TestingRequest.department_id.in_(department_ids))
+    rows = query.all()
 
     cohorts: dict = {}
-    for test_type_id, test_type_name, manufacturer, model_number, test_data, tested_at in rows:
+    for test_type_id, test_type_name, equipment_id, ueic, manufacturer, model_number, test_data, tested_at in rows:
         if not manufacturer or not model_number:
             continue  # can't form a real cohort without knowing the model
         key = (test_type_id, manufacturer, model_number)
@@ -204,8 +217,21 @@ def compute_interval_advisories(db: Session, org_id) -> list[dict]:
         })
         data = test_data or {}
         result = (data.get("recommendation_type") or data.get("overall_result") or "").strip().lower()
-        validity = data.get("validity_months")
+        # validity_months comes back as a string here in real submissions —
+        # confirmed live: a request submitted through the actual result form
+        # stores test_data['validity_months'] as '9', '12', etc. (JSON string,
+        # not a number), which crashed the arithmetic below
+        # (current_validity - shorten_months) with a str-minus-int TypeError
+        # the very first time this ran against real (non-seeded) data. Only
+        # ever exercised before against hand-seeded rows with actual int
+        # values, so this never surfaced.
+        try:
+            validity = int(data.get("validity_months"))
+        except (TypeError, ValueError):
+            validity = None
         entry["cycles"].append({
+            "equipment_id": equipment_id,
+            "ueic": ueic,
             "is_fail": result == "fail",
             "validity_months": validity,
             "tested_at": tested_at,
@@ -245,6 +271,24 @@ def compute_interval_advisories(db: Session, org_id) -> list[dict]:
         if direction is None:
             continue  # no meaningful change to advise
 
+        # Per-equipment breakdown, worst-first — the cohort-level advisory
+        # tells you a make/model's calibration validity should change, but
+        # not which actual relays/meters made up that fail rate. Grouped by
+        # equipment_id (not by cycle) so an officer sees "this specific
+        # relay failed 3 of its 3 calibrations," not a flat cycle list.
+        units: dict = {}
+        for c in cycles:
+            u = units.setdefault(c["equipment_id"], {
+                "equipment_id": str(c["equipment_id"]) if c["equipment_id"] else None,
+                "ueic": c["ueic"],
+                "cycle_count": 0,
+                "fail_count": 0,
+            })
+            u["cycle_count"] += 1
+            if c["is_fail"]:
+                u["fail_count"] += 1
+        equipment = sorted(units.values(), key=lambda u: -u["fail_count"])
+
         advisories.append({
             "test_type_id": test_type_id,
             "test_type_name": entry["test_type_name"],
@@ -256,6 +300,7 @@ def compute_interval_advisories(db: Session, org_id) -> list[dict]:
             "current_validity_months": current_validity,
             "suggested_validity_months": suggested_validity,
             "direction": direction,
+            "equipment": equipment,
             "rationale": (
                 f"{fail_count} fail(s) in the last {sample_size} calibration cycles "
                 f"({fail_rate_pct}%) — consider {'extending' if direction == 'extend' else 'shortening'} "

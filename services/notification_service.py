@@ -2467,10 +2467,20 @@ class NotificationService:
                         extra_data=extra_data,
                     )
 
-                # If inapp channel: mark batch log sent right away
+                # If inapp channel: mark batch log sent right away — but only if it
+                # actually reached someone. An empty recipient list (bad role names,
+                # a dept-scoping miss, an @token that didn't resolve) previously still
+                # marked this "sent", which made the Notification Center Log tab
+                # indistinguishable from a real delivery and hid the failure entirely.
                 if tmpl.channel == "inapp":
-                    batch_log.status  = "sent"
-                    batch_log.sent_at = datetime.now(timezone.utc)
+                    if recipients:
+                        batch_log.status  = "sent"
+                        batch_log.sent_at = datetime.now(timezone.utc)
+                    else:
+                        batch_log.status = "skipped"
+                        batch_log.error_message = (
+                            f"No recipients resolved for roles {effective_roles}"
+                        )
 
                 # ── extra_recipient_emails → NotificationLogRecipient rows ────
                 if tmpl.channel == "email":
@@ -2496,9 +2506,10 @@ class NotificationService:
                             self.db.add(extra_rcpt)
 
                 if not recipients and not (tmpl.extra_recipient_emails):
-                    logger.debug(
+                    logger.warning(
                         f"[Notif] event={event_type!r} channel={tmpl.channel!r}: "
-                        f"no recipients for roles {effective_roles}"
+                        f"no recipients for roles {effective_roles} "
+                        f"(org={organization_id}, source={source_type}/{source_id})"
                     )
 
                 try:
@@ -2778,6 +2789,7 @@ class NotificationService:
         comment: Optional[str],
         is_terminal: bool,
         from_status_code: Optional[str],
+        status_name: Optional[str] = None,
         recipient_roles_override: Optional[list] = None,
     ) -> None:
         """
@@ -2798,6 +2810,12 @@ class NotificationService:
             "performed_by":    performed_by,
             "comment":         comment or "",
             "status_code":     status_code or "",
+            # Templates render {{status_name}} (a human label like "Under
+            # Review") — status_code alone is the stable API identifier
+            # (e.g. "under_review") and was never meant to be shown as-is.
+            # Fall back to the code, then a generic word, so the placeholder
+            # is never left unrendered even if TrWfStatus has no display name.
+            "status_name":     status_name or status_code or "Updated",
             "is_terminal":     str(is_terminal),
         }
         common = dict(

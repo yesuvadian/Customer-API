@@ -1356,6 +1356,7 @@ class RoutingRuleCreate(BaseModel):
     applicable_status_to:   Optional[str] = None
     channels_enabled:    List[str] = Field(default=["inapp"])
     recipient_roles_override: Optional[List[str]] = None
+    advanced_conditions: Optional[dict] = None  # e.g. {"activity_types": [...]}
     priority: int = Field(default=10, description="Higher priority wins. Default 10 for org rules.")
     followup_action: Optional[dict] = None  # auto follow-up ticket on alert/critical
     # Per-channel template overrides — NULL = use default template for that channel
@@ -1698,6 +1699,8 @@ def create_routing_rule(
         applicable_status_to=data.applicable_status_to,
         channels_enabled=data.channels_enabled,
         recipient_roles_override=data.recipient_roles_override,
+        advanced_conditions=data.advanced_conditions,
+        followup_action=data.followup_action,
         priority=data.priority,
         email_template_id=data.email_template_id,
         sms_template_id=data.sms_template_id,

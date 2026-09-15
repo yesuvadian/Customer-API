@@ -199,18 +199,21 @@ class EvaluationService:
         Evaluate a table field using any combination of:
           • table_evaluation.column_evaluations  — numeric threshold per column
           • table_evaluation aggregate rules     — aggregate threshold
-          • column_evaluation on column def      — dropdown severity map per column
-                                                   (template-driven, no table_evaluation
-                                                    block required for this path)
+          • column_evaluation on column def      — dropdown/calculated severity map per
+                                                   column (template-driven, no
+                                                   table_evaluation block required for
+                                                   this path)
         """
         ev = field.get("table_evaluation") or {}
         table_ev_enabled = bool(ev.get("enabled"))
 
-        # Also fire when any column carries a dropdown column_evaluation map
+        # Also fire when any column carries a column_evaluation map — dropdown/radio
+        # (manually selected) or calculated (e.g. a ROW_COMPARE-derived Pass/Fail
+        # computed client-side from a rated-setpoint LOOKUP column) alike.
         has_col_ev = any(
             col.get("column_evaluation")
             for col in field.get("columns", [])
-            if col.get("type") in ("dropdown", "radio")
+            if col.get("type") in ("dropdown", "radio", "calculated")
         )
 
         if not table_ev_enabled and not has_col_ev:
@@ -277,10 +280,10 @@ class EvaluationService:
                     except (ValueError, TypeError):
                         continue
 
-        # Dropdown per-column evaluation — reads column_evaluation from column defs
+        # Dropdown/calculated per-column evaluation — reads column_evaluation from column defs
         if has_col_ev:
             for col in field.get("columns", []):
-                if col.get("type") not in ("dropdown", "radio"):
+                if col.get("type") not in ("dropdown", "radio", "calculated"):
                     continue
                 col_ev = col.get("column_evaluation")
                 if not col_ev:
@@ -552,7 +555,7 @@ class EvaluationService:
             return None
 
         overall_status = [NORMAL, ALERT, CRITICAL][worst_rank]
-        return {
+        result = {
             "key":            key,
             "label":          field.get("label", key),
             "type":           "table",
@@ -561,6 +564,45 @@ class EvaluationService:
             "aggregate_result": None,
             "column_results": [],
         }
+
+        # Duval Triangle zone severity (services/duval_triangle.py) — a
+        # separate, gas-RATIO-based fault classification from the per-gas
+        # ppm bands evaluated above. A sample can pass every individual
+        # gas's ppm band and still sit in a High/Critical Duval zone, so
+        # without this the alert engine would never fire for that case even
+        # though the Deterioration Watch List (routers/analytics.py) already
+        # flags it from the same duval_watchlist_severity config. Only zones
+        # listed there (e.g. T2/T3/D1/D2/DT, not PD/T1) can raise status here
+        # — keyed off the field flag, not the field/template name, per the
+        # is_duval_triangle_source comment above.
+        watchlist_severity = field.get("duval_watchlist_severity")
+        if field.get("is_duval_triangle_source") and watchlist_severity:
+            from services.duval_triangle import classify_duval_triangle, gas_values_from_test_data
+            # Shared with services/reporting_service.py's DGA Trend Report and
+            # routers/analytics.py's Deterioration Watch List — same "which
+            # reading counts" extraction, kept in one place rather than
+            # re-parsed here too.
+            gas_vals = gas_values_from_test_data(test_data)
+            duval = classify_duval_triangle(
+                gas_vals.get("ch4") or 0,
+                gas_vals.get("c2h4") or 0,
+                gas_vals.get("c2h2") or 0,
+            )
+            zone = duval.get("zone")
+            severity_word = watchlist_severity.get(zone) if zone else None
+            duval_status = {"Critical": CRITICAL, "High": ALERT}.get(severity_word)
+            if duval_status:
+                result["duval_zone"] = zone
+                result["duval_meaning"] = duval.get("meaning")
+                result["duval_severity"] = severity_word
+                if _STATUS_RANK[duval_status] > _STATUS_RANK[result["status"]]:
+                    result["status"] = duval_status
+                    result["remedial_action_text"] = (
+                        f"Duval Triangle zone {zone} ({duval.get('meaning')}) — "
+                        f"{duval.get('advisory')}"
+                    )
+
+        return result
 
     @staticmethod
     def _eval_table_aggregate(table_data: list, ev: dict) -> tuple[str, dict]:

@@ -25,6 +25,7 @@ from schemas import (
 )
 from services.repair_workflow_service import RepairWorkflowService
 from services.repair_timeliness_service import RepairTimelinessService
+from utils.upload_limits import read_and_validate_upload
 
 router = APIRouter(
     prefix="/repair-workflows",
@@ -291,7 +292,7 @@ async def upload_stage_file(
     - Patches form_data[field_key] with the document reference automatically.
     """
     try:
-        file_bytes = await file.read()
+        file_bytes = await read_and_validate_upload(file, category="document")
         return RepairWorkflowService(db).upload_stage_file(
             workflow_id=workflow_id,
             stage_id=stage_id,

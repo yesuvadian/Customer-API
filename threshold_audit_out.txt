@@ -1,0 +1,29 @@
+28 issue(s) found
+ - capacitance_tandelta_ct.tandelta_readings: no default_rows/id-col detected, produced keys ['CT % Tan Delta (IEC 60044-1)']
+ - tandelta_comparison.comparison_values: no default_rows/id-col detected, produced keys ['tan δ @ 20°C (IEC)']
+ - tandelta_nct.nct_readings: no default_rows/id-col detected, produced keys ['NCT % Tan Delta (IEC)']
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'B' Phase" used by both 'bushing_400kv_test_results' and 'bushing_220kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'R' Phase" used by both 'bushing_400kv_test_results' and 'bushing_220kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'Y' Phase" used by both 'bushing_400kv_test_results' and 'bushing_220kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'B' Phase" used by both 'bushing_220kv_test_results' and 'bushing_66kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'R' Phase" used by both 'bushing_220kv_test_results' and 'bushing_66kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'Y' Phase" used by both 'bushing_220kv_test_results' and 'bushing_66kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'B' Phase" used by both 'bushing_66kv_test_results' and 'bushing_33kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'R' Phase" used by both 'bushing_66kv_test_results' and 'bushing_33kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'Y' Phase" used by both 'bushing_66kv_test_results' and 'bushing_33kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'B' Phase" used by both 'bushing_33kv_test_results' and 'bushing_11kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'R' Phase" used by both 'bushing_33kv_test_results' and 'bushing_11kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key="'Y' Phase" used by both 'bushing_33kv_test_results' and 'bushing_11kv_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key='LV-GND' used by both 'winding_test_results' and 'idax_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key='HV-LV' used by both 'winding_test_results' and 'idax_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key='HV-GND' used by both 'winding_test_results' and 'idax_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key='LV-TV' used by both 'winding_test_results' and 'idax_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key='(HV+LV)-GND' used by both 'winding_test_results' and 'idax_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key='TV-GND' used by both 'winding_test_results' and 'idax_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key='(HV+LV)-TV' used by both 'winding_test_results' and 'idax_test_results'
+ - COLLISION: capacitance_tandelta_transformer parameter_key='TV-HV' used by both 'winding_test_results' and 'idax_test_results'
+ - sfra_transformer.correlation_analysis: rows with NO band coverage: ['HV-LV', 'HV-N', 'HV-TV', 'LV-N', 'LV-TV', 'TV-N']
+ - COLLISION: tan_delta_capacitance_idax parameter_key="'B' Phase" used by both 'bushing_220kv_results' and 'bushing_66kv_results'
+ - COLLISION: tan_delta_capacitance_idax parameter_key="'R' Phase" used by both 'bushing_220kv_results' and 'bushing_66kv_results'
+ - COLLISION: tan_delta_capacitance_idax parameter_key="'Y' Phase" used by both 'bushing_220kv_results' and 'bushing_66kv_results'
+ - sfra_routine.correlation_analysis: rows with NO band coverage: ['(HV+LV)-GND', '(HV+LV)-TV', 'HV-GND', 'HV-LV', 'LV-GND', 'LV-TV', 'TV-GND', 'TV-HV']

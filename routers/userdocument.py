@@ -9,8 +9,7 @@ from datetime import datetime,timezone
 from schemas import UserDocumentCreate, UserDocumentResponse, UserDocumentUpdate
 from services.userdocumentservice import UserDocumentService
 from utils.common_service import UTCDateTimeMixin
-import magic
-import mimetypes
+from utils.upload_limits import read_and_validate_upload, detect_mime
 
 router = APIRouter(
     prefix="/user_documents",
@@ -33,15 +32,11 @@ async def create_user_document(
 ):
     service = UserDocumentService(db)
 
-    # Read file
-    contents = await file.read()
+    # Read, size-cap, and validate against the real (sniffed) content type.
+    contents = await read_and_validate_upload(file, category="document")
 
     # 🔥 Detect MIME type from actual content
-    try:
-        detected_content_type = magic.from_buffer(contents, mime=True)
-    except Exception:
-        detected_content_type, _ = mimetypes.guess_type(file.filename)
-        detected_content_type = detected_content_type or "application/octet-stream"
+    detected_content_type = detect_mime(contents, file.filename)
 
     # Convert expiry_date
     expiry_date_dt = None

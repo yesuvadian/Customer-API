@@ -25,6 +25,7 @@ from schemas import (
     User as UserSchema
 )
 from services.org_department_service import OrgDepartmentService
+from utils.upload_limits import read_and_validate_upload
 
 
 # ── Dept bulk-import response schema ─────────────────────────────────────────
@@ -430,10 +431,7 @@ async def bulk_import_departments(
     current_user: User = Depends(require_org_admin),
 ):
     """Parse Excel and create 6-level department hierarchy."""
-    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Please upload a valid Excel file (.xlsx or .xls)")
-
-    contents = await file.read()
+    contents = await read_and_validate_upload(file, category="spreadsheet")
     try:
         wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
     except Exception:

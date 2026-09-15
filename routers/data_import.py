@@ -28,6 +28,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+from utils.upload_limits import read_and_validate_upload
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
@@ -412,7 +414,7 @@ async def extract_file(
     have a serial are returned exactly as before — no DB row is created for
     them here; they still flow through the existing /submit endpoint.
     """
-    file_bytes = await file.read()
+    file_bytes = await read_and_validate_upload(file, category=("document", "spreadsheet"))
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 

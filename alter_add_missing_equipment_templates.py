@@ -59,8 +59,13 @@ INSPECTION_CATEGORIES = [
 ]
 
 
-def _upsert_template(db, template_key: str) -> bool:
-    """Idempotently insert the OrgTestTemplate row for template_key. Returns True if inserted."""
+def _upsert_template(db, template_key: str, test_type_id: int | None = None) -> bool:
+    """Idempotently insert the OrgTestTemplate row for template_key, linked to
+    its CategoryDetails row via test_type_id — the id the Template Designer's
+    category-type grouping (Test/Maintenance/Inspection) resolves through.
+    Left unset (None) for the Inspection key, which deliberately has no
+    single CategoryDetails row of its own (see this module's docstring).
+    Returns True if inserted."""
     template_data = TEST_TEMPLATES.get(template_key)
     if not template_data:
         print(f"[WARN] {template_key!r} not found in TEST_TEMPLATES — skipping")
@@ -73,20 +78,25 @@ def _upsert_template(db, template_key: str) -> bool:
     if existing:
         existing.template_data = template_data
         existing.is_system = True
+        if test_type_id is not None and existing.test_type_id is None:
+            existing.test_type_id = test_type_id
         return False
 
     db.add(OrgTestTemplate(
         id=uuid.uuid4(),
         org_id=None,
         template_key=template_key,
+        test_type_id=test_type_id,
         template_data=template_data,
         is_system=True,
     ))
     return True
 
 
-def _upsert_category_detail(db, category_master_id: int, name: str, category_type: str) -> bool:
-    """Idempotently insert a disabled CategoryDetails row. Returns True if inserted."""
+def _upsert_category_detail(db, category_master_id: int, name: str, category_type: str) -> tuple[CategoryDetails, bool]:
+    """Idempotently insert a disabled CategoryDetails row. Returns
+    (row, was_inserted) — the row (existing or newly created) so its id can
+    be wired onto the matching OrgTestTemplate.test_type_id."""
     existing = db.query(CategoryDetails).filter_by(
         category_master_id=category_master_id, name=name,
     ).first()
@@ -96,15 +106,17 @@ def _upsert_category_detail(db, category_master_id: int, name: str, category_typ
         # earlier run) — only fill in category_type if it was blank.
         if not existing.category_type:
             existing.category_type = category_type
-        return False
+        return existing, False
 
-    db.add(CategoryDetails(
+    detail = CategoryDetails(
         category_master_id=category_master_id,
         name=name,
         category_type=category_type,
         is_active=False,
-    ))
-    return True
+    )
+    db.add(detail)
+    db.flush()  # assign detail.id before the caller reads it
+    return detail, True
 
 
 def run(db) -> None:
@@ -121,20 +133,28 @@ def run(db) -> None:
         maintenance_key = f"{prefix}_maintenance"
         inspection_key  = f"{prefix}_inspection"
 
-        for key in (test_key, maintenance_key, inspection_key):
-            if _upsert_template(db, key):
-                templates_inserted += 1
-
         test_name = TEST_TEMPLATES[test_key]["name"]
         maint_name = TEST_TEMPLATES[maintenance_key]["name"]
 
-        if _upsert_category_detail(db, master.id, test_name, "test"):
-            details_inserted += 1
-        if _upsert_category_detail(db, master.id, maint_name, "maintenance"):
-            details_inserted += 1
+        # CategoryDetails rows first — their ids are what the matching
+        # OrgTestTemplate row's test_type_id needs to point at.
+        test_detail, inserted = _upsert_category_detail(db, master.id, test_name, "test")
+        details_inserted += inserted
+        maint_detail, inserted = _upsert_category_detail(db, master.id, maint_name, "maintenance")
+        details_inserted += inserted
         for cat in INSPECTION_CATEGORIES:
-            if _upsert_category_detail(db, master.id, cat, "inspection"):
-                details_inserted += 1
+            _, inserted = _upsert_category_detail(db, master.id, cat, "inspection")
+            details_inserted += inserted
+
+        # Inspection has no single CategoryDetails row of its own (see
+        # module docstring — it resolves through the 6 generic categories
+        # above instead), so its OrgTestTemplate row is left unlinked.
+        if _upsert_template(db, test_key, test_type_id=test_detail.id):
+            templates_inserted += 1
+        if _upsert_template(db, maintenance_key, test_type_id=maint_detail.id):
+            templates_inserted += 1
+        if _upsert_template(db, inspection_key):
+            templates_inserted += 1
 
         db.flush()
         print(f"[OK] {equip_name}: templates ready, CategoryDetails ready (all disabled)")

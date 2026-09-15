@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, text
 from models import TestResult
 from datetime import datetime, timedelta
+from utils.sequence_locks import TESTING_REQUEST_NUMBER_LOCK
 
 from models import (
     TestingRequest, TestingRequestStatus, User,
@@ -132,55 +133,105 @@ class TestingRequestService:
         """
         Return (is_multi_session, total_sessions_planned, session_interval_days)
         from template's supports_multi_session / typical_total_sessions /
-        typical_session_interval_days. Same pattern as _resolve_is_cumulative().
+        typical_session_interval_days. Same DB-then-static-fallback pattern
+        as _resolve_is_cumulative()/_resolve_is_calibration() — see
+        _resolve_is_calibration's docstring for why the DB-only lookup alone
+        silently misses this for any org other than whichever one the
+        global template's test_type_id happened to be seeded against.
         """
         if not test_type_id:
             return False, None, None
+
+        def _multi_session_result(data: dict):
+            if data.get("supports_multi_session") or data.get("multi_session"):
+                session_types = data.get("session_types") or []
+                # Derive total from session_types length; fall back to explicit value
+                total = len(session_types) if session_types else data.get("typical_total_sessions")
+                return True, total, data.get("typical_session_interval_days")
+            return None
+
         tpl = (
             self.db.query(OrgTestTemplate)
             .filter(OrgTestTemplate.test_type_id == test_type_id)
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )
-        if not tpl:
-            return False, None, None
-        data = tpl.template_data or {}
-        if data.get("supports_multi_session") or data.get("multi_session"):
-            session_types = data.get("session_types") or []
-            # Derive total from session_types length; fall back to explicit value
-            total = len(session_types) if session_types else data.get("typical_total_sessions")
-            return (
-                True,
-                total,
-                data.get("typical_session_interval_days"),
-            )
+        if tpl:
+            result = _multi_session_result(tpl.template_data or {})
+            if result:
+                return result
+
+        # Fall back to test_templates.py static dict via test type name
+        try:
+            from test_templates import TEST_TYPE_TO_TEMPLATE, get_template_by_key
+            detail = self.db.query(CategoryDetails).filter(CategoryDetails.id == test_type_id).first()
+            if detail:
+                tmpl_key = TEST_TYPE_TO_TEMPLATE.get(detail.name)
+                if tmpl_key:
+                    static_tpl = get_template_by_key(tmpl_key)
+                    if static_tpl:
+                        result = _multi_session_result(static_tpl)
+                        if result:
+                            return result
+        except Exception:
+            pass
+
         return False, None, None
 
     def _resolve_is_calibration(self, test_type_id) -> bool:
         """
         Return True if the template has enable_calibration=true OR a DATE_ADD rule.
         Covers both legacy flag-based templates and rule-driven templates.
+        Checks DB OrgTestTemplate first, then falls back to test_templates.py
+        static dict — same two-step pattern as _resolve_is_cumulative(), for
+        the same reason: OrgTestTemplate.test_type_id on the global (org_id=
+        None) row is whichever org's CategoryDetails id happened to be first
+        when provision_global_defaults() seeded it (see
+        OrgTestTemplateService.provision_global_defaults's unscoped
+        `CategoryDetails.filter(name == type_name).first()`), so a different
+        org's CategoryDetails.id for the SAME-NAMED test type won't match it
+        at all. Confirmed live: an org whose "Protection Relay Calibration
+        and History" CategoryDetails.id was 102 got is_calibration=False on
+        every request, because the seeded global template's test_type_id was
+        45 (some other org's row for the same name) — the exact-id lookup
+        below silently found nothing for that org's own id every time.
         """
         if not test_type_id:
             return False
+
+        def _has_calibration(data: dict) -> bool:
+            if data.get("enable_calibration"):
+                return True
+            return any(
+                (r.get("type") or "").upper() == "DATE_ADD"
+                for r in data.get("rules", [])
+            )
+
         tpl = (
             self.db.query(OrgTestTemplate)
             .filter(OrgTestTemplate.test_type_id == test_type_id)
             .order_by(OrgTestTemplate.version.desc())
             .first()
         )
-        if not tpl:
-            return False
-        data = tpl.template_data or {}
-        if data.get("enable_calibration"):
+        if tpl and _has_calibration(tpl.template_data or {}):
             return True
-        return any(
-            (r.get("type") or "").upper() == "DATE_ADD"
-            for r in data.get("rules", [])
-        )
+
+        # Fall back to test_templates.py static dict via test type name
+        try:
+            from test_templates import TEST_TYPE_TO_TEMPLATE, get_template_by_key
+            detail = self.db.query(CategoryDetails).filter(CategoryDetails.id == test_type_id).first()
+            if detail:
+                tmpl_key = TEST_TYPE_TO_TEMPLATE.get(detail.name)
+                if tmpl_key:
+                    static_tpl = get_template_by_key(tmpl_key)
+                    if static_tpl and _has_calibration(static_tpl):
+                        return True
+        except Exception:
+            pass
+
+        return False
 
     def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
-        request_number = self._generate_request_number(org_id=data.get("organization_id"))
         test_type_id = data.get("test_type_id")
         is_cumulative = self._resolve_is_cumulative(test_type_id)
         is_calibration = self._resolve_is_calibration(test_type_id)
@@ -189,48 +240,64 @@ class TestingRequestService:
         _is_multi = data.get("is_multi_session") or _tpl_multi
         _total    = data.get("total_sessions_planned") or _tpl_sessions
         _interval = data.get("session_interval_days") or _tpl_interval
-        request = TestingRequest(
-            request_number=request_number,
-            title=data["title"],
-            description=data.get("description"),
-            transformer_type=data.get("transformer_type"),
-            transformer_rating=data.get("transformer_rating"),
-            manufacturer=data.get("manufacturer"),
-            serial_number=data.get("serial_number"),
-            equipment_type_id=data.get("equipment_type_id"),
-            test_type_id=test_type_id,
-            equipment_id=data.get("equipment_id"),
-            request_category=data.get("request_category", "test"),
-            organization_id=data.get("organization_id"),
-            department_id=data.get("department_id"),
-            zone=data.get("zone"),
-            ce_circle=data.get("ce_circle"),
-            se_division=data.get("se_division"),
-            ee_subdivision=data.get("ee_subdivision"),
-            aee_section=data.get("aee_section"),
-            ae_je=data.get("ae_je"),
-            assigned_tester_id=data.get("assigned_tester_id"),
-            priority=data.get("priority", "normal"),
-            requested_date=data.get("requested_date"),
-            due_date=data.get("due_date"),
-            scheduled_start_date=data.get("scheduled_start_date"),
-            notes=data.get("notes"),
-            status=TestingRequestStatus.draft,
-            originator_id=originator_id,
-            created_by=originator_id,
-            is_multi_session=bool(_is_multi),
-            total_sessions_planned=_total,
-            session_interval_days=_interval,
-            is_cumulative=is_cumulative,
-            is_calibration=is_calibration,
-            is_schedule_template=data.get("is_schedule_template", False),
-            source_schedule_id=data.get("source_schedule_id"),
-            surveillance_workflow_id=data.get("surveillance_workflow_id"),
-            surveillance_quarter=data.get("surveillance_quarter"),
-        )
-        self.db.add(request)
-        self.db.commit()
-        self.db.refresh(request)
+
+        # _generate_request_number() reads the current MAX sequence and adds
+        # 1 - not atomic, so two concurrent creates for the same org/year
+        # could read the same MAX before either commits and compute the
+        # identical "next" number, which the unique constraint on
+        # request_number then rejects with an IntegrityError. A real
+        # concurrent load test (5+ simultaneous creates) reproduced this;
+        # the same requests run sequentially never collide.
+        # TESTING_REQUEST_NUMBER_LOCK (see utils/sequence_locks.py) - shared
+        # with every other service that also writes TestingRequest.
+        # request_number (approval_service's repair-TR auto-create,
+        # direct_submission_service) - serializes generate-then-insert-then-
+        # commit across ALL of them, not just this function, so no two
+        # threads anywhere can read the same MAX before one has committed.
+        with TESTING_REQUEST_NUMBER_LOCK:
+            request_number = self._generate_request_number(org_id=data.get("organization_id"))
+            request = TestingRequest(
+                request_number=request_number,
+                title=data["title"],
+                description=data.get("description"),
+                transformer_type=data.get("transformer_type"),
+                transformer_rating=data.get("transformer_rating"),
+                manufacturer=data.get("manufacturer"),
+                serial_number=data.get("serial_number"),
+                equipment_type_id=data.get("equipment_type_id"),
+                test_type_id=test_type_id,
+                equipment_id=data.get("equipment_id"),
+                request_category=data.get("request_category", "test"),
+                organization_id=data.get("organization_id"),
+                department_id=data.get("department_id"),
+                zone=data.get("zone"),
+                ce_circle=data.get("ce_circle"),
+                se_division=data.get("se_division"),
+                ee_subdivision=data.get("ee_subdivision"),
+                aee_section=data.get("aee_section"),
+                ae_je=data.get("ae_je"),
+                assigned_tester_id=data.get("assigned_tester_id"),
+                priority=data.get("priority", "normal"),
+                requested_date=data.get("requested_date"),
+                due_date=data.get("due_date"),
+                scheduled_start_date=data.get("scheduled_start_date"),
+                notes=data.get("notes"),
+                status=TestingRequestStatus.draft,
+                originator_id=originator_id,
+                created_by=originator_id,
+                is_multi_session=bool(_is_multi),
+                total_sessions_planned=_total,
+                session_interval_days=_interval,
+                is_cumulative=is_cumulative,
+                is_calibration=is_calibration,
+                is_schedule_template=data.get("is_schedule_template", False),
+                source_schedule_id=data.get("source_schedule_id"),
+                surveillance_workflow_id=data.get("surveillance_workflow_id"),
+                surveillance_quarter=data.get("surveillance_quarter"),
+            )
+            self.db.add(request)
+            self.db.commit()
+            self.db.refresh(request)
         return request
 
     def get_request(self, request_id: UUID) -> TestingRequest:

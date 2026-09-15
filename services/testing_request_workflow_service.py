@@ -782,6 +782,7 @@ class TestingRequestWorkflowService:
         action_code: str,
         role_id: Optional[UUID] = None,
         comment: Optional[str] = None,
+        overwrite_schedule_ids: Optional[list[str]] = None,
     ) -> tuple[bool, str]:
         """
         Generic advance for any tr_wf_* action (return, complete, close, reject, etc.).
@@ -797,6 +798,7 @@ class TestingRequestWorkflowService:
                 performed_by_id=user.id,
                 role_id=role_id,
                 comment=comment,
+                overwrite_schedule_ids=overwrite_schedule_ids,
             )
             testing_request.modified_by = user.id
             if action_code == "submit_results":

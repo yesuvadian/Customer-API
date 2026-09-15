@@ -10,10 +10,18 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from auth_utils import get_current_user
+from utils.upload_limits import read_and_validate_upload, detect_mime, safe_extension_for_mime
 
 router = APIRouter(prefix="/upload", tags=["File Upload"])
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "documents")
+# Defaults to a local folder for single-instance/dev use. For a multi-instance
+# deployment, set UPLOAD_DIR in .env to a network share or object-storage
+# mount point shared by every instance — a file saved on one instance must
+# be readable from the others, which a local path alone cannot guarantee.
+UPLOAD_DIR = os.getenv(
+    "UPLOAD_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "uploads", "documents"),
+)
 
 
 @router.post("/file")
@@ -23,13 +31,16 @@ async def upload_file(
 ):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-    ext = os.path.splitext(file.filename or "file")[1]
-    stored_name = f"{uuid.uuid4()}{ext}"
-    dest = os.path.join(UPLOAD_DIR, stored_name)
-
-    content = await file.read()
+    content = await read_and_validate_upload(file, category="document")
     if not content:
         raise HTTPException(status_code=400, detail="Empty file")
+
+    # Derive the stored extension from the detected content, never from the
+    # client-supplied filename, to prevent extension spoofing on disk.
+    detected_type = detect_mime(content, file.filename)
+    ext = safe_extension_for_mime(detected_type)
+    stored_name = f"{uuid.uuid4()}{ext}"
+    dest = os.path.join(UPLOAD_DIR, stored_name)
 
     with open(dest, "wb") as f:
         f.write(content)
@@ -39,7 +50,7 @@ async def upload_file(
         "file_url":  relative_url,
         "file_name": file.filename,
         "file_size": len(content),
-        "mime_type": file.content_type,
+        "mime_type": detected_type,
     }
 
 

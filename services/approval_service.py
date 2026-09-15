@@ -15,10 +15,12 @@ from models import (
     RequestCategory,
     TestingRequest,
     TestingRequestStatus,
+    TestRequestSchedule,
     TestResult,
     User,
 )
 from utils.common_service import UTCDateTimeMixin
+from utils.sequence_locks import TESTING_REQUEST_NUMBER_LOCK
 
 
 class ApprovalService:
@@ -268,6 +270,80 @@ class ApprovalService:
             "test_results": test_results,
         }
 
+    def check_schedule_conflicts(self, recommendation_id: UUID) -> dict:
+        """
+        Read-only pre-check for the approval screen: for a pending
+        recommendation whose next_action would create operational schedules
+        on approval (maintenance/inspection/test), report every existing
+        schedule for each recommended test type (not just one — duplicates
+        can legitimately exist, e.g. a recurring schedule plus one-off
+        entries) so the approver can pick exactly which one(s) to overwrite,
+        delete, or leave alone before committing to approve. Mirrors the
+        exact equipment_id/test_type_id resolution WorkflowDispatchService
+        uses, without creating or modifying anything.
+        """
+        from models import CategoryDetails
+
+        rec = self.db.query(Recommendation).filter(Recommendation.id == recommendation_id).first()
+        if not rec:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
+
+        if rec.next_action not in (
+            NextActionType.maintenance, NextActionType.inspection, NextActionType.test,
+        ):
+            return {"conflicts": []}
+
+        request = self.db.query(TestingRequest).filter(TestingRequest.id == rec.testing_request_id).first()
+        if not request or not request.equipment_id:
+            return {"conflicts": []}
+
+        # Scoped to the ticket's OWN test type only — not the full
+        # rec.test_types list. A recommendation can name additional test
+        # types as separate follow-up suggestions (dispatch still creates/
+        # keeps schedules for those, unrelated to this check), but this
+        # reviewer is approving results for one specific test, so the
+        # overwrite prompt should only ever be about that one.
+        test_type_ids: list[int] = [request.test_type_id] if request.test_type_id else []
+
+        # Resolve display names once, keyed by test_type_id — never trust a
+        # schedule row's own `title` for this (it can be stale/mismatched
+        # from however it was originally created).
+        tt_names = {}
+        if test_type_ids:
+            for row in (
+                self.db.query(CategoryDetails)
+                .filter(CategoryDetails.id.in_(test_type_ids))
+                .all()
+            ):
+                tt_names[row.id] = row.name
+
+        conflicts = []
+        for tid in test_type_ids:
+            existing_rows = (
+                self.db.query(TestRequestSchedule)
+                .filter(
+                    TestRequestSchedule.equipment_id == request.equipment_id,
+                    TestRequestSchedule.test_type_id == tid,
+                    TestRequestSchedule.is_deleted == False,
+                )
+                .order_by(TestRequestSchedule.next_run_date)
+                .all()
+            )
+            for existing in existing_rows:
+                conflicts.append({
+                    "test_type_id": tid,
+                    "test_type_name": tt_names.get(tid),
+                    "schedule_id": str(existing.id),
+                    "equipment_id": str(request.equipment_id),
+                    "title": existing.title,
+                    "frequency": existing.frequency.value if existing.frequency else None,
+                    "next_run_date": existing.next_run_date.isoformat() if existing.next_run_date else None,
+                    "is_recurring": existing.is_recurring,
+                    "is_active": existing.is_active,
+                })
+
+        return {"conflicts": conflicts}
+
     def approve_recommendation(
         self,
         recommendation_id: UUID,
@@ -276,6 +352,7 @@ class ApprovalService:
         schedule_start_date: Optional[str] = None,
         schedule_end_date:   Optional[str] = None,
         schedule_frequency:  Optional[str] = None,
+        overwrite_schedule_ids: Optional[List[str]] = None,
     ) -> dict:
         rec = self.db.query(Recommendation).filter(Recommendation.id == recommendation_id).first()
         if not rec:
@@ -356,7 +433,9 @@ class ApprovalService:
         dispatch_result = {}
         if request:
             from services.workflow_dispatch_service import WorkflowDispatchService
-            dispatch_result = WorkflowDispatchService(self.db).dispatch(request, rec, approver_id)
+            dispatch_result = WorkflowDispatchService(self.db).dispatch(
+                request, rec, approver_id, overwrite_schedule_ids=overwrite_schedule_ids,
+            )
 
         return {
             "id": str(rec.id),
@@ -395,37 +474,43 @@ class ApprovalService:
         and trigger the 10-stage RepairWorkflow for the equipment.
         """
         now = datetime.now(timezone.utc)
-        rn = self._generate_tr_number("RL")
-
         failure_category = td.get("failure_category", "")
         failure_date = td.get("failure_date", "")
         fr_title = source_request.title or source_request.request_number
 
-        # ── RL- ticket (traceability / audit record) ──────────────────────────
-        repair_tr = TestingRequest(
-            request_number=rn,
-            title=f"[Repair] {fr_title}",
-            description=(
-                f"Auto-created from Failure Registry approval.\n"
-                f"Source FR: {source_request.request_number}\n"
-                f"Failure Category: {failure_category}\n"
-                f"Failure Date: {failure_date}"
-            ),
-            request_category=RequestCategory.repair_lifecycle,
-            equipment_id=source_request.equipment_id,
-            organization_id=source_request.organization_id,
-            department_id=source_request.department_id,
-            priority=source_request.priority or "normal",
-            status=TestingRequestStatus.submitted,
-            is_direct_submission=False,
-            source_failure_id=source_request.id,     # traceability FK
-            originator_id=source_request.originator_id,
-            created_by=approver_id,
-            requested_date=now,
-        )
-        self.db.add(repair_tr)
-        self.db.commit()
-        self.db.refresh(repair_tr)
+        # request_number is generated from a read-count-then-insert query
+        # (see utils/sequence_locks.py) shared with every other service that
+        # also writes TestingRequest.request_number - serialize generate
+        # through commit so no two threads anywhere can read the same count
+        # before one has committed.
+        with TESTING_REQUEST_NUMBER_LOCK:
+            rn = self._generate_tr_number("RL")
+
+            # ── RL- ticket (traceability / audit record) ──────────────────
+            repair_tr = TestingRequest(
+                request_number=rn,
+                title=f"[Repair] {fr_title}",
+                description=(
+                    f"Auto-created from Failure Registry approval.\n"
+                    f"Source FR: {source_request.request_number}\n"
+                    f"Failure Category: {failure_category}\n"
+                    f"Failure Date: {failure_date}"
+                ),
+                request_category=RequestCategory.repair_lifecycle,
+                equipment_id=source_request.equipment_id,
+                organization_id=source_request.organization_id,
+                department_id=source_request.department_id,
+                priority=source_request.priority or "normal",
+                status=TestingRequestStatus.submitted,
+                is_direct_submission=False,
+                source_failure_id=source_request.id,     # traceability FK
+                originator_id=source_request.originator_id,
+                created_by=approver_id,
+                requested_date=now,
+            )
+            self.db.add(repair_tr)
+            self.db.commit()
+            self.db.refresh(repair_tr)
 
         # ── Trigger the 10-stage repair workflow ──────────────────────────────
         if source_request.equipment_id:

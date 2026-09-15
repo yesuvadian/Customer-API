@@ -7,6 +7,7 @@ from sqlalchemy import func
 
 from models import ProcurementRequest, TestingRequest, TestingRequestStatus, Recommendation
 from utils.common_service import UTCDateTimeMixin
+from utils.sequence_locks import PROCUREMENT_NUMBER_LOCK
 
 
 class ProcurementService:
@@ -46,28 +47,32 @@ class ProcurementService:
                     detail="Procurement can only reference approved recommendations",
                 )
 
-        procurement = ProcurementRequest(
-            procurement_number=self._generate_procurement_number(),
-            testing_request_id=testing_request_id,
-            recommendation_id=recommendation_id,
-            organization_id=request.organization_id,  # Auto-populate from testing_request
-            title=data["title"],
-            description=data.get("description"),
-            estimated_cost=data.get("estimated_cost"),
-            quantity=data.get("quantity"),
-            specifications=data.get("specifications"),
-            status="initiated",
-            raised_by=raised_by,
-            created_by=raised_by,
-        )
-        self.db.add(procurement)
+        # _generate_procurement_number() reads a count-then-insert query, not
+        # atomic on its own (see utils/sequence_locks.py) - serialize generate
+        # through commit so two concurrent creates can't read the same count.
+        with PROCUREMENT_NUMBER_LOCK:
+            procurement = ProcurementRequest(
+                procurement_number=self._generate_procurement_number(),
+                testing_request_id=testing_request_id,
+                recommendation_id=recommendation_id,
+                organization_id=request.organization_id,  # Auto-populate from testing_request
+                title=data["title"],
+                description=data.get("description"),
+                estimated_cost=data.get("estimated_cost"),
+                quantity=data.get("quantity"),
+                specifications=data.get("specifications"),
+                status="initiated",
+                raised_by=raised_by,
+                created_by=raised_by,
+            )
+            self.db.add(procurement)
 
-        # Update testing request status
-        request.status = TestingRequestStatus.procurement_initiated
-        request.modified_by = raised_by
+            # Update testing request status
+            request.status = TestingRequestStatus.procurement_initiated
+            request.modified_by = raised_by
 
-        self.db.commit()
-        self.db.refresh(procurement)
+            self.db.commit()
+            self.db.refresh(procurement)
         return procurement
 
     def get_procurement(self, procurement_id: UUID) -> ProcurementRequest:

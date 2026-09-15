@@ -20,6 +20,7 @@ from models import User, TestRequestScheduleLog
 
 from schemas import (
     TestRequestScheduleCreate,
+    TestRequestScheduleCreateOneOff,
     TestRequestScheduleUpdate,
 )
 
@@ -149,6 +150,36 @@ def delete_master_schedule(
 # OPERATIONAL SCHEDULES
 # equipment_id != NULL
 # ============================================================
+
+
+# ============================================================
+# CREATE ONE-OFF OPERATIONAL SCHEDULE
+# For one specific equipment + test type, deferred to a future date.
+# Fires once via the daily scheduler, then deactivates itself.
+# ============================================================
+
+@router.post(
+    "/operational/one-off",
+    status_code=201,
+)
+def create_one_off_operational_schedule(
+    data: TestRequestScheduleCreateOneOff,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    svc = TestRequestScheduleService(db)
+
+    payload = data.dict(exclude_unset=True)
+
+    payload["organization_id"] = (
+        current_user.organization_id
+    )
+
+    return svc.create_one_off_operational_schedule(
+        data=payload,
+        user_id=current_user.id,
+    )
 
 
 # ============================================================

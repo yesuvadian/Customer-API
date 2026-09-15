@@ -67,22 +67,28 @@ def _get_master(db, name: str):
     return m
 
 
-def _upsert_category_detail(db, category_master_id: int, name: str, category_type: str, active: bool) -> bool:
+def _upsert_category_detail(db, category_master_id: int, name: str, category_type: str, active: bool) -> tuple[CategoryDetails, bool]:
+    """Returns (row, was_inserted) — the row (existing or newly created) so
+    its id can be wired onto the matching OrgTestTemplate.test_type_id."""
     existing = db.query(CategoryDetails).filter_by(
         category_master_id=category_master_id, name=name,
     ).first()
     if existing:
-        return False
-    db.add(CategoryDetails(
+        return existing, False
+    detail = CategoryDetails(
         category_master_id=category_master_id,
         name=name,
         category_type=category_type,
         is_active=active,
-    ))
-    return True
+    )
+    db.add(detail)
+    db.flush()  # assign detail.id before the caller reads it
+    return detail, True
 
 
-def _upsert_template(db, template_key: str) -> bool:
+def _upsert_template(db, template_key: str, test_type_id: int | None = None) -> bool:
+    """Linked to its CategoryDetails row via test_type_id — the id the
+    Template Designer's category-type grouping resolves through."""
     template_data = TEST_TEMPLATES.get(template_key)
     if not template_data:
         print(f"[WARN] {template_key!r} not found in TEST_TEMPLATES — skipping")
@@ -94,9 +100,12 @@ def _upsert_template(db, template_key: str) -> bool:
     if existing:
         existing.template_data = template_data
         existing.is_system = True
+        if test_type_id is not None and existing.test_type_id is None:
+            existing.test_type_id = test_type_id
         return False
     db.add(OrgTestTemplate(
         id=uuid.uuid4(), org_id=None, template_key=template_key,
+        test_type_id=test_type_id,
         template_data=template_data, is_system=True,
     ))
     return True
@@ -113,7 +122,8 @@ def run(db) -> None:
             continue
         added = 0
         for cat in missing_cats:
-            if _upsert_category_detail(db, master.id, cat, "inspection", active=True):
+            _, inserted = _upsert_category_detail(db, master.id, cat, "inspection", active=True)
+            if inserted:
                 added += 1
                 details_inserted += 1
         print(f"[OK] {equip_name}: {added} Inspection categories added (active)")
@@ -124,15 +134,18 @@ def run(db) -> None:
         if not master:
             continue
 
-        if _upsert_template(db, tpl_key):
-            templates_inserted += 1
+        # CategoryDetails row first — its id is what the Maintenance
+        # template's test_type_id needs to point at.
+        maint_detail, inserted = _upsert_category_detail(db, master.id, maint_name, "maintenance", active=False)
+        details_inserted += inserted
 
-        if _upsert_category_detail(db, master.id, maint_name, "maintenance", active=False):
-            details_inserted += 1
+        if _upsert_template(db, tpl_key, test_type_id=maint_detail.id):
+            templates_inserted += 1
 
         added = 0
         for cat in INSPECTION_CATEGORIES:
-            if _upsert_category_detail(db, master.id, cat, "inspection", active=False):
+            _, inserted = _upsert_category_detail(db, master.id, cat, "inspection", active=False)
+            if inserted:
                 added += 1
                 details_inserted += 1
         print(f"[OK] {equip_name}: Maintenance template + CategoryDetails ready (disabled), "

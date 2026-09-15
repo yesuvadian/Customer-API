@@ -15,11 +15,11 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from services.company_tax_document_service import CompanyTaxDocumentService
+from config import MAX_DOCUMENT_UPLOAD_MB
+from utils.upload_limits import read_and_validate_upload
 
 # Load env
 load_dotenv()
-MAX_FILE_SIZE_KB = int(os.getenv("MAX_FILE_SIZE_KB", 10000))
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_KB * 1024
 
 router = APIRouter(
     prefix="/company_tax_documents",
@@ -86,21 +86,14 @@ def get_company_documents(company_id: UUID, db: Session = Depends(get_db)):
 # UPLOAD DOCUMENT (ONE PER CATEGORY)
 # =====================================================
 @router.post("/company/{company_id}", status_code=status.HTTP_201_CREATED)
-def upload_company_document(
+async def upload_company_document(
     company_id: UUID,
     category_detail_id: int = Form(...),  # <-- REQUIRED
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
     try:
-        file_data = file.file.read()
-
-        # Validate file size
-        if len(file_data) > MAX_FILE_SIZE_BYTES:
-            raise HTTPException(
-                400,
-                f"File too large. Max size allowed: {MAX_FILE_SIZE_KB} MB"
-            )
+        file_data = await read_and_validate_upload(file, category="document", max_mb=MAX_DOCUMENT_UPLOAD_MB)
 
         doc = service.create_document_for_company(
             db=db,

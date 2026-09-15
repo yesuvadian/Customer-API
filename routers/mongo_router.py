@@ -30,6 +30,8 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from bson import Binary
 from auth_utils import get_current_user
 from services.mongo_service import MongoService
+from config import MAX_UPLOAD_MB
+from utils.upload_limits import read_and_validate_upload
 
 router = APIRouter(
     prefix="/mongo",
@@ -44,7 +46,7 @@ async def upload_file(file: UploadFile = File(...), folder_name: str = None):
     """
     try:
         # Read file content as bytes
-        content = await file.read()
+        content = await read_and_validate_upload(file, category="document", max_mb=MAX_UPLOAD_MB)
         mongo_binary = Binary(content)  # convert bytes to BSON Binary
 
         # Prepare payload for insertion
@@ -60,6 +62,8 @@ async def upload_file(file: UploadFile = File(...), folder_name: str = None):
         
         return {"message": "File uploaded and inserted successfully", "document": result}
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

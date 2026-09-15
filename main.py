@@ -3,14 +3,17 @@ load_dotenv()
 
 import os
 import logging
-from fastapi import FastAPI
+import anyio
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer
+from config import MAX_UPLOAD_MB, MAX_DOCUMENT_UPLOAD_MB
 from database import Base, engine, SessionLocal
 from middleware.auth_privilege import auth_and_privilege_middleware
 from routers.file_download import router as file_download_router
 from routers.health import router as health_router
+from routers.public_config import router as public_config_router
 from routers import (
     repair_workflow,
     surveillance_workflow,
@@ -95,6 +98,7 @@ from routers import organizations, org_departments, org_users, org_roles
 from routers import equipment
 from routers import equipment_type_kit_mappings
 from routers import condition_monitoring_recommendations
+from routers import threshold_config
 
 # Notification & Alert Engine
 from routers import notifications as notifications_router
@@ -1251,7 +1255,7 @@ def _billing_notification_job():
                 admins = db.query(User).filter(
                     User.organization_id == org.id,
                     User.usertype == "org_admin",
-                    User.is_active == True,
+                    User.isactive == True,
                 ).all()
                 for admin in admins:
                     try:
@@ -1287,7 +1291,7 @@ def _billing_notification_job():
             admins = db.query(User).filter(
                 User.organization_id == org.id,
                 User.usertype == "org_admin",
-                User.is_active == True,
+                User.isactive == True,
             ).all()
             for admin in admins:
                 try:
@@ -1349,7 +1353,7 @@ def _billing_anomaly_nag_job():
 
         super_admins = db.query(User).filter(
             User.usertype == "super_admin",
-            User.is_active == True,
+            User.isactive == True,
         ).all()
 
         count = len(unresolved)
@@ -1444,7 +1448,45 @@ async def custom_redoc():
 </html>
 """)
 
+# ── Global Middleware ─────────────────────────────────────────────────────────
+
+# Early-rejection backstop: reject an oversized request by its Content-Length
+# header before it reaches any route handler. This is defense-in-depth only —
+# every upload endpoint enforces its own (lower) per-category cap via
+# utils.upload_limits.read_and_validate_upload; this just catches anything
+# that slips past a route that forgot to. A generous ceiling is safe for
+# every request type (a JSON POST body never approaches this size).
+_MAX_REQUEST_BODY_MB = max(MAX_UPLOAD_MB, MAX_DOCUMENT_UPLOAD_MB) + 10
+_MAX_REQUEST_BODY_BYTES = _MAX_REQUEST_BODY_MB * 1024 * 1024
+
+
+async def max_body_size_middleware(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"Request body exceeds the {_MAX_REQUEST_BODY_MB} MB limit"},
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
+
+
+app.middleware("http")(max_body_size_middleware)
+app.middleware("http")(auth_and_privilege_middleware)
+
 # ── CORS ──────────────────────────────────────────────────────────────────────
+# Registered LAST so it ends up OUTERMOST, wrapping both middlewares above —
+# Starlette wraps middleware in reverse registration order, last added =
+# outermost. CORS must be outermost: any response either of those returns
+# directly (a 401/403 from auth, a 413 from the body-size guard, or an
+# unhandled exception bubbling to a bare 500) never reaches an inner
+# CORSMiddleware at all, so it comes back with no Access-Control-Allow-Origin
+# header — the browser then blocks it and reports a CORS error, masking the
+# real 401/403/413/500 entirely. Confirmed live: a 401 response had zero CORS
+# headers with this order reversed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -1460,9 +1502,6 @@ app.add_middleware(
     expose_headers=["X-Payment-Token", "X-Org-Name", "X-Dept-Name", "X-Dept-Id", "X-Plan-Id", "X-Trial-Expired-Dept-Mode", "X-Billing-Mode", "X-Dept-Pricing-Ready", "X-Report-Filename"],
 )
 
-# ── Global Middleware ─────────────────────────────────────────────────────────
-app.middleware("http")(auth_and_privilege_middleware)
-
 security = HTTPBearer()
 
 # ── Routers ───────────────────────────────────────────────────────────────────
@@ -1470,6 +1509,10 @@ security = HTTPBearer()
 # Health check - no auth (see PUBLIC_ENDPOINTS in middleware/auth_privilege.py) -
 # polled repeatedly by external load-testing tools during a live run.
 app.include_router(health_router)
+
+# Public runtime config (e.g. max_upload_mb) - no auth, fetched by the UI at
+# startup before login so client-side limits stay in sync with the backend.
+app.include_router(public_config_router)
 
 # Authentication & Token
 app.include_router(token.router)
@@ -1553,6 +1596,7 @@ app.include_router(precommission_router.router)  # Pre-Commission QAP
 app.include_router(equipment.router)
 app.include_router(equipment_type_kit_mappings.router)
 app.include_router(condition_monitoring_recommendations.router)
+app.include_router(threshold_config.router)
 
 # Notification & Alert Engine
 app.include_router(notifications_router.router)
@@ -1610,6 +1654,15 @@ app.include_router(billing_router.admin_router)   # Billing admin endpoints (/ad
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
+    # Most routers here use plain `def` (sync) handlers, which FastAPI runs
+    # on anyio's worker-thread pool rather than the event loop. That pool
+    # defaults to 40 threads regardless of vCPU count, so it — not CPU — is
+    # often the real concurrency ceiling. Configurable per deployment via
+    # THREAD_POOL_SIZE in .env; default matches anyio's own default (40).
+    thread_pool_size = int(os.getenv("THREAD_POOL_SIZE", 40))
+    anyio.to_thread.current_default_thread_limiter().total_tokens = thread_pool_size
+    logger.info(f"[Startup] Thread pool limiter set to {thread_pool_size} (THREAD_POOL_SIZE)")
+
     scheduler.start()
     logger.info(
         "[Scheduler] APScheduler started — "

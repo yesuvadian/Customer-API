@@ -49,6 +49,7 @@ from models import (
     TrWfInstance,
     User,
 )
+from utils.sequence_locks import REPAIR_WORKFLOW_NUMBER_LOCK
 
 UPLOAD_DIR = os.path.join("uploads", "repair")
 
@@ -426,70 +427,75 @@ class RepairWorkflowService:
 
         first_stage = stages[0]
 
-        # GENERATE WORKFLOW NUMBER
-        workflow_number = self.generate_workflow_number()
+        # generate_workflow_number() reads the last workflow_number for
+        # today's prefix then increments it - not atomic on its own (see
+        # utils/sequence_locks.py) - serialize generate through commit so
+        # two concurrent starts can't read the same last sequence.
+        with REPAIR_WORKFLOW_NUMBER_LOCK:
+            # GENERATE WORKFLOW NUMBER
+            workflow_number = self.generate_workflow_number()
 
-        # CREATE WORKFLOW
-        workflow = RepairWorkflow(
-            workflow_number=workflow_number,
-            workflow_code="BREAKDOWN",
-            equipment_id=equipment_id,
-            organization_id=equipment.organization_id,
-            source_failure_id=source_failure_id,
-            current_stage_id=first_stage.id,
-            status="active",
-            assignment_pending=True,
-            progress=0,
-            priority="normal",
-            created_by=user_id,
-        )
-
-        self.db.add(workflow)
-        self.db.flush()
-
-        first_stage_instance = None
-
-        # CREATE STAGE INSTANCES
-        for s in stages:
-
-            is_first = s.id == first_stage.id
-
-            instance = RepairStageInstance(
-                workflow_id=workflow.id,
-                stage_id=s.id,
-                status="pending" if is_first else "not_started",
-                assignment_pending=is_first,
-                started_at=self._utc_now() if is_first else None,
+            # CREATE WORKFLOW
+            workflow = RepairWorkflow(
+                workflow_number=workflow_number,
+                workflow_code="BREAKDOWN",
+                equipment_id=equipment_id,
+                organization_id=equipment.organization_id,
+                source_failure_id=source_failure_id,
+                current_stage_id=first_stage.id,
+                status="active",
+                assignment_pending=True,
+                progress=0,
+                priority="normal",
                 created_by=user_id,
             )
 
-            self.db.add(instance)
+            self.db.add(workflow)
             self.db.flush()
 
-            if is_first:
-                first_stage_instance = instance
+            first_stage_instance = None
 
-        # SET CURRENT STAGE INSTANCE
-        workflow.current_stage_instance_id = (
-            first_stage_instance.id
-            if first_stage_instance
-            else None
-        )
+            # CREATE STAGE INSTANCES
+            for s in stages:
 
-        # CREATE ASSIGNMENT QUEUE
-        self.db.add(
-            RepairAssignmentQueue(
-                workflow_id=workflow.id,
-                stage_id=first_stage.id,
-                status="pending",
+                is_first = s.id == first_stage.id
+
+                instance = RepairStageInstance(
+                    workflow_id=workflow.id,
+                    stage_id=s.id,
+                    status="pending" if is_first else "not_started",
+                    assignment_pending=is_first,
+                    started_at=self._utc_now() if is_first else None,
+                    created_by=user_id,
+                )
+
+                self.db.add(instance)
+                self.db.flush()
+
+                if is_first:
+                    first_stage_instance = instance
+
+            # SET CURRENT STAGE INSTANCE
+            workflow.current_stage_instance_id = (
+                first_stage_instance.id
+                if first_stage_instance
+                else None
             )
-        )
 
-        # UPDATE EQUIPMENT STATUS
-        equipment.status = EquipmentStatus.under_repair
+            # CREATE ASSIGNMENT QUEUE
+            self.db.add(
+                RepairAssignmentQueue(
+                    workflow_id=workflow.id,
+                    stage_id=first_stage.id,
+                    status="pending",
+                )
+            )
 
-        self.db.commit()
-        self.db.refresh(workflow)
+            # UPDATE EQUIPMENT STATUS
+            equipment.status = EquipmentStatus.under_repair
+
+            self.db.commit()
+            self.db.refresh(workflow)
 
         # LOG AUDIT
         self._log_audit(

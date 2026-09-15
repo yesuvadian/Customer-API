@@ -48,6 +48,7 @@ class WorkflowDispatchService:
         tr: TestingRequest,
         rec: Recommendation,
         approver_id: UUID,
+        overwrite_schedule_ids: Optional[list[str]] = None,
     ) -> dict:
         """
         Dispatch next action after technical approval.
@@ -98,7 +99,8 @@ class WorkflowDispatchService:
 
         elif action == NextActionType.maintenance:
             numbers = self._create_schedules_for_action(
-                tr, rec, approver_id, category=RequestCategory.maintenance
+                tr, rec, approver_id, category=RequestCategory.maintenance,
+                overwrite_schedule_ids=overwrite_schedule_ids,
             )
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)
@@ -109,7 +111,8 @@ class WorkflowDispatchService:
 
         elif action == NextActionType.inspection:
             numbers = self._create_schedules_for_action(
-                tr, rec, approver_id, category=RequestCategory.inspection
+                tr, rec, approver_id, category=RequestCategory.inspection,
+                overwrite_schedule_ids=overwrite_schedule_ids,
             )
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)
@@ -122,6 +125,7 @@ class WorkflowDispatchService:
             numbers = self._create_schedules_for_action(
                 tr, rec, approver_id, category=RequestCategory.test,
                 force_immediate_ticket=True,
+                overwrite_schedule_ids=overwrite_schedule_ids,
             )
             tr.status = TestingRequestStatus.outcome_active
             tr.completed_at = datetime.now(timezone.utc)
@@ -414,6 +418,7 @@ class WorkflowDispatchService:
         approver_id: UUID,
         category: RequestCategory,
         force_immediate_ticket: bool = False,
+        overwrite_schedule_ids: Optional[list[str]] = None,
     ) -> list[str]:
         """
         Create one operational schedule per recommended test type.
@@ -425,6 +430,13 @@ class WorkflowDispatchService:
         follow-up path, which needs the ticket immediately. The normal
         recommendation-approval path leaves it False so the first ticket is
         deferred to the advance window.
+
+        overwrite_schedule_ids: ids of existing schedules (from
+        ApprovalService.check_schedule_conflicts) the approver explicitly
+        chose to overwrite. A schedule for (equipment_id, test_type_id) not
+        in this list is left completely untouched. Selecting more than one
+        existing schedule for the same test type merges them: the first
+        selected is updated in place, the rest are deleted.
         """
         test_types: list[dict] = rec.test_types or []
         if test_types:
@@ -438,13 +450,15 @@ class WorkflowDispatchService:
             return [
                 self._create_schedule(tr, rec, approver_id, category=category,
                                       test_type_id=_safe_int(t.get("id")),
-                                      force_immediate_ticket=force_immediate_ticket)
+                                      force_immediate_ticket=force_immediate_ticket,
+                                      overwrite_schedule_ids=overwrite_schedule_ids)
                 for t in test_types
             ]
         # Legacy / TAQC path — single test_type_id on the TR
         return [self._create_schedule(tr, rec, approver_id, category=category,
                                       test_type_id=tr.test_type_id,
-                                      force_immediate_ticket=force_immediate_ticket)]
+                                      force_immediate_ticket=force_immediate_ticket,
+                                      overwrite_schedule_ids=overwrite_schedule_ids)]
 
     def _create_schedule(
         self,
@@ -454,6 +468,7 @@ class WorkflowDispatchService:
         category: RequestCategory,
         test_type_id: Optional[int] = None,
         force_immediate_ticket: bool = False,
+        overwrite_schedule_ids: Optional[list[str]] = None,
     ) -> str:
         """
         Create an operational TestRequestSchedule for recurring work triggered by
@@ -510,24 +525,6 @@ class WorkflowDispatchService:
             )
             return ""
 
-        # Idempotency: don't create duplicate schedule for same equipment + test type
-        existing = (
-            self.db.query(TestRequestSchedule)
-            .filter(
-                TestRequestSchedule.equipment_id == tr.equipment_id,
-                TestRequestSchedule.test_type_id == test_type_id,
-                TestRequestSchedule.is_deleted == False,
-            )
-            .first()
-        )
-        if existing:
-            print(
-                f"[Dispatch] Operational schedule already exists "
-                f"(id={existing.id}) for equipment {tr.equipment_id} "
-                f"test_type {test_type_id} — skipping create"
-            )
-            return str(existing.id)
-
         try:
             from config import SCHEDULE_ADVANCE_DAYS as _adv
         except Exception:
@@ -551,21 +548,70 @@ class WorkflowDispatchService:
         else:
             next_run_date = schedule_base
 
-        schedule = TestRequestSchedule(
-            equipment_id=tr.equipment_id,
-            equipment_type_id=equipment_type_id,
-            test_type_id=test_type_id,
-            organization_id=tr.organization_id,
-            title=tr.title,
-            request_category=category,
-            frequency=freq,
-            start_date=effective_start,
-            next_run_date=next_run_date,
-            advance_days=_adv,
-            is_active=True,
-            created_by=approver_id,
+        # Idempotency: find every existing schedule for this equipment + test
+        # type — duplicates can legitimately exist (e.g. one recurring plus
+        # one-off entries), so this is never just a single row.
+        existing_all = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id == tr.equipment_id,
+                TestRequestSchedule.test_type_id == test_type_id,
+                TestRequestSchedule.is_deleted == False,
+            )
+            .order_by(TestRequestSchedule.next_run_date)
+            .all()
         )
-        self.db.add(schedule)
+        selected_ids = set(overwrite_schedule_ids or [])
+        selected = [e for e in existing_all if str(e.id) in selected_ids]
+
+        if existing_all and not selected:
+            # Approver didn't pick any of the existing schedules to overwrite
+            # — leave every one of them untouched.
+            print(
+                f"[Dispatch] Operational schedule(s) already exist "
+                f"({len(existing_all)}) for equipment {tr.equipment_id} "
+                f"test_type {test_type_id} — none selected for overwrite, skipping create"
+            )
+            return str(existing_all[0].id)
+
+        if selected:
+            # Overwrite the first selected schedule in place with this
+            # approval's values; if more than one was selected (merge), the
+            # rest are soft-deleted rather than left as orphaned duplicates.
+            schedule = selected[0]
+            schedule.title = tr.title
+            schedule.request_category = category
+            schedule.frequency = freq
+            schedule.start_date = effective_start
+            schedule.next_run_date = next_run_date
+            schedule.advance_days = _adv
+            schedule.is_active = True
+            schedule.modified_by = approver_id
+            print(
+                f"[Dispatch] Overwrote operational schedule (id={schedule.id}) "
+                f"for equipment {tr.equipment_id} test_type {test_type_id}"
+                + (f", merging {len(selected) - 1} other selected schedule(s)" if len(selected) > 1 else "")
+            )
+            for extra in selected[1:]:
+                extra.is_deleted = True
+                extra.deleted_at = now
+                extra.deleted_by = approver_id
+        else:
+            schedule = TestRequestSchedule(
+                equipment_id=tr.equipment_id,
+                equipment_type_id=equipment_type_id,
+                test_type_id=test_type_id,
+                organization_id=tr.organization_id,
+                title=tr.title,
+                request_category=category,
+                frequency=freq,
+                start_date=effective_start,
+                next_run_date=next_run_date,
+                advance_days=_adv,
+                is_active=True,
+                created_by=approver_id,
+            )
+            self.db.add(schedule)
         self.db.flush()   # populate schedule.id
 
         # Diagnostic: every operational schedule is bound to ONE equipment.

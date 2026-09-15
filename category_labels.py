@@ -192,3 +192,19 @@ class BillingOrderStatusColors(LabelPairRegistry):
     PAID      = LabelPair("paid",      "#16A34A")   # green-600
     FAILED    = LabelPair("failed",    "#DC2626")   # red-600
     CANCELLED = LabelPair("cancelled", "#94A3B8")   # slate-400
+
+
+# ── TR workflow outcome colors ────────────────────────────────────────────────
+
+class TrWfOutcomeColors(LabelPairRegistry):
+    """Canonical hex color per terminal/non-terminal TR workflow OUTCOME —
+    rejected, cancelled, or returned (sent back a stage without closing).
+    Sourced from wf_timeline_sheet.dart's flowchart palette (the original
+    place these three were ever colored) and tr_kanban_board.dart's matching
+    Rejected/Cancelled columns — this is now the single source those, and
+    every other view (e.g. the Overview Dashboard's Rejected/Cancelled
+    card), should read the color from, rather than each deciding it
+    independently in Flutter."""
+    REJECTED  = LabelPair("rejected",  "#EF5350")
+    CANCELLED = LabelPair("cancelled", "#FB8C00")
+    RETURNED  = LabelPair("returned",  "#7C3AED")

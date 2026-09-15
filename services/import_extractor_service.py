@@ -508,12 +508,19 @@ def build_import_schema_workbook(tpl: dict | None, visibility_data: dict | None 
     """
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
-    from services.visibility_rule import is_template_field_visible
+    from services.visibility_rule import is_template_field_visible, evaluate_visibility_rule
 
     def _visible(section: dict, field: dict) -> bool:
         if visibility_data is None:
             return True
         return is_template_field_visible(section, field, visibility_data)
+
+    def _row_visible(drow: dict) -> bool:
+        if visibility_data is None:
+            return True
+        # Same "unevaluable -> visible" fallback as _visible/is_template_field_visible:
+        # only drop a row when its own rule definitely evaluates to False.
+        return evaluate_visibility_rule(drow.get("visibility_rule"), visibility_data) is not False
 
     # Fixed identity columns always present (needed for equipment matching)
     fixed_cols = [
@@ -632,8 +639,11 @@ def build_import_schema_workbook(tpl: dict | None, visibility_data: dict | None 
         tws.row_dimensions[3].height = 18
         tws.freeze_panes = "A4"
 
-        # Pre-fill default rows (starting at row 4)
-        default_rows = tf.get("default_rows", [])
+        # Pre-fill default rows (starting at row 4), scoped to this
+        # equipment's voltage class same as section/field visibility above -
+        # e.g. a 400kV transformer only gets (HV+LV)-GND/(HV+LV)-TV/TV-GND,
+        # not the 220/66kV-only HV-LV/HV-GND/LV-TV/LV-GND/TV-HV rows too.
+        default_rows = [r for r in tf.get("default_rows", []) if _row_visible(r)]
         for ri, drow in enumerate(default_rows, start=4):
             for ci, col in enumerate(editable_cols, start=1):
                 val = drow.get(col.get("key", ""), "")

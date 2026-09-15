@@ -109,7 +109,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Trip Circuit Test",
                 "fields": [
-                    {"key": "trip_circuit_ok", "label": "Trip Circuit Healthy", "type": "boolean", "required": True},
+                    {"key": "trip_circuit_ok", "label": "Trip Circuit Healthy", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "trip_coil_resistance", "label": "Trip Coil Resistance", "type": "number", "unit": "ohms"},
                     {"key": "trip_time", "label": "Trip Time", "type": "number", "unit": "ms"},
                 ]
@@ -119,6 +119,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks / Observations", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -175,7 +176,7 @@ TEST_TEMPLATES = {
                 "title": "Stability Test",
                 "fields": [
                     {"key": "through_fault_current", "label": "Through Fault Current", "type": "number", "unit": "A"},
-                    {"key": "stability_result", "label": "Stability Test Result", "type": "dropdown", "options": ["Stable (No Trip)", "Unstable (Tripped)"], "required": True},
+                    {"key": "stability_result", "label": "Stability Test Result", "type": "dropdown", "options": ["Stable (No Trip)", "Unstable (Tripped)"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_TRIP}},
                 ]
             },
             {
@@ -228,7 +229,7 @@ TEST_TEMPLATES = {
                 "title": "Stability Verification",
                 "fields": [
                     {"key": "max_through_fault", "label": "Max Through Fault Current", "type": "number", "unit": "A"},
-                    {"key": "relay_stable", "label": "Relay Stable (No Maloperation)", "type": "boolean", "required": True},
+                    {"key": "relay_stable", "label": "Relay Stable (No Maloperation)", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "stability_margin", "label": "Stability Margin", "type": "number", "unit": "%"},
                 ]
             },
@@ -237,6 +238,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -281,10 +283,10 @@ TEST_TEMPLATES = {
             {
                 "title": "Functional Tests",
                 "fields": [
-                    {"key": "trip_test_ok", "label": "Trip Test Successful", "type": "boolean", "required": True},
-                    {"key": "close_test_ok", "label": "Close Test Successful", "type": "boolean"},
-                    {"key": "flag_indication_ok", "label": "Flag/LED Indication OK", "type": "boolean", "required": True},
-                    {"key": "alarm_contacts_ok", "label": "Alarm Contacts OK", "type": "boolean"},
+                    {"key": "trip_test_ok", "label": "Trip Test Successful", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "close_test_ok", "label": "Close Test Successful", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "flag_indication_ok", "label": "Flag/LED Indication OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "alarm_contacts_ok", "label": "Alarm Contacts OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "auxiliary_supply", "label": "Auxiliary Supply", "type": "number", "unit": "V DC"},
                 ]
             },
@@ -293,6 +295,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -418,7 +421,7 @@ TEST_TEMPLATES = {
             {
                 "title": "Polarity Test",
                 "fields": [
-                    {"key": "polarity_ok", "label": "Polarity Correct", "type": "boolean", "required": True},
+                    {"key": "polarity_ok", "label": "Polarity Correct", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "polarity_method", "label": "Test Method", "type": "dropdown", "options": ["DC Kick Test", "AC Test", "Comparator"]},
                 ]
             },
@@ -427,6 +430,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -506,8 +510,8 @@ TEST_TEMPLATES = {
                         "columns": [
                             {"key": "protection_type", "label": "Protection Type", "type": "text"},
                             {"key": "relay_make_model", "label": "Relay Make/Model", "type": "text"},
-                            {"key": "setting_verified", "label": "Setting Verified", "type": "dropdown", "options": ["Yes", "No"]},
-                            {"key": "trip_test_ok", "label": "Trip Test OK", "type": "dropdown", "options": ["Yes", "No"]},
+                            {"key": "setting_verified", "label": "Setting Verified", "type": "dropdown", "options": ["Yes", "No"], "column_evaluation": {"Yes": "NORMAL", "No": "CRITICAL"}},
+                            {"key": "trip_test_ok", "label": "Trip Test OK", "type": "dropdown", "options": ["Yes", "No"], "column_evaluation": {"Yes": "NORMAL", "No": "CRITICAL"}},
                             {"key": "row_result", "label": "Result", "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF}
                         ]
                     }
@@ -516,11 +520,11 @@ TEST_TEMPLATES = {
             {
                 "title": "Wiring & Panel Checks",
                 "fields": [
-                    {"key": "ct_wiring_ok", "label": "CT Wiring Correct", "type": "boolean", "required": True},
-                    {"key": "pt_wiring_ok", "label": "PT Wiring Correct", "type": "boolean", "required": True},
-                    {"key": "trip_circuit_ok", "label": "Trip Circuit OK", "type": "boolean", "required": True},
-                    {"key": "alarm_circuit_ok", "label": "Alarm Circuit OK", "type": "boolean"},
-                    {"key": "interlock_ok", "label": "Interlocks Verified", "type": "boolean"},
+                    {"key": "ct_wiring_ok", "label": "CT Wiring Correct", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "pt_wiring_ok", "label": "PT Wiring Correct", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "trip_circuit_ok", "label": "Trip Circuit OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "alarm_circuit_ok", "label": "Alarm Circuit OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "interlock_ok", "label": "Interlocks Verified", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                 ]
             },
             {
@@ -528,6 +532,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -614,12 +619,12 @@ TEST_TEMPLATES = {
                 "title": "External Condition",
                 "fields": [
                     {"key": "body_condition", "label": "Body/Tank Condition", "type": "dropdown", "options": ["Good", "Fair", "Poor", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_GFP}},
-                    {"key": "paint_condition", "label": "Paint Condition", "type": "dropdown", "options": ["Good", "Faded", "Peeling", "Rusted"], "required": True},
-                    {"key": "oil_leak", "label": "Oil Leakage Observed", "type": "boolean", "required": True},
+                    {"key": "paint_condition", "label": "Paint Condition", "type": "dropdown", "options": ["Good", "Faded", "Peeling", "Rusted"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Faded": "ALERT", "Peeling": "ALERT", "Rusted": "CRITICAL"}}},
+                    {"key": "oil_leak", "label": "Oil Leakage Observed", "type": "dropdown", "options": ["No", "Yes"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"No": "NORMAL", "Yes": "CRITICAL"}}},
                     {"key": "oil_leak_location", "label": "Leakage Location", "type": "text"},
                     {"key": "oil_level", "label": "Oil Level", "type": "dropdown", "options": ["Normal", "Low", "Very Low", "Empty"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Normal": "NORMAL", "Low": "ALERT", "Very Low": "CRITICAL", "Empty": "CRITICAL"}}},
                     {"key": "oil_color", "label": "Oil Color", "type": "dropdown", "options": ["Clear", "Light Yellow", "Dark Yellow", "Brown", "Black"]},
-                    {"key": "silica_gel_condition", "label": "Silica Gel Condition", "type": "dropdown", "options": ["Blue (Good)", "Pink (Saturated)", "Not Available"]},
+                    {"key": "silica_gel_condition", "label": "Silica Gel Condition", "type": "dropdown", "options": ["Blue (Good)", "Pink (Saturated)", "Not Available"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Blue (Good)": "NORMAL", "Pink (Saturated)": "ALERT", "Not Available": "ALERT"}}},
                 ]
             },
             {
@@ -628,16 +633,16 @@ TEST_TEMPLATES = {
                     {"key": "hv_bushing_condition", "label": "HV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Cracked": "ALERT", "Chipped": "ALERT", "Damaged": "CRITICAL"}}},
                     {"key": "lv_bushing_condition", "label": "LV Bushing Condition", "type": "dropdown", "options": ["Good", "Cracked", "Chipped", "Damaged"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Good": "NORMAL", "Cracked": "ALERT", "Chipped": "ALERT", "Damaged": "CRITICAL"}}},
                     {"key": "terminal_connections", "label": "Terminal Connections", "type": "dropdown", "options": ["Tight", "Loose", "Corroded"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": {"Tight": "NORMAL", "Loose": "ALERT", "Corroded": "CRITICAL"}}},
-                    {"key": "earthing_ok", "label": "Earthing Proper", "type": "boolean", "required": True},
+                    {"key": "earthing_ok", "label": "Earthing Proper", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                 ]
             },
             {
                 "title": "Accessories",
                 "fields": [
-                    {"key": "rating_plate_ok", "label": "Rating Plate Readable", "type": "boolean"},
-                    {"key": "thermometer_ok", "label": "Thermometer Working", "type": "boolean"},
-                    {"key": "buchholz_relay_ok", "label": "Buchholz Relay OK", "type": "boolean"},
-                    {"key": "prv_ok", "label": "PRV/Explosion Vent OK", "type": "boolean"},
+                    {"key": "rating_plate_ok", "label": "Rating Plate Readable", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "thermometer_ok", "label": "Thermometer Working", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "buchholz_relay_ok", "label": "Buchholz Relay OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
+                    {"key": "prv_ok", "label": "PRV/Explosion Vent OK", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "tap_changer_position", "label": "Tap Changer Position", "type": "text"},
                 ]
             },
@@ -646,6 +651,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "overall_remarks", "label": "Remarks / Observations", "type": "textarea"},
                     {"key": "overall_result", "label": "Overall Result", "type": "dropdown", "options": ["Pass", "Fail", "Conditional", "Retest"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFCR}},
+                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "Fail"}},
                 ]
             }
         ]
@@ -2366,7 +2372,7 @@ TEST_TEMPLATES = {
                 "fields": [
                     {"key": "s5_inspection_date",        "label": "Date of Joint Inspection",            "type": "date",   "required": True},
                     {"key": "s5_inspection_report_ref",  "label": "Inspection Report Reference",         "type": "text",   "required": False},
-                    {"key": "s5_inspection_outcome",     "label": "Inspection Outcome",                  "type": "dropdown","required": True, "options": ["Satisfactory", "Satisfactory with Observations", "Unsatisfactory — Rework Required"]},
+                    {"key": "s5_inspection_outcome",     "label": "Inspection Outcome",                  "type": "dropdown","required": True, "options": ["Satisfactory", "Satisfactory with Observations", "Unsatisfactory — Rework Required"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_SAT}},
                     {"key": "s5_defects_found",          "label": "Defects / Observations found at Vendor Works", "type": "textarea", "required": False},
                     {"key": "s5_responsible_officer",    "label": "Responsible Officer (KPTCL)",         "type": "text",   "required": True},
                     {"key": "s5_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
@@ -2396,11 +2402,11 @@ TEST_TEMPLATES = {
                 "title": "Stage 7 — Stage Inspections During Repair (SRS §7.1)",
                 "fields": [
                     {"key": "s7_stage_insp_1_date",      "label": "Stage Inspection 1 — Date",           "type": "date",   "required": False},
-                    {"key": "s7_stage_insp_1_result",    "label": "Stage Inspection 1 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_insp_1_result",    "label": "Stage Inspection 1 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Pass": "NORMAL", "Pass with Observations": "ALERT", "Fail": "CRITICAL"}}},
                     {"key": "s7_stage_insp_2_date",      "label": "Stage Inspection 2 — Date",           "type": "date",   "required": False},
-                    {"key": "s7_stage_insp_2_result",    "label": "Stage Inspection 2 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_insp_2_result",    "label": "Stage Inspection 2 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Pass": "NORMAL", "Pass with Observations": "ALERT", "Fail": "CRITICAL"}}},
                     {"key": "s7_stage_insp_3_date",      "label": "Stage Inspection 3 — Date",           "type": "date",   "required": False},
-                    {"key": "s7_stage_insp_3_result",    "label": "Stage Inspection 3 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"]},
+                    {"key": "s7_stage_insp_3_result",    "label": "Stage Inspection 3 — Result",         "type": "dropdown","required": False, "options": ["Pass", "Fail", "Pass with Observations"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Pass": "NORMAL", "Pass with Observations": "ALERT", "Fail": "CRITICAL"}}},
                     {"key": "s7_stage_observations",     "label": "Observations across Stage Inspections","type": "textarea","required": False},
                     {"key": "s7_responsible_officer",    "label": "Responsible Officer (Stage Inspections)","type": "text", "required": False},
                     {"key": "s7_contractual_date",       "label": "Contracted Completion Date",          "type": "date",   "required": False},
@@ -2450,9 +2456,9 @@ TEST_TEMPLATES = {
                     {"key": "s10_ir_hv_mohm",            "label": "IR — HV to Earth (Post-Repair)",      "type": "number", "required": True,  "unit": "MOhm"},
                     {"key": "s10_ir_lv_mohm",            "label": "IR — LV to Earth (Post-Repair)",      "type": "number", "required": True,  "unit": "MOhm"},
                     {"key": "s10_bdv_kv",                "label": "Oil BDV (Post-Repair)",               "type": "number", "required": True,  "unit": "kV"},
-                    {"key": "s10_turns_ratio_ok",        "label": "Turns ratio within specification",    "type": "dropdown","required": True, "options": ["Pass", "Fail"]},
-                    {"key": "s10_winding_resistance_ok", "label": "Winding resistance within specification","type":"dropdown","required": True, "options": ["Pass", "Fail"]},
-                    {"key": "s10_no_load_test_ok",       "label": "No-load test result",                 "type": "dropdown","required": True, "options": ["Pass", "Fail"]},
+                    {"key": "s10_turns_ratio_ok",        "label": "Turns ratio within specification",    "type": "dropdown","required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
+                    {"key": "s10_winding_resistance_ok", "label": "Winding resistance within specification","type":"dropdown","required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
+                    {"key": "s10_no_load_test_ok",       "label": "No-load test result",                 "type": "dropdown","required": True, "options": ["Pass", "Fail"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PF}},
                     {"key": "s10_test_results_summary",  "label": "Complete Test Results Summary",       "type": "textarea","required": True},
                     {"key": "s10_commissioning_status",  "label": "Commissioning Status",                "type": "dropdown","required": True, "options": ["Commissioned — In Service", "Commissioned with Surveillance", "Commissioning Failed — Rework Required"]},
                     {"key": "s10_responsible_officer",   "label": "Responsible Officer",                 "type": "text",   "required": True},
@@ -2471,13 +2477,13 @@ TEST_TEMPLATES = {
                     {"key": "surveillance_period_months","label": "Surveillance Period",                 "type": "number", "required": True,  "unit": "months", "default": "24"},
                     {"key": "surveillance_start_date",   "label": "Surveillance Start Date",             "type": "date",   "required": True},
                     {"key": "surveillance_end_date",     "label": "Surveillance End Date",               "type": "date",   "required": False},
-                    {"key": "dga_result_1m",             "label": "DGA at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
-                    {"key": "bdv_result_1m",             "label": "BDV at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
-                    {"key": "ir_result_6m",              "label": "IR Test at 6 Months",                "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"]},
+                    {"key": "dga_result_1m",             "label": "DGA at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_NAC}},
+                    {"key": "bdv_result_1m",             "label": "BDV at 1 Month Post-Commissioning",  "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_NAC}},
+                    {"key": "ir_result_6m",              "label": "IR Test at 6 Months",                "type": "dropdown","required": False, "options": ["Normal", "Alert", "Critical / Abnormal", "Not Done"], "dropdown_evaluation": {"enabled": True, "value_severities": _EV_NAC}},
                     {"key": "loading_history_summary",   "label": "Loading History Summary (surveillance period)", "type": "textarea","required": False},
                     {"key": "incidents_during_surveillance","label":"Any incidents during surveillance period","type":"checkbox","required": True},
                     {"key": "incident_details",          "label": "Incident Details (if any)",           "type": "textarea","required": False},
-                    {"key": "overall_quality_rating",    "label": "Overall Quality Rating of Repair",    "type": "dropdown","required": True, "options": ["Excellent", "Good", "Satisfactory", "Poor", "Unsatisfactory"]},
+                    {"key": "overall_quality_rating",    "label": "Overall Quality Rating of Repair",    "type": "dropdown","required": True, "options": ["Excellent", "Good", "Satisfactory", "Poor", "Unsatisfactory"], "dropdown_evaluation": {"enabled": True, "value_severities": {"Excellent": "NORMAL", "Good": "NORMAL", "Satisfactory": "NORMAL", "Poor": "ALERT", "Unsatisfactory": "CRITICAL"}}},
                     {"key": "post_repair_evaluation",    "label": "Post-Repair Evaluation Summary",      "type": "textarea","required": True},
                     {"key": "warranty_expiry_date",      "label": "Repair Warranty Expiry Date",         "type": "date",   "required": False},
                 ],
@@ -3108,11 +3114,39 @@ TEST_TEMPLATES = {
                     "type": "table",
                     "allow_add_rows": False,
                     "allow_delete_rows": False,
+                    "is_duval_triangle_source": True,
+                    # Self-contained marker: "this table field is the one
+                    # Duval Triangle classification reads gas values from."
+                    # Not a template-key check — transformer_oil_test's own
+                    # embedded DGA section uses this identical field key
+                    # ("dga_results") but is unrelated to this feature; a
+                    # flag on the actual field data avoids relying on which
+                    # template/field happens to be named what, and survives
+                    # a rename or a Template-Designer-made clone.
+                    "duval_watchlist_severity": {
+                        # Zone -> severity tier shown on the Deterioration
+                        # Watch List (services/duval_triangle.py has the
+                        # zone classification math + plain-language
+                        # meanings; this is a separate, much simpler lookup
+                        # of which zones are worth an officer's attention).
+                        # Only zones listed here are watch-list-worthy — PD
+                        # and T1 (not listed) are common/mild enough (trace
+                        # corona, simple hot spots) that flagging every
+                        # occurrence would be noisy; they stay visible in
+                        # the DGA Trend Report only. NOT a THRESHOLD rule —
+                        # those compare one numeric value to a numeric
+                        # range (feeds ParameterThresholdBand); a Duval
+                        # zone is a categorical code derived from a 3-gas
+                        # ratio, a different shape, so this is a plain
+                        # lookup, not a reused rule type.
+                        "T2": "High", "T3": "Critical",
+                        "D1": "High", "D2": "Critical", "DT": "High",
+                    },
                     "columns": [
                         {"key": "gas",         "label": "Gas",            "type": "readonly"},
                         {"key": "formula",     "label": "Formula",        "type": "readonly"},
-                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number"},
-                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number"},
+                        {"key": "value_top",   "label": "Top (ppm)",      "type": "number", "required": True},
+                        {"key": "value_bottom","label": "Bottom (ppm)",   "type": "number", "required": True},
                         {
                             "key": "condition",
                             "label": "Status",
@@ -4299,7 +4333,20 @@ TEST_TEMPLATES = {
                             {"key": "reading_2",     "label": "Reading 2 (µΩ)", "type": "number"},
                             {"key": "average",       "label": "Average (µΩ)",   "type": "number"},
                             {"key": "max_limit",     "label": "Max Limit (µΩ)", "type": "number"},
-                            {"key": "result",        "label": "Result",         "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
+                            {
+                                "key": "result", "label": "Result", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "average",
+                                        "right_field": "max_limit",
+                                        "operator": "<=",
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
+                                "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
+                            },
                         ],
                         "default_rows": [
                             {"pole": "R Phase"},
@@ -4617,7 +4664,7 @@ TEST_TEMPLATES = {
                             {"key": "y_phase_ms",  "label": "Y Phase (ms)",     "type": "number"},
                             {"key": "b_phase_ms",  "label": "B Phase (ms)",     "type": "number"},
                             {"key": "limit_ms",    "label": "Max Limit (ms)",   "type": "number"},
-                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"]},
+                            {"key": "result",      "label": "Result",           "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
                             {"operation": "Closing Time"},
@@ -5010,7 +5057,7 @@ TEST_TEMPLATES = {
                             {"key": "phase",             "label": "Phase",                  "type": "text"},
                             {"key": "test_voltage_kv",   "label": "Test Voltage (kVrms)",    "type": "number"},
                             {"key": "duration_sec",      "label": "Duration (s)",            "type": "number"},
-                            {"key": "flashover",         "label": "Flashover / Breakdown",   "type": "dropdown", "options": ["No", "Yes"]},
+                            {"key": "flashover",         "label": "Flashover / Breakdown",   "type": "dropdown", "options": ["No", "Yes"], "column_evaluation": {"No": "NORMAL", "Yes": "CRITICAL"}},
                             {"key": "result",            "label": "Result",                  "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
                         ],
                         "default_rows": [
@@ -6590,11 +6637,11 @@ TEST_TEMPLATES = {
                             {"key": "test_configuration",         "label": "Test Configuration",                    "type": "readonly"},
                             {"key": "moisture_percent",            "label": "% Moisture",                            "type": "number"},
                             {"key": "moisture_analysis",          "label": "Tr. Analysis (% Moisture)",             "type": "dropdown",
-                             "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"]},
+                             "options": ["As new", "Dry", "Moderately Wet", "Wet", "Very Wet"], "column_evaluation": _EV_MOISTURE},
                             {"key": "moisture_previous_test",     "label": "% Moisture Previous Test",              "type": "number"},
                             {"key": "oil_conductivity_psm",       "label": "Oil Conductivity (pS/m)",               "type": "number"},
                             {"key": "oil_conductivity_analysis",  "label": "Tr. Analysis (Oil Conductivity)",       "type": "dropdown",
-                             "options": ["As new", "Acceptable", "Poor", "Bad"]},
+                             "options": ["As new", "Acceptable", "Poor", "Bad"], "column_evaluation": _EV_OIL_COND},
                         ],
                         "default_rows": [
                             {"test_configuration": "HV-GND"},
@@ -7085,6 +7132,7 @@ TEST_TEMPLATES = {
                         "analytics_skip": True,
                         "label": "SFRA Measurements (Amplitude vs Frequency)",
                         "type": "table",
+                        "required": True,
                         "allow_add_rows": True,
                         "allow_delete_rows": True,
                         "columns": [
@@ -7273,11 +7321,25 @@ TEST_TEMPLATES = {
                         "lock_default_rows": False,
                         "columns": [
                             {"key": "test_point",         "label": "Test Point",              "type": "readonly"},
+                            # Nameplate setpoint differs per transformer - tester enters the
+                            # actual value from the equipment's nameplate/OEM datasheet here;
+                            # this is NOT auto-populated from a fixed lookup.
                             {"key": "rated_setpoint_c",   "label": "Rated Setpoint (Nameplate)", "type": "number", "unit": "°C"},
                             {"key": "actual_value_c",     "label": "Actual Value Observed",   "type": "number", "unit": "°C"},
                             {
-                                "key": "result", "label": "Contact Operation", "type": "dropdown",
-                                "options": ["Pass", "Fail"],
+                                "key": "result", "label": "Contact Operation", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "actual_value_c",
+                                        "right_field": "rated_setpoint_c",
+                                        "operator": "<=",
+                                        "row_id_field": "test_point",
+                                        "row_operators": {},
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
                                 "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
                             },
                         ],
@@ -7306,11 +7368,25 @@ TEST_TEMPLATES = {
                         "lock_default_rows": False,
                         "columns": [
                             {"key": "test_point",         "label": "Test Point",              "type": "readonly"},
+                            # Nameplate setpoint differs per transformer - tester enters the
+                            # actual value from the equipment's nameplate/OEM datasheet here;
+                            # this is NOT auto-populated from a fixed lookup.
                             {"key": "rated_setpoint_c",   "label": "Rated Setpoint (Nameplate)", "type": "number", "unit": "°C"},
                             {"key": "actual_value_c",     "label": "Actual Value Observed",   "type": "number", "unit": "°C"},
                             {
-                                "key": "result", "label": "Contact Operation", "type": "dropdown",
-                                "options": ["Pass", "Fail"],
+                                "key": "result", "label": "Contact Operation", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "actual_value_c",
+                                        "right_field": "rated_setpoint_c",
+                                        "operator": "<=",
+                                        "row_id_field": "test_point",
+                                        "row_operators": {},
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
                                 "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
                             },
                         ],
@@ -7373,11 +7449,31 @@ TEST_TEMPLATES = {
                         "lock_default_rows": False,
                         "columns": [
                             {"key": "test_point",       "label": "Test Point",                 "type": "readonly"},
-                            {"key": "rated_value",      "label": "Rated Value (Nameplate)",     "type": "number", "unit": "kg/cm²"},
+                            {
+                                "key": "rated_value",   "label": "Rated Value (Nameplate)",     "type": "calculated", "unit": "kg/cm²",
+                                # Locked value sourced from the CM/PM master template - set the
+                                # per-test-point rated value in the Template Designer before this
+                                # table is used; left empty here since real nameplate values vary
+                                # by equipment and must not be guessed.
+                                "rule": {"type": "LOOKUP", "config": {"field": "test_point", "mapping": {}}},
+                            },
                             {"key": "actual_value",     "label": "Actual Value Observed",       "type": "number", "unit": "kg/cm²"},
                             {
-                                "key": "result", "label": "Result", "type": "dropdown",
-                                "options": ["Pass", "Fail"],
+                                "key": "result", "label": "Result", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "actual_value",
+                                        "right_field": "rated_value",
+                                        "operator": "<=",
+                                        "row_id_field": "test_point",
+                                        # e.g. "Reseal (drops to 0 after operation)" needs its own
+                                        # direction/limit - configure per row in the Template Designer.
+                                        "row_operators": {},
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
                                 "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
                             },
                         ],
@@ -7450,8 +7546,27 @@ TEST_TEMPLATES = {
                             {"key": "test_point",   "label": "Test Point",                       "type": "readonly"},
                             {"key": "test_value",   "label": "Air Injected / Surge Applied",      "type": "number", "unit": "cc"},
                             {
-                                "key": "result", "label": "Contact Operation", "type": "dropdown",
-                                "options": ["Pass", "Fail"],
+                                "key": "rated_value", "label": "Standard Test Value", "type": "calculated", "unit": "cc",
+                                # Locked value sourced from the CM/PM master template - set the
+                                # per-test-point standard air/oil-surge volume (per IS 3637) in the
+                                # Template Designer before this table is used; left empty here since
+                                # it must not be guessed.
+                                "rule": {"type": "LOOKUP", "config": {"field": "test_point", "mapping": {}}},
+                            },
+                            {
+                                "key": "result", "label": "Contact Operation", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "test_value",
+                                        "right_field": "rated_value",
+                                        "operator": "<=",
+                                        "row_id_field": "test_point",
+                                        "row_operators": {},
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
                                 "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
                             },
                         ],
@@ -7471,7 +7586,7 @@ TEST_TEMPLATES = {
                     {"key": "float_mercury_condition", "label": "Float / Mercury Switch Condition", "type": "dropdown",
                      "options": ["Free Movement", "Sluggish", "Stuck", "Damaged"],
                      "dropdown_evaluation": {"enabled": True, "value_severities": {"Free Movement": "NORMAL", "Sluggish": "ALERT", "Stuck": "CRITICAL", "Damaged": "CRITICAL"}}},
-                    {"key": "wiring_continuity_ok", "label": "Alarm/Trip Wiring Continuity Checked", "type": "boolean", "required": True},
+                    {"key": "wiring_continuity_ok", "label": "Alarm/Trip Wiring Continuity Checked", "type": "dropdown", "options": ["Pass", "Fail", "N/A"], "required": True, "dropdown_evaluation": {"enabled": True, "value_severities": _EV_PFNA}},
                     {"key": "gas_sample_taken", "label": "Gas Sample Taken for Analysis (if gas present)", "type": "boolean"},
                 ],
             },
@@ -7483,6 +7598,7 @@ TEST_TEMPLATES = {
                         "options": ["PASS", "ALERT", "FAIL"], "required": True,
                         "dropdown_evaluation": {"enabled": True, "value_severities": {"PASS": "NORMAL", "ALERT": "ALERT", "FAIL": "CRITICAL"}},
                     },
+                    {"key": "fault_description", "label": "Fault Description", "type": "textarea", "depends_on": {"field": "overall_result", "value": "FAIL"}},
                     {"key": "observation",    "label": "Observation",    "type": "textarea"},
                     {"key": "recommendation", "label": "Recommendation", "type": "textarea"},
                 ],
@@ -9201,7 +9317,7 @@ TEST_TEMPLATES = {
         "name": "OLTC Dynamic Resistance Measurement (DRM)",
         "equipment_type": "Power Transformer",
         "description": "Dynamic contact resistance measurement across OLTC tap positions — detects contact pitting, coking, and transition-timing anomalies during tap-change operation.",
-        "is_active": False,
+        "is_active": True,
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
@@ -9243,7 +9359,7 @@ TEST_TEMPLATES = {
                             {"key": "selector_resistance_mohm", "label": "Selector Contact Resistance", "type": "number", "unit": "mΩ"},
                             {"key": "transition_time_ms", "label": "Diverter Transition Time",  "type": "number", "unit": "ms"},
                             {"key": "deviation_pct",      "label": "Deviation from Baseline",   "type": "number", "unit": "%"},
-                            {"key": "anomaly_detected",   "label": "Anomaly Detected",          "type": "dropdown", "options": ["No", "Yes"], "dropdown_evaluation": {"enabled": True, "value_severities": {"No": "NORMAL", "Yes": "ALERT"}}},
+                            {"key": "anomaly_detected",   "label": "Anomaly Detected",          "type": "dropdown", "options": ["No", "Yes"], "column_evaluation": {"No": "NORMAL", "Yes": "ALERT"}},
                         ],
                         "default_rows": [{"tap_position": "1", "direction": "Raise"}],
                     },
@@ -9285,7 +9401,7 @@ TEST_TEMPLATES = {
         "name": "Transformer Turns Ratio (TTR)",
         "equipment_type": "Power Transformer",
         "description": "Turns ratio measurement across all winding pairs and tap positions, compared against nameplate ratio.",
-        "is_active": False,
+        "is_active": True,
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
@@ -9367,7 +9483,7 @@ TEST_TEMPLATES = {
         "name": "Partial Discharge Measurement",
         "equipment_type": "Power Transformer",
         "description": "Partial discharge measurement (IEC 60270 conventional / UHF / acoustic) — apparent charge, inception/extinction voltage, and PD pattern classification.",
-        "is_active": False,
+        "is_active": True,
         "supports_multi_session": False,
         "typical_session_interval_days": None,
         "typical_total_sessions": 1,
@@ -9407,8 +9523,23 @@ TEST_TEMPLATES = {
                             {"key": "phase",              "label": "Phase",             "type": "dropdown", "options": ["R", "Y", "B"]},
                             {"key": "applied_voltage_kv", "label": "Applied Voltage",   "type": "number", "unit": "kV"},
                             {"key": "apparent_charge_pc", "label": "Apparent Charge",   "type": "number", "unit": "pC"},
+                            # Threshold varies by voltage class / test method - tester enters
+                            # the applicable limit here; not auto-populated from a fixed lookup.
                             {"key": "threshold_pc",       "label": "Threshold",         "type": "number", "unit": "pC"},
-                            {"key": "row_result",         "label": "Result",            "type": "dropdown", "options": ["Pass", "Fail"], "column_evaluation": _EV_PF},
+                            {
+                                "key": "row_result", "label": "Result", "type": "calculated",
+                                "rule": {
+                                    "type": "ROW_COMPARE",
+                                    "config": {
+                                        "left_field": "apparent_charge_pc",
+                                        "right_field": "threshold_pc",
+                                        "operator": "<=",
+                                        "pass_value": "Pass",
+                                        "fail_value": "Fail",
+                                    },
+                                },
+                                "column_evaluation": {"Pass": "NORMAL", "Fail": "CRITICAL"},
+                            },
                         ],
                         "default_rows": [{"phase": "R"}, {"phase": "Y"}, {"phase": "B"}],
                     },

@@ -1,0 +1,689 @@
+<title>SEACMS Capacity Planner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#F5F7F8;
+    --surface:#FFFFFF;
+    --surface-2:#EEF2F3;
+    --line:#DCE3E5;
+    --ink:#131B22;
+    --ink-muted:#5B6B76;
+    --ink-faint:#8B9AA3;
+    --accent:#0E7C74;
+    --accent-ink:#FFFFFF;
+    --accent-soft:#E4F2F0;
+    --ok:#2F9E44;
+    --ok-soft:#E7F6E9;
+    --warn:#B5710F;
+    --warn-soft:#FBF0DD;
+    --crit:#C23B3B;
+    --crit-soft:#FBE7E7;
+    --bar-track:#E4E9EA;
+    --shadow: 0 1px 2px rgba(19,27,34,.04), 0 8px 24px -12px rgba(19,27,34,.12);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0D1316;
+      --surface:#151D21;
+      --surface-2:#1B2429;
+      --line:#2A353A;
+      --ink:#E7EEF0;
+      --ink-muted:#93A5AC;
+      --ink-faint:#63757C;
+      --accent:#4FD1C5;
+      --accent-ink:#08201D;
+      --accent-soft:rgba(79,209,197,.12);
+      --ok:#5FC97A;
+      --ok-soft:rgba(95,201,122,.12);
+      --warn:#E2A054;
+      --warn-soft:rgba(226,160,84,.12);
+      --crit:#E8635E;
+      --crit-soft:rgba(232,99,94,.13);
+      --bar-track:#263136;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0D1316;
+    --surface:#151D21;
+    --surface-2:#1B2429;
+    --line:#2A353A;
+    --ink:#E7EEF0;
+    --ink-muted:#93A5AC;
+    --ink-faint:#63757C;
+    --accent:#4FD1C5;
+    --accent-ink:#08201D;
+    --accent-soft:rgba(79,209,197,.12);
+    --ok:#5FC97A;
+    --ok-soft:rgba(95,201,122,.12);
+    --warn:#E2A054;
+    --warn-soft:rgba(226,160,84,.12);
+    --crit:#E8635E;
+    --crit-soft:rgba(232,99,94,.13);
+    --bar-track:#263136;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,sans-serif;
+    padding:32px 20px 64px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;}
+
+  /* ---------- header ---------- */
+  .eyebrow{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--accent);
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:10px;
+  }
+  .eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);}
+  h1{
+    font-family:'Archivo',sans-serif;
+    font-weight:800;
+    font-size:clamp(28px,4vw,38px);
+    line-height:1.08;
+    letter-spacing:-.01em;
+    text-wrap:balance;
+    margin:0 0 8px;
+  }
+  .lede{
+    color:var(--ink-muted);
+    font-size:15px;
+    max-width:62ch;
+    line-height:1.55;
+    margin:0 0 28px;
+  }
+  .lede code{font-family:'IBM Plex Mono',monospace;font-size:13px;background:var(--surface-2);padding:1px 5px;border-radius:4px;}
+
+  /* ---------- controls ---------- */
+  .controls{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:14px;
+    box-shadow:var(--shadow);
+    padding:22px 24px;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:24px;
+    margin-bottom:22px;
+  }
+  @media (max-width:640px){ .controls{grid-template-columns:1fr;} }
+  .field label{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:13px; font-weight:600; color:var(--ink);
+    margin-bottom:10px;
+  }
+  .field label .unit{font-weight:400;color:var(--ink-faint);font-size:12px;}
+  .field .row{display:flex; align-items:center; gap:12px;}
+  input[type=range]{
+    flex:1; -webkit-appearance:none; appearance:none;
+    height:4px; border-radius:2px; background:var(--bar-track); outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none;
+    width:16px;height:16px;border-radius:50%;
+    background:var(--accent); border:3px solid var(--surface); box-shadow:0 0 0 1px var(--accent);
+    cursor:pointer;
+  }
+  input[type=range]::-moz-range-thumb{
+    width:16px;height:16px;border-radius:50%;
+    background:var(--accent); border:3px solid var(--surface); box-shadow:0 0 0 1px var(--accent);
+    cursor:pointer; border-radius:50%;
+  }
+  input[type=number]{
+    width:84px; font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:500;
+    color:var(--ink); background:var(--surface-2); border:1px solid var(--line);
+    border-radius:8px; padding:7px 8px; text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
+  input[type=number]:focus, input[type=range]:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+  .field .hint{font-size:12px; color:var(--ink-faint); margin-top:6px;}
+
+  /* ---------- summary strip ---------- */
+  .summary{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:1px;
+    background:var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden;
+    margin-bottom:28px; box-shadow:var(--shadow);
+  }
+  @media (max-width:640px){ .summary{grid-template-columns:repeat(2,1fr);} }
+  .summary .cell{background:var(--surface); padding:18px 20px;}
+  .summary .cell .num{
+    font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:26px;
+    color:var(--ink); font-variant-numeric:tabular-nums; line-height:1;
+  }
+  .summary .cell .num small{font-size:14px; font-weight:500; color:var(--ink-faint); margin-left:3px;}
+  .summary .cell .lbl{font-size:12px; color:var(--ink-muted); margin-top:6px;}
+
+  /* ---------- section headings ---------- */
+  h2{
+    font-family:'Archivo',sans-serif; font-weight:700; font-size:15px;
+    text-transform:uppercase; letter-spacing:.05em; color:var(--ink-muted);
+    margin:0 0 14px; padding-top:6px;
+  }
+
+  /* ---------- resource grid ---------- */
+  .grid{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:32px;
+  }
+  @media (max-width:820px){ .grid{grid-template-columns:1fr 1fr;} }
+  @media (max-width:520px){ .grid{grid-template-columns:1fr;} }
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    padding:18px 18px 16px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:12px;
+  }
+  .card .top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+  .card .tier{font-family:'Archivo',sans-serif; font-weight:700; font-size:15px;}
+  .card .tag{
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--accent); background:var(--accent-soft); padding:3px 7px; border-radius:5px; white-space:nowrap;
+  }
+  .card .headline{
+    font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:20px; color:var(--ink);
+    font-variant-numeric:tabular-nums;
+  }
+  .bars{display:flex; flex-direction:column; gap:7px;}
+  .bar-row{display:grid; grid-template-columns:34px 1fr 44px; align-items:center; gap:8px; font-size:11px; color:var(--ink-faint);}
+  .bar-track{height:6px; background:var(--bar-track); border-radius:3px; overflow:hidden;}
+  .bar-fill{height:100%; background:var(--accent); border-radius:3px;}
+  .bar-row .val{font-family:'IBM Plex Mono',monospace; text-align:right; color:var(--ink-muted); font-variant-numeric:tabular-nums;}
+  .card .note{font-size:12.5px; line-height:1.5; color:var(--ink-muted); border-top:1px solid var(--line); padding-top:10px; margin-top:2px;}
+  .card .note code{font-family:'IBM Plex Mono',monospace; font-size:11.5px; background:var(--surface-2); padding:0 4px; border-radius:3px;}
+
+  /* ---------- pre-scale fixes ---------- */
+  .fixes{display:flex; flex-direction:column; gap:10px; margin-bottom:28px;}
+  .fix{
+    background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--crit);
+    border-radius:10px; padding:14px 16px; box-shadow:var(--shadow);
+    display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+  }
+  .fix.warn{border-left-color:var(--warn);}
+  .fix .sev{
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:600; letter-spacing:.05em;
+    padding:4px 8px; border-radius:5px; white-space:nowrap; margin-top:1px;
+    background:var(--crit-soft); color:var(--crit);
+  }
+  .fix.warn .sev{background:var(--warn-soft); color:var(--warn);}
+  .fix .body h3{
+    font-family:'IBM Plex Sans',sans-serif; font-weight:600; font-size:14px; margin:0 0 4px; color:var(--ink);
+  }
+  .fix .body p{margin:0; font-size:13px; line-height:1.55; color:var(--ink-muted);}
+  .fix .body p code{font-family:'IBM Plex Mono',monospace; font-size:12px; background:var(--surface-2); padding:0 4px; border-radius:3px; color:var(--ink);}
+  .fix .body .figure{font-family:'IBM Plex Mono',monospace; font-weight:600; color:var(--crit);}
+  .fix.warn .body .figure{color:var(--warn);}
+
+  /* ---------- assumptions ---------- */
+  /* ---------- tabs ---------- */
+  .tabs{display:flex; gap:0; margin-bottom:20px; border-bottom:1px solid var(--line);}
+  .tab-btn{
+    font-family:'Archivo',sans-serif; font-weight:700; font-size:13.5px;
+    padding:10px 2px; margin-right:26px; background:none; border:none; cursor:pointer;
+    color:var(--ink-faint); border-bottom:2px solid transparent; margin-bottom:-1px;
+  }
+  .tab-btn.active{color:var(--ink); border-bottom-color:var(--accent);}
+  .tab-btn:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  /* ---------- reverse: spec groups ---------- */
+  .spec-groups{display:grid; grid-template-columns:repeat(4,1fr); gap:20px;}
+  @media (max-width:900px){ .spec-groups{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:520px){ .spec-groups{grid-template-columns:1fr;} }
+  .spec-group h4{
+    font-family:'Archivo',sans-serif; font-size:12px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.05em; color:var(--ink-muted); margin:0 0 12px;
+  }
+  .spec-field{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px;}
+  .spec-field label{font-size:12.5px; color:var(--ink-muted);}
+  .spec-field input[type=number]{width:64px;}
+  .spec-field.checkbox{gap:8px;}
+  .spec-field input[type=checkbox]{width:15px;height:15px; accent-color:var(--accent); cursor:pointer;}
+
+  .summary--dual{grid-template-columns:repeat(2,1fr);}
+  .summary .cell .sub{font-size:11.5px; color:var(--ink-faint); margin-top:3px;}
+  .bottleneck-tag{
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--crit); background:var(--crit-soft); padding:3px 7px; border-radius:5px; white-space:nowrap;
+  }
+  .ok-tag{
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--ok); background:var(--ok-soft); padding:3px 7px; border-radius:5px; white-space:nowrap;
+  }
+
+  details{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 18px;
+  }
+  summary{
+    cursor:pointer; font-size:13px; font-weight:600; color:var(--ink); list-style:none;
+    display:flex; align-items:center; gap:8px;
+  }
+  summary::-webkit-details-marker{display:none;}
+  summary::before{content:"›"; font-family:'IBM Plex Mono',monospace; transition:transform .15s ease; color:var(--accent); font-size:16px;}
+  details[open] summary::before{transform:rotate(90deg);}
+  .assumptions-body{
+    margin-top:12px; padding-top:12px; border-top:1px solid var(--line);
+    font-size:12.5px; color:var(--ink-muted); line-height:1.7;
+  }
+  .assumptions-body dl{display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:0;}
+  .assumptions-body dt{font-family:'IBM Plex Mono',monospace; color:var(--ink); white-space:nowrap;}
+  .assumptions-body dd{margin:0;}
+  footer{margin-top:22px; font-size:12px; color:var(--ink-faint); line-height:1.6;}
+</style>
+
+<div class="wrap">
+  <div class="eyebrow"><span class="dot"></span>Customer-API · On-Prem Deployment</div>
+  <h1>Capacity Planner</h1>
+  <p class="lede">Live infrastructure sizing for the SEACMS-AI Customer-API, derived from what's actually in <code>requirements.txt</code>, <code>database.py</code> and the migrations schema — not a generic estimate.</p>
+
+  <div class="tabs">
+    <button class="tab-btn active" id="tabBtnFwd" data-tab="fwd">Load → Infra</button>
+    <button class="tab-btn" id="tabBtnRev" data-tab="rev">Infra → Capacity</button>
+  </div>
+
+  <!-- ===================== FORWARD PANEL ===================== -->
+  <div class="panel active" id="panelFwd">
+    <div class="controls">
+      <div class="field">
+        <label>Concurrent users <span class="unit">— live sessions hitting the API at once</span></label>
+        <div class="row">
+          <input type="range" id="cRange" min="10" max="3000" step="10" value="500">
+          <input type="number" id="cNum" min="1" max="20000" value="500">
+        </div>
+        <div class="hint">e.g. field engineers &amp; supervisors logged into dashboards/testing screens simultaneously</div>
+      </div>
+      <div class="field">
+        <label>Testing requests / day <span class="unit">— OCR extractions to process</span></label>
+        <div class="row">
+          <input type="range" id="tRange" min="5" max="5000" step="5" value="100">
+          <input type="number" id="tNum" min="1" max="50000" value="100">
+        </div>
+        <div class="hint">oil tests, tan-delta reports &amp; other uploaded test documents run through <code>easyocr</code></div>
+      </div>
+    </div>
+
+    <div class="summary" id="summary"></div>
+
+    <h2>Recommended servers</h2>
+    <div class="grid" id="grid"></div>
+
+    <h2>Pre-scale fixes — required, not optional</h2>
+    <div class="fixes" id="fixes"></div>
+  </div>
+
+  <!-- ===================== REVERSE PANEL ===================== -->
+  <div class="panel" id="panelRev">
+    <div class="controls" style="grid-template-columns:1fr;">
+      <div class="spec-groups">
+        <div class="spec-group">
+          <h4>API server</h4>
+          <div class="spec-field"><label>vCPU / instance</label><input type="number" id="rApiVcpu" min="1" max="64" value="4"></div>
+          <div class="spec-field"><label>RAM / instance (GB)</label><input type="number" id="rApiRam" min="1" max="512" value="16"></div>
+          <div class="spec-field"><label>Instances</label><input type="number" id="rApiInstances" min="1" max="50" value="1"></div>
+        </div>
+        <div class="spec-group">
+          <h4>Database</h4>
+          <div class="spec-field"><label>vCPU</label><input type="number" id="rDbVcpu" min="1" max="128" value="4"></div>
+          <div class="spec-field"><label>RAM (GB)</label><input type="number" id="rDbRam" min="1" max="1024" value="16"></div>
+          <div class="spec-field checkbox"><label for="rPgBouncer">PgBouncer in front</label><input type="checkbox" id="rPgBouncer"></div>
+        </div>
+        <div class="spec-group">
+          <h4>OCR / background</h4>
+          <div class="spec-field"><label>vCPU</label><input type="number" id="rOcrVcpu" min="1" max="64" value="2"></div>
+          <div class="spec-field"><label>RAM (GB)</label><input type="number" id="rOcrRam" min="1" max="256" value="6"></div>
+        </div>
+        <div class="spec-group">
+          <h4>Storage</h4>
+          <div class="spec-field"><label>Disk available (GB)</label><input type="number" id="rDisk" min="10" max="100000" value="200"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="summary summary--dual" id="revSummary"></div>
+
+    <h2>Capacity breakdown</h2>
+    <div class="grid" id="revGrid"></div>
+
+    <h2>Pre-scale fixes at this capacity</h2>
+    <div class="fixes" id="revFixes"></div>
+  </div>
+
+  <details style="margin-top:6px;">
+    <summary>Sizing assumptions</summary>
+    <div class="assumptions-body">
+      <dl id="assumptions"></dl>
+    </div>
+  </details>
+
+  <footer>Formulas are engineering heuristics grounded in current code limits (connection pool size, inline OCR calls, default thread-pool depth) — they are a planning starting point, not a load-tested capacity guarantee. Validate against real traffic before procurement.</footer>
+</div>
+
+<script>
+(function(){
+  const clamp = (v,min,max) => Math.min(max, Math.max(min, v));
+  const fmt = n => n.toLocaleString('en-US');
+
+  function compute(C, T){
+    // ---- API tier ----
+    const instances = Math.max(1, Math.ceil(C / 300));
+    const perInstanceLoad = C / instances;
+    const apiVcpu = clamp(Math.ceil(perInstanceLoad / 35), 4, 16);
+    const apiRam = clamp(apiVcpu * 4, 16, 64);
+    const apiWorkers = clamp(Math.ceil(perInstanceLoad / 60), 2, 12);
+
+    // ---- Database tier ----
+    const dbConnections = Math.max(20, Math.ceil(C * 0.3));
+    const dbVcpu = clamp(Math.ceil(dbConnections / 20), 4, 32);
+    const dbRam = clamp(dbVcpu * 4, 16, 128);
+    const needsPgBouncer = dbConnections > 50;
+
+    // ---- Web / UI tier ----
+    const webVcpu = clamp(Math.ceil(C / 250), 2, 8);
+    const webRam = 4 + Math.floor(C / 250) * 2;
+
+    // ---- OCR / background workers (driven by tests/day) ----
+    const avgOcrSeconds = 45;
+    const workingHours = 10;
+    const availableSeconds = workingHours * 3600;
+    const utilizationTarget = 0.5;
+    const requiredWorkerSeconds = T * avgOcrSeconds;
+    const ocrWorkers = Math.max(1, Math.ceil(requiredWorkerSeconds / (availableSeconds * utilizationTarget)));
+    const ocrRamPerWorker = 3;
+    const ocrVcpu = Math.max(2, ocrWorkers);
+    const ocrRam = ocrWorkers * ocrRamPerWorker;
+    const ocrHours = requiredWorkerSeconds / 3600;
+
+    // ---- Storage growth ----
+    const avgFileMB = 6;
+    const dailyGrowthMB = T * avgFileMB;
+    const monthlyGrowthGB = (dailyGrowthMB * 30) / 1024;
+    const yearOneGB = Math.ceil(100 + monthlyGrowthGB * 12);
+
+    // ---- Redis ----
+    const redisDedicated = C >= 200 || instances > 1;
+    const redisRam = 4 + Math.floor(C / 500) * 2;
+
+    const totalVcpu = apiVcpu*instances + dbVcpu + webVcpu + ocrVcpu + (redisDedicated?2:0);
+    const totalRam  = apiRam*instances + dbRam + webRam + ocrRam + (redisDedicated?redisRam:0);
+    const totalBoxes = instances + 1 + 1 + 1 + (redisDedicated?1:0);
+
+    return {C,T,instances,perInstanceLoad,apiVcpu,apiRam,apiWorkers,
+      dbConnections,dbVcpu,dbRam,needsPgBouncer,
+      webVcpu,webRam,
+      ocrWorkers,ocrVcpu,ocrRam,ocrHours,
+      dailyGrowthMB,monthlyGrowthGB,yearOneGB,
+      redisDedicated,redisRam,
+      totalVcpu,totalRam,totalBoxes};
+  }
+
+  function barRow(label, value, max, unit){
+    const pct = clamp(Math.round((value/max)*100), 4, 100);
+    return `<div class="bar-row"><span>${label}</span><span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span><span class="val">${value}${unit}</span></div>`;
+  }
+
+  function card(tag, tier, headline, bars, note, badgeHTML){
+    return `<div class="card">
+      <div class="top"><span class="tier">${tier}</span>${badgeHTML || `<span class="tag">${tag}</span>`}</div>
+      <div class="headline">${headline}</div>
+      <div class="bars">${bars}</div>
+      <div class="note">${note}</div>
+    </div>`;
+  }
+
+  function fix(sevClass, sevLabel, title, html){
+    return `<div class="fix ${sevClass}"><span class="sev">${sevLabel}</span><div class="body"><h3>${title}</h3><p>${html}</p></div></div>`;
+  }
+
+  // Shared: build the 5 pre-scale-fix cards for a given (C,T) scenario — used by both tabs.
+  function buildFixesHTML(C, T, r){
+    const poolMult = (r.dbConnections/15).toFixed(1);
+    const threadRatio = (C/40).toFixed(1);
+    return [
+      fix('warn', 'WATCH', 'Database pool must be set for this scale — defaults are too low',
+        `<code>database.py:87</code> now reads <code>DB_POOL_SIZE</code> / <code>DB_MAX_OVERFLOW</code> from <code>.env</code> (fixed — previously hardcoded), but the defaults are still 5/10 = 15 connections/process. At ${fmt(C)} concurrent users you need roughly <span class="figure">${fmt(r.dbConnections)}</span> — <span class="figure">${poolMult}×</span> the default. Set both in this site's <code>.env</code> before deploying, and coordinate with Postgres <code>max_connections</code> / PgBouncer.`),
+
+      fix('warn', 'WATCH', 'Thread pool & worker count must be set for this scale — defaults are too low',
+        `Handlers in <code>routers/testing.py</code> and most others are plain <code>def</code>, not <code>async def</code> — served from a thread pool now configurable via <code>THREAD_POOL_SIZE</code> in <code>.env</code> (fixed — applied at startup in <code>main.py</code>; default 40, matching anyio's own default). At ${fmt(C)} concurrent users that's <span class="figure">${threadRatio}×</span> the default. Set <code>THREAD_POOL_SIZE</code> and run ${Math.max(2, r.apiWorkers)}+ processes via <code>WEB_CONCURRENCY</code> / <code>start_api.sh</code> — vCPU alone won't help.`),
+
+      fix(r.instances > 1 ? 'crit' : 'warn', r.instances > 1 ? 'CRITICAL' : 'WATCH', 'Upload path is configurable — but still needs a shared mount for multiple instances',
+        `<code>routers/file_upload.py</code> now reads <code>UPLOAD_DIR</code> from <code>.env</code> (fixed — previously hardcoded to <code>uploads/documents/</code>). That only helps once it points at storage every instance can reach. ${r.instances > 1 ? `This scenario needs <span class="figure">${r.instances} API instances</span> — set <code>UPLOAD_DIR</code> to a network share or object-storage mount shared by all of them before adding the second instance.` : 'Fine as a local path at a single instance, but set it to shared storage before adding a second one.'}`),
+
+      fix('warn', 'WATCH', 'Upload size limit is set and shared with the UI — reverse proxy still needs its own cap',
+        `<code>utils/upload_limits.py</code> now enforces <code>MAX_UPLOAD_MB</code> from <code>.env</code> (fixed — default 5 MB, shared across every upload endpoint, reading in chunks and aborting early rather than buffering the whole file). The Flutter UI reads the same value live from <code>GET /public-config</code> rather than keeping its own copy, so both sides stay in sync automatically. Still set <code>client_max_body_size</code> at the reverse proxy to match — the app-level check alone won't stop an oversized request from reaching this instance first. Relevant given storage is growing ~${r.monthlyGrowthGB.toFixed(1)} GB/month.`),
+
+      fix(r.ocrWorkers > 1 ? 'crit' : 'warn', r.ocrWorkers > 1 ? 'CRITICAL' : 'WATCH', 'OCR extraction runs inline on the request path',
+        `<code>services/import_extractor_service.py</code> calls <code>easyocr</code> synchronously, <code>workers=1</code>, inside the request handler. At ${fmt(T)} tests/day that's <span class="figure">${r.ocrHours.toFixed(1)} compute-hours</span> that would otherwise tie up threads shared with all ${fmt(C)} other users. Move it to the background queue sized above.`),
+    ].join('');
+  }
+
+  function render(){
+    const C = clamp(parseInt(document.getElementById('cNum').value)||500, 1, 20000);
+    const T = clamp(parseInt(document.getElementById('tNum').value)||100, 1, 50000);
+    document.getElementById('cRange').value = clamp(C,10,3000);
+    document.getElementById('tRange').value = clamp(T,5,5000);
+
+    const r = compute(C, T);
+
+    document.getElementById('summary').innerHTML = `
+      <div class="cell"><div class="num">${r.totalBoxes}</div><div class="lbl">servers to provision</div></div>
+      <div class="cell"><div class="num">${r.totalVcpu}<small>vCPU</small></div><div class="lbl">total compute</div></div>
+      <div class="cell"><div class="num">${r.totalRam}<small>GB</small></div><div class="lbl">total memory</div></div>
+      <div class="cell"><div class="num">${r.instances}×</div><div class="lbl">API instance${r.instances>1?'s':''} (HA)</div></div>
+    `;
+
+    document.getElementById('grid').innerHTML = [
+      card('API', 'API Server', `${r.apiVcpu} vCPU · ${r.apiRam} GB`,
+        barRow('CPU', r.apiVcpu, 16, ' vCPU') + barRow('RAM', r.apiRam, 64, ' GB'),
+        `${r.instances} instance${r.instances>1?'s':''} × ${r.apiWorkers} gunicorn/uvicorn workers each, sized for ${fmt(Math.round(r.perInstanceLoad))} concurrent sessions per instance. Sync <code>def</code> handlers run in FastAPI's thread pool — worker count matters as much as vCPU.`),
+
+      card('DB', 'Database Server', `${r.dbVcpu} vCPU · ${r.dbRam} GB`,
+        barRow('CPU', r.dbVcpu, 32, ' vCPU') + barRow('RAM', r.dbRam, 128, ' GB'),
+        `Needs ≈ ${fmt(r.dbConnections)} concurrent connections at ${fmt(C)} users. ${r.needsPgBouncer ? 'Put <code>PgBouncer</code> in front — raw connections at this count will strain Postgres directly.' : 'PgBouncer optional at this load.'}`),
+
+      card('UI', 'Web / UI Server', `${r.webVcpu} vCPU · ${r.webRam} GB`,
+        barRow('CPU', r.webVcpu, 8, ' vCPU') + barRow('RAM', r.webRam, 16, ' GB'),
+        `Static Flutter web build behind a reverse proxy — no app logic runs here, sizing tracks TLS/session volume, not compute.`),
+
+      card('OCR', 'OCR / Background Workers', `${r.ocrWorkers} worker${r.ocrWorkers>1?'s':''} · ${r.ocrRam} GB`,
+        barRow('CPU', r.ocrVcpu, 16, ' vCPU') + barRow('RAM', r.ocrRam, 48, ' GB'),
+        `${fmt(T)} tests/day × ~45s each ≈ ${r.ocrHours.toFixed(1)}h of <code>easyocr</code>/<code>torch</code> compute — run as a queue, off the request path (see fixes below).`),
+
+      card('Cache', 'Redis', r.redisDedicated ? `Dedicated · ${r.redisRam} GB` : 'Co-located',
+        barRow('RAM', r.redisRam, 16, ' GB'),
+        r.redisDedicated ? `At ${fmt(C)} concurrent users / ${r.instances} instances, split Redis out so cache traffic doesn't compete with API or OCR CPU.` : `Low enough load to co-locate on the API box.`),
+
+      card('Disk', 'Storage Growth', `+${r.monthlyGrowthGB.toFixed(1)} GB/mo`,
+        barRow('Yr 1', r.yearOneGB, 1000, ' GB'),
+        `${fmt(T)} tests/day × ~6 MB (scanned report + OCR temp images) ≈ ${fmt(Math.round(r.dailyGrowthMB))} MB/day. Year-one estimate: ~${fmt(r.yearOneGB)} GB — plan retention/archival before that.`),
+    ].join('');
+
+    document.getElementById('fixes').innerHTML = buildFixesHTML(C, T, r);
+
+    document.getElementById('assumptions').innerHTML = `
+      <dt>OCR time / test</dt><dd>45 s average (<code>easyocr</code>, CPU, single page)</dd>
+      <dt>OCR work window</dt><dd>10 working hours/day at 50% target utilization</dd>
+      <dt>DB connection factor</dt><dd>0.3 × concurrent users (not every session queries simultaneously)</dd>
+      <dt>Thread-pool baseline</dt><dd>~40 threads (FastAPI/anyio default)</dd>
+      <dt>Avg file size</dt><dd>6 MB per test (scanned document + OCR temp images)</dd>
+      <dt>API instance ceiling</dt><dd>~300 concurrent sessions before adding another instance</dd>
+    `;
+
+    saveState();
+  }
+
+  function sync(fromRange){
+    if(fromRange){
+      document.getElementById('cNum').value = document.getElementById('cRange').value;
+      document.getElementById('tNum').value = document.getElementById('tRange').value;
+    }
+    render();
+  }
+
+  ['cRange','tRange'].forEach(id=>document.getElementById(id).addEventListener('input', ()=>sync(true)));
+  ['cNum','tNum'].forEach(id=>document.getElementById(id).addEventListener('input', ()=>sync(false)));
+
+  // =====================================================================
+  // REVERSE: "what I have" → achievable concurrent users / tests per day
+  // Inverts the same constants used in compute(), so both directions
+  // agree with each other.
+  // =====================================================================
+  function computeReverse(inputs){
+    const {apiVcpu, apiRam, apiInstances, dbVcpu, dbRam, pgBouncer, ocrVcpu, ocrRam, disk} = inputs;
+
+    // ---- API tier: capacity is bounded by whichever of CPU or RAM runs out first ----
+    const apiLoadPerInstance = 35 * Math.min(apiVcpu, apiRam / 4);
+    const apiCapacityUsers = Math.floor(apiInstances * apiLoadPerInstance);
+
+    // ---- DB tier: same inversion, then convert connections → concurrent users ----
+    let dbConnCapacity = 20 * Math.min(dbVcpu, dbRam / 4);
+    const pgDefaultCeiling = 100; // Postgres default max_connections
+    const dbCappedByDefault = !pgBouncer && dbConnCapacity > pgDefaultCeiling;
+    if (!pgBouncer) dbConnCapacity = Math.min(dbConnCapacity, pgDefaultCeiling);
+    const dbCapacityUsers = Math.floor(dbConnCapacity / 0.3);
+
+    const achievableC = Math.max(1, Math.min(apiCapacityUsers, dbCapacityUsers));
+    const bottleneckC = apiCapacityUsers <= dbCapacityUsers ? 'API server' : 'Database server';
+
+    // ---- OCR tier: workers bounded by CPU or RAM (3 GB/worker model footprint) ----
+    const ocrWorkerCapacity = Math.max(1, Math.floor(Math.min(ocrVcpu, ocrRam / 3)));
+    const availableSeconds = 10 * 3600, utilizationTarget = 0.5, avgOcrSeconds = 45;
+    const ocrCapacityTests = Math.floor((ocrWorkerCapacity * availableSeconds * utilizationTarget) / avgOcrSeconds);
+
+    // ---- Storage tier: how many tests/day can 12 months of growth sustain ----
+    const usableGB = Math.max(0, disk - 100); // 100 GB reserved for OS/app/logs
+    const monthlyGrowthCapacityGB = usableGB / 12;
+    const dailyGrowthCapacityMB = (monthlyGrowthCapacityGB * 1024) / 30;
+    const storageCapacityTests = Math.floor(dailyGrowthCapacityMB / 6);
+
+    const achievableT = Math.max(1, Math.min(ocrCapacityTests, storageCapacityTests));
+    const bottleneckT = ocrCapacityTests <= storageCapacityTests ? 'OCR / background workers' : 'Storage';
+
+    return {apiCapacityUsers, dbCapacityUsers, dbCappedByDefault, achievableC, bottleneckC,
+      ocrWorkerCapacity, ocrCapacityTests, storageCapacityTests, achievableT, bottleneckT};
+  }
+
+  function tierCard(tier, tag, badge, headline, bars, note){
+    const badgeHTML = badge ? `<span class="${badge==='BOTTLENECK'?'bottleneck-tag':'ok-tag'}">${badge}</span>` : null;
+    return card(tag, tier, headline, bars, note, badgeHTML);
+  }
+
+  function renderReverse(){
+    const inputs = {
+      apiVcpu: clamp(parseInt(document.getElementById('rApiVcpu').value)||4, 1, 64),
+      apiRam: clamp(parseInt(document.getElementById('rApiRam').value)||16, 1, 512),
+      apiInstances: clamp(parseInt(document.getElementById('rApiInstances').value)||1, 1, 50),
+      dbVcpu: clamp(parseInt(document.getElementById('rDbVcpu').value)||4, 1, 128),
+      dbRam: clamp(parseInt(document.getElementById('rDbRam').value)||16, 1, 1024),
+      pgBouncer: document.getElementById('rPgBouncer').checked,
+      ocrVcpu: clamp(parseInt(document.getElementById('rOcrVcpu').value)||2, 1, 64),
+      ocrRam: clamp(parseInt(document.getElementById('rOcrRam').value)||6, 1, 256),
+      disk: clamp(parseInt(document.getElementById('rDisk').value)||200, 10, 100000),
+    };
+
+    const x = computeReverse(inputs);
+
+    document.getElementById('revSummary').innerHTML = `
+      <div class="cell"><div class="num">${fmt(x.achievableC)}</div><div class="lbl">concurrent users supported</div><div class="sub">bottleneck: ${x.bottleneckC}</div></div>
+      <div class="cell"><div class="num">${fmt(x.achievableT)}</div><div class="lbl">testing requests / day supported</div><div class="sub">bottleneck: ${x.bottleneckT}</div></div>
+    `;
+
+    const maxUserTier = Math.max(x.apiCapacityUsers, x.dbCapacityUsers, 1);
+    const maxTestTier = Math.max(x.ocrCapacityTests, x.storageCapacityTests, 1);
+
+    document.getElementById('revGrid').innerHTML = [
+      tierCard('API Server', 'API', x.bottleneckC==='API server' ? 'BOTTLENECK' : 'OK',
+        `~${fmt(x.apiCapacityUsers)} users`,
+        barRow('Cap', x.apiCapacityUsers, maxUserTier, ''),
+        `${inputs.apiInstances} instance${inputs.apiInstances>1?'s':''} × ${inputs.apiVcpu} vCPU / ${inputs.apiRam} GB each.`),
+
+      tierCard('Database Server', 'DB', x.bottleneckC==='Database server' ? 'BOTTLENECK' : 'OK',
+        `~${fmt(x.dbCapacityUsers)} users`,
+        barRow('Cap', x.dbCapacityUsers, maxUserTier, ''),
+        `${inputs.dbVcpu} vCPU / ${inputs.dbRam} GB. ${inputs.pgBouncer ? 'PgBouncer in front — raw connection budget applies directly.' : x.dbCappedByDefault ? `No PgBouncer — capped at Postgres' default <code>max_connections=100</code> even though the hardware could support more.` : 'No PgBouncer, but under the default connection ceiling at this size.'}`),
+
+      tierCard('OCR / Background', 'OCR', x.bottleneckT==='OCR / background workers' ? 'BOTTLENECK' : 'OK',
+        `~${fmt(x.ocrCapacityTests)} tests/day`,
+        barRow('Cap', x.ocrCapacityTests, maxTestTier, ''),
+        `${x.ocrWorkerCapacity} worker${x.ocrWorkerCapacity>1?'s':''} from ${inputs.ocrVcpu} vCPU / ${inputs.ocrRam} GB (~3 GB/worker for resident <code>torch</code>/<code>easyocr</code> models).`),
+
+      tierCard('Storage', 'Disk', x.bottleneckT==='Storage' ? 'BOTTLENECK' : 'OK',
+        `~${fmt(x.storageCapacityTests)} tests/day`,
+        barRow('Cap', x.storageCapacityTests, maxTestTier, ''),
+        `${fmt(inputs.disk)} GB disk, 100 GB reserved for OS/app/logs, sized to sustain 12 months of upload growth (~6 MB/test) before running out.`),
+    ].join('');
+
+    const r = compute(x.achievableC, x.achievableT);
+    document.getElementById('revFixes').innerHTML = buildFixesHTML(x.achievableC, x.achievableT, r);
+
+    saveState();
+  }
+
+  const revInputIds = ['rApiVcpu','rApiRam','rApiInstances','rDbVcpu','rDbRam','rPgBouncer','rOcrVcpu','rOcrRam','rDisk'];
+  revInputIds.forEach(id=>document.getElementById(id).addEventListener('input', renderReverse));
+
+  // ---- tabs ----
+  const tabBtns = {fwd: document.getElementById('tabBtnFwd'), rev: document.getElementById('tabBtnRev')};
+  const panels  = {fwd: document.getElementById('panelFwd'), rev: document.getElementById('panelRev')};
+  function showTab(name){
+    Object.keys(tabBtns).forEach(k=>{
+      tabBtns[k].classList.toggle('active', k===name);
+      panels[k].classList.toggle('active', k===name);
+    });
+    saveState(name);
+  }
+  tabBtns.fwd.addEventListener('click', ()=>showTab('fwd'));
+  tabBtns.rev.addEventListener('click', ()=>showTab('rev'));
+
+  // ---- persistence ----
+  function saveState(activeTab){
+    try{
+      const prev = JSON.parse(localStorage.getItem('seacms-capacity-planner')) || {};
+      const state = {
+        tab: activeTab || prev.tab || 'fwd',
+        C: parseInt(document.getElementById('cNum').value) || prev.C || 500,
+        T: parseInt(document.getElementById('tNum').value) || prev.T || 100,
+        rev: {
+          apiVcpu: document.getElementById('rApiVcpu').value, apiRam: document.getElementById('rApiRam').value,
+          apiInstances: document.getElementById('rApiInstances').value,
+          dbVcpu: document.getElementById('rDbVcpu').value, dbRam: document.getElementById('rDbRam').value,
+          pgBouncer: document.getElementById('rPgBouncer').checked,
+          ocrVcpu: document.getElementById('rOcrVcpu').value, ocrRam: document.getElementById('rOcrRam').value,
+          disk: document.getElementById('rDisk').value,
+        }
+      };
+      localStorage.setItem('seacms-capacity-planner', JSON.stringify(state));
+    }catch(e){}
+  }
+
+  let initial = {tab:'fwd', C:500, T:100, rev:null};
+  try{
+    const saved = JSON.parse(localStorage.getItem('seacms-capacity-planner'));
+    if(saved) initial = Object.assign(initial, saved);
+  }catch(e){}
+  document.getElementById('cNum').value = initial.C;
+  document.getElementById('tNum').value = initial.T;
+  if(initial.rev){
+    document.getElementById('rApiVcpu').value = initial.rev.apiVcpu;
+    document.getElementById('rApiRam').value = initial.rev.apiRam;
+    document.getElementById('rApiInstances').value = initial.rev.apiInstances;
+    document.getElementById('rDbVcpu').value = initial.rev.dbVcpu;
+    document.getElementById('rDbRam').value = initial.rev.dbRam;
+    document.getElementById('rPgBouncer').checked = !!initial.rev.pgBouncer;
+    document.getElementById('rOcrVcpu').value = initial.rev.ocrVcpu;
+    document.getElementById('rOcrRam').value = initial.rev.ocrRam;
+    document.getElementById('rDisk').value = initial.rev.disk;
+  }
+  showTab(initial.tab === 'rev' ? 'rev' : 'fwd');
+
+  render();
+  renderReverse();
+})();
+</script>

@@ -7,8 +7,9 @@ from services import city_service, userrole_service
 from sqlalchemy.orm import Session
 from services.plan_service import PlanService
 from auth_utils import get_registration_user
-from config import MAX_FILE_SIZE_KB, NOMINATIM_URL
+from config import MAX_DOCUMENT_UPLOAD_MB, NOMINATIM_URL
 from database import get_db
+from utils.upload_limits import read_and_validate_upload
 import schemas
 from services import user_service
 from services.companybankdocument_service import CompanyBankDocumentService
@@ -38,7 +39,6 @@ countryservice = CountryService()
 stateservice = StateService()
 taxservice = CompanyTaxService()
 taxdocumentservice = CompanyTaxDocumentService()
-ALLOWED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 
 @router.post("/", response_model=schemas.User)
 def create_user(user: schemas.UserRegistor, db: Session = Depends(get_db)):
@@ -311,7 +311,7 @@ async def upload_bank_document_reg(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    file_data = await file.read()
+    file_data = await read_and_validate_upload(file, category="document", max_mb=MAX_DOCUMENT_UPLOAD_MB)
 
     return CompanyBankDocumentService.create_document(
         db=db,
@@ -334,7 +334,7 @@ async def upload_tax_document_reg(
     try:
         print("📌 DEBUG RECEIVED category_detail_id =", category_detail_id)
         # Read file content
-        file_data = await file.read()
+        file_data = await read_and_validate_upload(file, category="document", max_mb=MAX_DOCUMENT_UPLOAD_MB)
 
      
 
@@ -476,12 +476,7 @@ async def complete_registration(
                     raise HTTPException(400, f"Missing bank file index {i}")
 
                 up = uploaded_files[i]
-                data_bytes = await up.read()
-
-                if len(data_bytes) > MAX_FILE_SIZE_BYTES:
-                    raise HTTPException(400, "Bank document too large")
-                if up.content_type not in ALLOWED_MIME_TYPES:
-                    raise HTTPException(400, "Invalid bank document type")
+                data_bytes = await read_and_validate_upload(up, category="document", max_mb=MAX_DOCUMENT_UPLOAD_MB)
 
                 CompanyBankDocumentService.create_document(
                     db=db,
@@ -513,12 +508,7 @@ async def complete_registration(
                     raise HTTPException(400, f"Missing tax file index {i}")
 
                 up = uploaded_files[i]
-                data_bytes = await up.read()
-
-                if len(data_bytes) > MAX_FILE_SIZE_BYTES:
-                    raise HTTPException(400, "Tax document too large")
-                if up.content_type not in ALLOWED_MIME_TYPES:
-                    raise HTTPException(400, "Invalid tax document type")
+                data_bytes = await read_and_validate_upload(up, category="document", max_mb=MAX_DOCUMENT_UPLOAD_MB)
 
                 taxdocumentservice.create_document_for_company(
                     db=db,

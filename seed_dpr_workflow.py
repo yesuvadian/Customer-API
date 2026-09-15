@@ -130,6 +130,7 @@ ROLE_MAP = {
 _TEMPLATES = {
     "dpr_initiation_form": {
         "name": "DPR — Initiation",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Project Justification",
@@ -145,6 +146,7 @@ _TEMPLATES = {
     },
     "dpr_cost_estimation_form": {
         "name": "DPR — Cost Estimation",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Estimation Basis",
@@ -194,6 +196,7 @@ _TEMPLATES = {
     },
     "dpr_technical_review_form": {
         "name": "DPR — Technical Review",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Feasibility Checklist",
@@ -231,6 +234,7 @@ _TEMPLATES = {
     },
     "dpr_authority_approval_form": {
         "name": "DPR — Authority Approval",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Approval Decision",
@@ -246,6 +250,7 @@ _TEMPLATES = {
     },
     "dpr_execution_tracking_form": {
         "name": "DPR — Execution Tracking",
+        "template_type": "dpr_stage",
         "sections": [
             {
                 "title": "Progress Update",
