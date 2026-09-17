@@ -805,34 +805,44 @@ async def bulk_import(
                 pass
 
         try:
-            equipment = EquipmentService.create_equipment(
-                db=db,
-                organization_id=org_id,
-                department_id=dept.id,
-                equipment_type_id=eq_type,
-                voltage_class=str(d["voltage_class"]).strip() if d.get("voltage_class") else None,
-                bay_number=str(d["bay_number"]).strip() if d.get("bay_number") else None,
-                nameplate_data=nameplate_data or None,
-                commissioned_date=commissioned_date,
-                manufacturer=str(d["manufacturer"]).strip() if d.get("manufacturer") else None,
-                model_number=str(d["model_number"]).strip() if d.get("model_number") else None,
-                factory_serial_number=str(d["factory_serial_number"]).strip() if d.get("factory_serial_number") else None,
-                year_of_manufacture=d.get("year_of_manufacture"),
-                latitude=d.get("latitude"),
-                longitude=d.get("longitude"),
-                phase=d.get("phase"),
-                ct_ratio_actual=str(d["ct_ratio_actual"]).strip() if d.get("ct_ratio_actual") else None,
-                ct_ratio_current=str(d["ct_ratio_current"]).strip() if d.get("ct_ratio_current") else None,
-                pt_ratio=str(d["pt_ratio"]).strip() if d.get("pt_ratio") else None,
-                vector_group=str(d["vector_group"]).strip() if d.get("vector_group") else None,
-                impedance_pct=d.get("impedance_pct"),
-                scada_tag=str(d["scada_tag"]).strip() if d.get("scada_tag") else None,
-                created_by=current_user.id,
-            )
-            db.flush()
+            # SAVEPOINT-scoped: a failure below only rolls back THIS row.
+            # db.commit() only fires once, after the whole loop, so a bare
+            # db.rollback() here would roll back the entire session —
+            # discarding every earlier row already flushed successfully in
+            # this same batch, while `imported` still counted them as
+            # successful. begin_nested() isolates each row's insert so the
+            # rest of the batch survives a single row's failure.
+            with db.begin_nested():
+                equipment = EquipmentService.create_equipment(
+                    db=db,
+                    organization_id=org_id,
+                    department_id=dept.id,
+                    equipment_type_id=eq_type,
+                    voltage_class=str(d["voltage_class"]).strip() if d.get("voltage_class") else None,
+                    bay_number=str(d["bay_number"]).strip() if d.get("bay_number") else None,
+                    nameplate_data=nameplate_data or None,
+                    commissioned_date=commissioned_date,
+                    manufacturer=str(d["manufacturer"]).strip() if d.get("manufacturer") else None,
+                    model_number=str(d["model_number"]).strip() if d.get("model_number") else None,
+                    factory_serial_number=str(d["factory_serial_number"]).strip() if d.get("factory_serial_number") else None,
+                    year_of_manufacture=d.get("year_of_manufacture"),
+                    latitude=d.get("latitude"),
+                    longitude=d.get("longitude"),
+                    phase=d.get("phase"),
+                    ct_ratio_actual=str(d["ct_ratio_actual"]).strip() if d.get("ct_ratio_actual") else None,
+                    ct_ratio_current=str(d["ct_ratio_current"]).strip() if d.get("ct_ratio_current") else None,
+                    pt_ratio=str(d["pt_ratio"]).strip() if d.get("pt_ratio") else None,
+                    vector_group=str(d["vector_group"]).strip() if d.get("vector_group") else None,
+                    impedance_pct=d.get("impedance_pct"),
+                    scada_tag=str(d["scada_tag"]).strip() if d.get("scada_tag") else None,
+                    created_by=current_user.id,
+                )
+                db.flush()
             imported += 1
 
-            # Non-fatal post-creation hooks
+            # Non-fatal post-creation hooks — deliberately outside the
+            # savepoint above: a failure here must not undo the equipment
+            # row itself, only skip the schedule instantiation.
             try:
                 from services.test_request_schedule_service import TestRequestScheduleService
                 TestRequestScheduleService.instantiate_equipment_schedules(db, equipment, current_user.id)
@@ -840,7 +850,6 @@ async def bulk_import(
                 pass
 
         except Exception as exc:
-            db.rollback()
             skipped += 1
             error_rows.append({"row": result["row"], "errors": [str(exc)]})
             continue
