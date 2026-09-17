@@ -840,6 +840,7 @@ class TrWfStage(Base):
     is_mandatory = Column(Boolean, default=True)
     is_active = Column(Boolean, default=True)
     default_duration_days = Column(Integer, nullable=True)
+    default_duration_hours = Column(Integer, nullable=True)
     show_recommendation = Column(Boolean, default=False, server_default="false")
     is_result_stage = Column(Boolean, default=False, server_default="false")
     use_l2_route = Column(Boolean, default=False, server_default="false")
@@ -972,6 +973,7 @@ class TrWfStageInstance(Base):
     completed_at = Column(DateTime, nullable=True)
     completed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     comment = Column(Text, nullable=True)
+    sla_breach_notified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     wf_instance = relationship("TrWfInstance", back_populates="stage_instances")
