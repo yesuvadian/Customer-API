@@ -3296,10 +3296,27 @@ class NotificationService:
         self, manufacturer: str, equipment_type: str,
         problem_description: str, affected_count: int,
         organization_id=None,
+        recipient_roles_override: Optional[List[str]] = None,
+        source_id=None,
+        source_type: Optional[str] = None,
     ) -> None:
         """
         Fired when a systemic design problem is identified for a make/model
         (SRS — Design Problem Alert). Broadcasts org-wide (no dept scoping).
+
+        recipient_roles_override: the template's own baked-in role names
+        ("Maintenance Officer" / "Reviewing Officer" / "Supervisory Officer")
+        don't reliably match every org's real role names (the same class of
+        bug found in the CAR escalation path) -- callers should pass the
+        event catalogue's own default_roles (CEE_TRANSMISSION_ZONE,
+        EE_TLSS -- both confirmed real, already-firing KPTCL roles
+        elsewhere) rather than relying on the template default.
+
+        source_id/source_type: a cohort has no real row/id of its own (it's
+        computed fresh from Equipment/TestingRequest joins), so a caller
+        that needs to dedup repeat alerts for the same cohort (e.g. main.py's
+        daily _check_design_problem_alerts) should pass a deterministic
+        synthetic id here and check NotificationLog for it before calling.
         """
         self.fire(
             event_type="design_problem_alert",
@@ -3312,6 +3329,9 @@ class NotificationService:
             organization_id=organization_id,
             severity="critical",
             equipment_type=equipment_type,
+            recipient_roles_override=recipient_roles_override,
+            source_id=source_id,
+            source_type=source_type,
         )
 
     def notify_deterioration_escalated(
