@@ -393,11 +393,20 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                         TestingRequest.test_type_id == schedule.test_type_id,
                         TestingRequest.status.in_(_open),
                         TestingRequest.is_schedule_template.is_(False),
-                        # Only consider already-generated follow-up tickets — NOT
-                        # the manually-created test that triggered this. The
-                        # original test has source_schedule_id = NULL, so it
-                        # won't block its own follow-up.
-                        TestingRequest.source_schedule_id.isnot(None),
+                        or_(
+                            # Already-generated follow-up ticket — NOT the
+                            # manually-created test that triggered this. The
+                            # original test has source_schedule_id = NULL, so
+                            # it won't block its own follow-up.
+                            TestingRequest.source_schedule_id.isnot(None),
+                            # OR a ticket CalibrationService.run_pre_due_check()
+                            # already created directly for this equipment (that
+                            # path never sets source_schedule_id, since it
+                            # doesn't go through a TestRequestSchedule row) —
+                            # without this, this scheduler can't see it and
+                            # creates a duplicate calibration ticket alongside it.
+                            TestingRequest.is_calibration.is_(True),
+                        ),
                     )
                     .first()
                 )

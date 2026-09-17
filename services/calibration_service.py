@@ -36,7 +36,7 @@ from typing import Optional
 from uuid import UUID
 
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from models import (
@@ -952,6 +952,12 @@ class CalibrationService:
         created = []
         skipped = []
 
+        # Looked up once — used both to recognize tickets the OTHER scheduler
+        # (test_request_schedule_service.py, via upsert_calibration_schedule's
+        # TestRequestSchedule row) already created for this equipment, and to
+        # tag the ticket this method creates itself.
+        cal_type_id = self._get_calibration_type_id()
+
         # All equipment that have calibration configs with scheduling enabled
         configs = (
             self.db.query(EquipmentCalibrationConfig)
@@ -979,12 +985,18 @@ class CalibrationService:
                 skipped.append(str(equipment_id))
                 continue
 
-            # Check if an open calibration request already exists
+            # Check if an open calibration request already exists — either one
+            # this method created itself (is_calibration=True) OR one the
+            # generic recurring scheduler already created from the
+            # TestRequestSchedule row upsert_calibration_schedule() writes
+            # after a Pass (that ticket doesn't set is_calibration, so it's
+            # recognized here by test_type_id instead). Without the second
+            # branch, both schedulers can independently create a ticket for
+            # the same overdue calibration.
             open_req = (
                 self.db.query(TestingRequest)
                 .filter(
                     TestingRequest.equipment_id == equipment_id,
-                    TestingRequest.is_calibration == True,  # noqa: E712
                     TestingRequest.status.in_([
                         TestingRequestStatus.draft,
                         TestingRequestStatus.submitted,
@@ -992,6 +1004,10 @@ class CalibrationService:
                         TestingRequestStatus.accepted,
                         TestingRequestStatus.in_progress,
                     ]),
+                    or_(
+                        TestingRequest.is_calibration == True,  # noqa: E712
+                        TestingRequest.test_type_id == cal_type_id,
+                    ),
                 )
                 .first()
             )
@@ -1005,7 +1021,6 @@ class CalibrationService:
                 skipped.append(str(equipment_id))
                 continue
 
-            cal_type_id = self._get_calibration_type_id()
             count = (
                 self.db.query(func.count(TestingRequest.id))
                 .filter(TestingRequest.request_number.like(
