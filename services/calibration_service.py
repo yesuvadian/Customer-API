@@ -39,6 +39,8 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from utils.business_days import business_days_between, subtract_business_days
+
 from models import (
     CalibrationRepairRecommendation,
     CategoryDetails,
@@ -572,7 +574,10 @@ class CalibrationService:
 
         next_due = date_add(cal_date_str, validity_months)
         today = self._today()
-        days_until_due = (next_due - today).days
+        # Business days (Mon-Fri) — weekends shouldn't count toward OVERDUE/
+        # DUE_SOON, or make an equipment look on-track over a weekend when
+        # it's actually already due.
+        days_until_due = business_days_between(today, next_due)
 
         if overall_result == "Fail":
             state = "CRITICAL"
@@ -814,8 +819,10 @@ class CalibrationService:
             )
             lead_days = cfg.lead_days if cfg else 30
 
-            # Trigger date: lead_days before next_due
-            trigger_date = next_due - __import__("datetime").timedelta(days=lead_days)
+            # Trigger date: lead_days (business days) before next_due — matches
+            # run_pre_due_check()'s own trigger_date calc, so the two paths that
+            # both decide "is this due yet" agree on the date.
+            trigger_date = subtract_business_days(next_due, lead_days)
             trigger_dt = datetime(
                 trigger_date.year, trigger_date.month, trigger_date.day,
                 tzinfo=timezone.utc,
@@ -979,7 +986,11 @@ class CalibrationService:
                 continue
 
             next_due = date.fromisoformat(next_due_str)
-            trigger_date = next_due - __import__("datetime").timedelta(days=cfg.lead_days)
+            # lead_days counted in business days, same as get_calibration_status's
+            # days_until_due — keeps "due soon" / "trigger now" consistent across
+            # both, and a weekend can't push the trigger point out further than
+            # intended.
+            trigger_date = subtract_business_days(next_due, cfg.lead_days)
 
             if today < trigger_date:
                 skipped.append(str(equipment_id))
@@ -1046,8 +1057,8 @@ class CalibrationService:
             self.db.add(new_req)
             created.append(str(equipment_id))
 
-            # Fire notification
-            days_until = (next_due - today).days
+            # Fire notification — business days, matching days_until_due above.
+            days_until = business_days_between(today, next_due)
             event = "kit_calibration_overdue" if days_until < 0 else "kit_calibration_due"
             _fire_calibration_notification(self.db, equipment, event, next_due, days_until)
 
