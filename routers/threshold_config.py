@@ -36,6 +36,7 @@ from models import (
     DqiRuleConfig,
     EquipmentConditionBandThreshold,
     EquipmentHealthBandThreshold,
+    FailureCohortThresholdConfig,
     ParameterConditionScore,
     TestStatusCondition,
     User,
@@ -149,6 +150,20 @@ class ConditionBandResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FailureCohortThresholdUpdate(BaseModel):
+    min_failure_rate: Optional[float] = None
+    min_cohort_units: Optional[int] = None
+
+
+class FailureCohortThresholdResponse(BaseModel):
+    min_failure_rate: float
+    min_cohort_units: int
+    # True when this org has its own override row; False means the value
+    # shown is the inherited system-wide default -- lets the UI show
+    # "(default)" vs "(customized)" without a second round trip.
+    is_org_override: bool
 
 
 # DqiRuleConfig's `key` is still constrained server-side to
@@ -584,6 +599,104 @@ def update_dqi_rule(
     db.commit()
     db.refresh(row)
     return row
+
+
+# ── Failure cohort thresholds ───────────────────────────────────────────────
+# Singleton per org, not a list like the tables above -- GET/PUT, not full
+# CRUD. See FailureCohortThresholdConfig's own docstring for the
+# org-override -> system-default lookup chain.
+
+@router.get("/failure-cohort-thresholds", response_model=FailureCohortThresholdResponse)
+def get_failure_cohort_thresholds(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org_row = (
+        db.query(FailureCohortThresholdConfig)
+        .filter(FailureCohortThresholdConfig.organization_id == current_user.organization_id)
+        .first()
+    )
+    if org_row:
+        return FailureCohortThresholdResponse(
+            min_failure_rate=float(org_row.min_failure_rate),
+            min_cohort_units=org_row.min_cohort_units,
+            is_org_override=True,
+        )
+
+    default_row = (
+        db.query(FailureCohortThresholdConfig)
+        .filter(FailureCohortThresholdConfig.organization_id.is_(None))
+        .first()
+    )
+    if not default_row:
+        raise HTTPException(
+            status_code=500,
+            detail="No system-wide default configured -- run alter_failure_cohort_threshold_config.py",
+        )
+    return FailureCohortThresholdResponse(
+        min_failure_rate=float(default_row.min_failure_rate),
+        min_cohort_units=default_row.min_cohort_units,
+        is_org_override=False,
+    )
+
+
+@router.put("/failure-cohort-thresholds", response_model=FailureCohortThresholdResponse)
+def update_failure_cohort_thresholds(
+    payload: FailureCohortThresholdUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Creates this org's own override row on first edit (get-or-create) --
+    every org starts on the inherited system-wide default and only
+    diverges once an admin here actually changes something."""
+    row = (
+        db.query(FailureCohortThresholdConfig)
+        .filter(FailureCohortThresholdConfig.organization_id == current_user.organization_id)
+        .first()
+    )
+    if not row:
+        default_row = (
+            db.query(FailureCohortThresholdConfig)
+            .filter(FailureCohortThresholdConfig.organization_id.is_(None))
+            .first()
+        )
+        row = FailureCohortThresholdConfig(
+            organization_id=current_user.organization_id,
+            min_failure_rate=default_row.min_failure_rate if default_row else 1.0,
+            min_cohort_units=default_row.min_cohort_units if default_row else 3,
+        )
+        db.add(row)
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(row, field, value)
+    row.modified_by = current_user.id
+
+    db.commit()
+    db.refresh(row)
+    return FailureCohortThresholdResponse(
+        min_failure_rate=float(row.min_failure_rate),
+        min_cohort_units=row.min_cohort_units,
+        is_org_override=True,
+    )
+
+
+@router.delete("/failure-cohort-thresholds", status_code=status.HTTP_204_NO_CONTENT)
+def reset_failure_cohort_thresholds(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Removes this org's override row so it falls back to the system-wide
+    default again -- a no-op (not a 404) if there was no override to begin
+    with, since "already at default" is the same end state either way."""
+    row = (
+        db.query(FailureCohortThresholdConfig)
+        .filter(FailureCohortThresholdConfig.organization_id == current_user.organization_id)
+        .first()
+    )
+    if row:
+        db.delete(row)
+        db.commit()
 
 
 @router.delete("/dqi-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)

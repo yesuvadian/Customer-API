@@ -972,9 +972,23 @@ class EquipmentService:
         default every call site used before this parameter existed).
         """
         import config as _config
-        from models import TestingRequest, TestResult, CategoryMaster
+        from models import TestingRequest, TestResult, CategoryMaster, FailureCohortThresholdConfig
 
-        min_units = _config.FAILURE_COHORT_MIN_UNITS
+        # Org-specific override -> system-wide default (organization_id
+        # NULL) -> .env constant as a last resort (e.g. before the seed
+        # script has run). Same lookup shape as NotificationTemplate.
+        _threshold_row = (
+            db.query(FailureCohortThresholdConfig)
+            .filter(FailureCohortThresholdConfig.organization_id == organization_id)
+            .first()
+            or db.query(FailureCohortThresholdConfig)
+            .filter(FailureCohortThresholdConfig.organization_id.is_(None))
+            .first()
+        )
+        min_units = (
+            _threshold_row.min_cohort_units if _threshold_row is not None
+            else _config.FAILURE_COHORT_MIN_UNITS
+        )
         limit     = _config.FAILURE_COHORT_DASHBOARD_LIMIT
 
         equip_q = (
@@ -1112,7 +1126,10 @@ class EquipmentService:
             ]
             del entry["unit_ids"]
 
-        design_problem_rate = _config.DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE
+        design_problem_rate = (
+            float(_threshold_row.min_failure_rate) if _threshold_row is not None
+            else _config.DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE
+        )
         results = []
         for entry in cohorts.values():
             if entry["unit_count"] < min_units:
