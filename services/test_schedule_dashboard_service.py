@@ -20,6 +20,8 @@ from uuid import UUID
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from utils.business_days import business_days_between
+
 from models import (
     CategoryDetails,
     CategoryMaster,
@@ -288,7 +290,7 @@ class TestScheduleDashboardService:
 
                 if next_run:
                     next_date = next_run.date() if isinstance(next_run, datetime) else next_run
-                    days = (next_date - self._today).days
+                    days = business_days_between(self._today, next_date)
                 else:
                     next_date = None
                     days = None
@@ -373,7 +375,7 @@ class TestScheduleDashboardService:
                     if end_d < today_dt:
                         continue  # truly expired — no valid run at all
                     nr_date = end_d
-            days = (nr_date - today_dt).days
+            days = business_days_between(today_dt, nr_date)
             if days < 0:
                 continue  # overdue — not "upcoming"
 
@@ -459,7 +461,7 @@ class TestScheduleDashboardService:
                 if next_naive > end_naive:
                     continue
             next_date = next_run.date() if isinstance(next_run, datetime) else next_run
-            days = (next_date - today).days
+            days = business_days_between(today, next_date)
             tt = tt_map.get(s.test_type_id)
             status = _cell_status(days)
 
@@ -518,7 +520,7 @@ class TestScheduleDashboardService:
                     next_run = s.end_date if end_naive >= today else None
             if next_run:
                 nd = next_run.date() if isinstance(next_run, datetime) else next_run
-                days = (nd - today).days
+                days = business_days_between(today, nd)
             else:
                 days = None
             cells_for_health[str(s.test_type_id)] = {"status": _cell_status(days)}
@@ -765,7 +767,7 @@ class TestScheduleDashboardService:
                 else next_run
             )
 
-            days = (next_date - today).days
+            days = business_days_between(today, next_date)
 
             if days <= 0:
                 overdue += 1
@@ -879,7 +881,7 @@ class TestScheduleDashboardService:
                     next_run = s.end_date if end_naive >= self._today else None
             if next_run:
                 next_date = next_run.date() if isinstance(next_run, datetime) else next_run
-                days = (next_date - self._today).days
+                days = business_days_between(self._today, next_date)
             else:
                 next_date = None
                 days = None
