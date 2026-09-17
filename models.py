@@ -843,6 +843,13 @@ class TrWfStage(Base):
     default_duration_hours = Column(Integer, nullable=True)
     show_recommendation = Column(Boolean, default=False, server_default="false")
     is_result_stage = Column(Boolean, default=False, server_default="false")
+    # Only meaningful when is_result_stage is True -- how long a result
+    # review stays open, after which the _check_auto_close_normal_results
+    # job (main.py) auto-closes it IF every TestResult on the request
+    # evaluated NORMAL (never the tester's own overall_result pass/fail
+    # pick -- see _derive_recommendation_from_results' same precedent).
+    # Null = auto-close disabled for this stage (opt-in, admin-configured).
+    auto_close_normal_after_hours = Column(Integer, nullable=True)
     use_l2_route = Column(Boolean, default=False, server_default="false")
     is_role_scoped = Column(Boolean, default=False, server_default="false")
     created_at = Column(DateTime, server_default=func.now())
