@@ -367,6 +367,44 @@ class TestRequestScheduleService(UTCDateTimeMixin):
              if now.date() < trigger_date.date():
                 return False
 
+            # ── Calibration cross-path guard (always on, unlike the guard below) ──
+            # CalibrationService.run_pre_due_check() (a separate daily cron) can
+            # also create a calibration TestingRequest directly for this same
+            # equipment — it never sets source_schedule_id, since it doesn't go
+            # through a TestRequestSchedule row at all, so the guarded _dup check
+            # below (and existing_generated further down) can't see it. That
+            # guard is deliberately OFF for this method's main caller
+            # (run_daily_scheduler, enforce_open_ticket_guard=False) so a
+            # schedule's own cadence keeps advancing past ITS OWN still-open
+            # prior-cycle ticket — but this check must still run regardless of
+            # that flag, or every daily run creates a second, duplicate
+            # calibration ticket alongside whatever run_pre_due_check already
+            # made for the same equipment.
+            if schedule.equipment_id and schedule.test_type_id:
+                from models import TestingRequestStatus as _TRS
+                _cal_dup = (
+                    db.query(TestingRequest)
+                    .filter(
+                        TestingRequest.equipment_id == schedule.equipment_id,
+                        TestingRequest.test_type_id == schedule.test_type_id,
+                        TestingRequest.is_calibration.is_(True),
+                        TestingRequest.status.in_([
+                            _TRS.draft, _TRS.submitted, _TRS.assigned, _TRS.accepted,
+                            _TRS.in_progress, _TRS.test_submitted, _TRS.under_approval,
+                            _TRS.under_review,
+                        ]),
+                    )
+                    .first()
+                )
+                if _cal_dup:
+                    logger.info(
+                        "[ScheduleService] Skipping ticket — open calibration request "
+                        "%s already exists for equipment %s (created directly by "
+                        "CalibrationService.run_pre_due_check, not via this schedule)",
+                        _cal_dup.request_number, schedule.equipment_id,
+                    )
+                    return False
+
             # ── Cross-path dedup ─────────────────────────────────────────────
             # Multiple paths can create a follow-up for the same equipment+test
             # (threshold-alert followup on save AND recommendation dispatch on
@@ -393,20 +431,11 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                         TestingRequest.test_type_id == schedule.test_type_id,
                         TestingRequest.status.in_(_open),
                         TestingRequest.is_schedule_template.is_(False),
-                        or_(
-                            # Already-generated follow-up ticket — NOT the
-                            # manually-created test that triggered this. The
-                            # original test has source_schedule_id = NULL, so
-                            # it won't block its own follow-up.
-                            TestingRequest.source_schedule_id.isnot(None),
-                            # OR a ticket CalibrationService.run_pre_due_check()
-                            # already created directly for this equipment (that
-                            # path never sets source_schedule_id, since it
-                            # doesn't go through a TestRequestSchedule row) —
-                            # without this, this scheduler can't see it and
-                            # creates a duplicate calibration ticket alongside it.
-                            TestingRequest.is_calibration.is_(True),
-                        ),
+                        # Only consider already-generated follow-up tickets — NOT
+                        # the manually-created test that triggered this. The
+                        # original test has source_schedule_id = NULL, so it
+                        # won't block its own follow-up.
+                        TestingRequest.source_schedule_id.isnot(None),
                     )
                     .first()
                 )
