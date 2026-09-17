@@ -17,6 +17,7 @@ overwritten.
 Usage:
     python alter_failure_cohort_threshold_config.py
 """
+from sqlalchemy import text
 from database import VendorSessionLocal
 from models import Base, FailureCohortThresholdConfig
 import config as _config
@@ -31,6 +32,19 @@ def main():
 
     db = VendorSessionLocal()
     try:
+        # create_all only creates a MISSING table -- it never alters an
+        # existing one, so outlier_z_score (added after this table's first
+        # release, for within-cohort outlier detection) needs its own
+        # idempotent ADD COLUMN. The DEFAULT clause backfills any row that
+        # already exists (e.g. the seeded default row below, from before
+        # this column existed) in the same statement.
+        db.execute(text(
+            "ALTER TABLE public.failure_cohort_threshold_configs "
+            "ADD COLUMN IF NOT EXISTS outlier_z_score NUMERIC(4,2) NOT NULL DEFAULT 3.0"
+        ))
+        db.commit()
+        print("Ensured failure_cohort_threshold_configs.outlier_z_score column exists.")
+
         existing = (
             db.query(FailureCohortThresholdConfig)
             .filter(FailureCohortThresholdConfig.organization_id.is_(None))

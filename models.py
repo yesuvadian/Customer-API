@@ -5535,6 +5535,12 @@ class FailureCohortThresholdConfig(Base):
     )
     min_failure_rate = Column(Numeric(5, 2), nullable=False, default=1.0)
     min_cohort_units = Column(Integer, nullable=False, default=3)
+    # Within-cohort outlier detection (KPTCL spec §2/12.3): a unit whose own
+    # failure_count Z-score against its cohort's mean/stdev clears this
+    # threshold is flagged is_outlier. Same default as the unrelated
+    # per-unit time-series anomaly detector (config.py's ANALYTICS_ANOMALY_Z)
+    # for consistency, not because the two are the same calculation.
+    outlier_z_score = Column(Numeric(4, 2), nullable=False, default=3.0)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
