@@ -1906,6 +1906,14 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             _logging.getLogger(__name__).warning(
                 "failure cohort reliability computation failed", exc_info=True
             )
+            # A DB-level error (e.g. a missing table/column) leaves this
+            # session's transaction aborted in Postgres — every later query
+            # on the same `db` in this request would raise
+            # InFailedSqlTransaction otherwise, cascading this one caught
+            # failure into unrelated widgets computed further down in
+            # _build_department_rollup (confirmed live: _ticket_lists failed
+            # right after this swallowed exception, same request).
+            db.rollback()
             return []
 
     if not children:
