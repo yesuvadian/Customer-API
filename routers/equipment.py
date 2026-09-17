@@ -1321,17 +1321,26 @@ def get_failure_cohorts(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Org-wide failure-rate-by-make/model cohort breakdown (KPTCL spec §2) --
-    same computation and shape the Overall Dashboard's Failure Reliability
-    panel already uses (EquipmentService.compute_failure_cohort_stats), just
+    Failure-rate-by-make/model cohort breakdown (KPTCL spec §2) -- same
+    computation and shape the Overall Dashboard's Failure Reliability panel
+    already uses (EquipmentService.compute_failure_cohort_stats), just
     exposed as its own endpoint so other screens (e.g. Equipment Registry)
     can open the same panel without pulling the whole dashboard rollup.
+
+    Scoped to the caller's own department subtree, same as every other
+    endpoint in this router (get_equipment_counts, etc.) -- an org admin
+    sees every cohort org-wide; a department-scoped user only sees cohorts
+    built from equipment within their own department hierarchy.
     """
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_view")
 
+    from utils.common_service import get_user_dept_scope, get_dept_subtree_ids
+    is_admin, scoped_dept = get_user_dept_scope(db, current_user.id, org_id)
+    department_ids = None if is_admin or not scoped_dept else get_dept_subtree_ids(db, scoped_dept)
+
     from services.equipment_service import EquipmentService
-    return EquipmentService.compute_failure_cohort_stats(db, org_id)
+    return EquipmentService.compute_failure_cohort_stats(db, org_id, department_ids=department_ids)
 
 
 @router.get("/stats/group-counts")
