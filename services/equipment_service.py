@@ -303,6 +303,31 @@ class EquipmentService:
         
         voltage_class = cls._normalize_voltage_class(voltage_class)
 
+        # KPTCL spec §1: "no two active equipment units may share the same
+        # serial number within the same equipment class and substation."
+        # Scoped to active units only — a serial can legitimately reappear
+        # once the earlier unit is retired/scrapped/replaced.
+        serial = (factory_serial_number or "").strip()
+        if serial:
+            dup = (
+                db.query(Equipment)
+                .filter(
+                    Equipment.equipment_type_id == equipment_type_id,
+                    Equipment.department_id == department_id,
+                    Equipment.factory_serial_number == serial,
+                    Equipment.status == EquipmentStatus.active,
+                )
+                .first()
+            )
+            if dup:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"An active {eq_type.name} with serial number '{serial}' "
+                        f"already exists at this substation (UEIC {dup.ueic})."
+                    ),
+                )
+
         ueic = cls.generate_ueic(
             db, department_id, eq_type.name, voltage_class, bay_number,
             manufacturer=manufacturer,
@@ -551,6 +576,32 @@ class EquipmentService:
             "phase", "ct_ratio_actual", "ct_ratio_current",
             "pt_ratio", "vector_group", "impedance_pct",
         ]
+
+        new_serial = kwargs.get("factory_serial_number")
+        if new_serial is not None:
+            new_serial = new_serial.strip()
+            if new_serial and new_serial != (equipment.factory_serial_number or ""):
+                dup = (
+                    db.query(Equipment)
+                    .filter(
+                        Equipment.id != equipment.id,
+                        Equipment.equipment_type_id == equipment.equipment_type_id,
+                        Equipment.department_id == equipment.department_id,
+                        Equipment.factory_serial_number == new_serial,
+                        Equipment.status == EquipmentStatus.active,
+                    )
+                    .first()
+                )
+                if dup:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"An active unit of this equipment class with serial "
+                            f"number '{new_serial}' already exists at this "
+                            f"substation (UEIC {dup.ueic})."
+                        ),
+                    )
+
         for key, value in kwargs.items():
             if key == "voltage_class" and value is not None:
                 value = cls._normalize_voltage_class(value)
