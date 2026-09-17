@@ -1315,6 +1315,25 @@ def get_equipment_counts(
     return counts
 
 
+@router.get("/stats/failure-cohorts")
+def get_failure_cohorts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Org-wide failure-rate-by-make/model cohort breakdown (KPTCL spec §2) --
+    same computation and shape the Overall Dashboard's Failure Reliability
+    panel already uses (EquipmentService.compute_failure_cohort_stats), just
+    exposed as its own endpoint so other screens (e.g. Equipment Registry)
+    can open the same panel without pulling the whole dashboard rollup.
+    """
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
+    from services.equipment_service import EquipmentService
+    return EquipmentService.compute_failure_cohort_stats(db, org_id)
+
+
 @router.get("/stats/group-counts")
 def get_equipment_group_counts(
     group_by: str = Query(..., description="Field to group by: equipment_type, manufacturer, voltage_class, model_type, bay_number, commission_year, failure_year, replacement_year"),

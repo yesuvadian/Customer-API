@@ -1076,6 +1076,104 @@ scheduler.add_job(
 )
 
 
+# ── Design Problem Register alert (runs daily at 10:00 UTC) ──────────────────
+# EquipmentService.compute_failure_cohort_stats() already computes
+# is_design_problem_candidate per make/model cohort on every dashboard
+# request -- this is what actually turns that dormant flag into a proactive
+# alert. A cohort isn't a real persisted row (it's computed fresh from
+# Equipment/TestingRequest joins every call, no id of its own), so instead of
+# a new table, dedup reuses the existing NotificationLog audit trail: a
+# deterministic UUID5 of (org, equipment_type, manufacturer, model_number)
+# becomes this fire's source_id, and "has design_problem_alert ever logged
+# against that source_id" is the one-shot guard -- a cohort that stays
+# flagged (nothing resolves it -- there's no "clear" action) doesn't
+# re-notify every day.
+def _check_design_problem_alerts():
+    db = BackgroundSessionLocal()
+    try:
+        import uuid as _uuid
+        from models import Organization, NotificationLog
+        from services.equipment_service import EquipmentService
+        from services.notification_service import NotificationService
+
+        orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        notified = 0
+        nsvc = NotificationService(db)
+        _cohort_ns = _uuid.UUID("6f2b6b6a-6b3a-4b8e-9e2a-7a3b1c9d4e5f")
+
+        for org in orgs:
+            try:
+                cohorts = EquipmentService.compute_failure_cohort_stats(db, org.id)
+            except Exception as _ce:
+                logger.warning(f"[Notif] Design problem cohort computation failed org={org.id}: {_ce}")
+                continue
+
+            for cohort in cohorts:
+                if not cohort.get("is_design_problem_candidate"):
+                    continue
+                equipment_type = cohort["equipment_type"]
+                manufacturer = cohort["manufacturer"]
+                model_number = cohort.get("model_number")
+
+                cohort_source_id = _uuid.uuid5(
+                    _cohort_ns, f"{org.id}|{equipment_type}|{manufacturer}|{model_number}"
+                )
+
+                already = (
+                    db.query(NotificationLog.id)
+                    .filter(
+                        NotificationLog.event_type == "design_problem_alert",
+                        NotificationLog.source_id == cohort_source_id,
+                    )
+                    .first()
+                )
+                if already:
+                    continue
+
+                try:
+                    nsvc.notify_design_problem_alert(
+                        manufacturer=manufacturer,
+                        equipment_type=equipment_type,
+                        problem_description=(
+                            f"Failure rate {cohort['failure_rate_per_unit']:.2f} per unit "
+                            f"across {cohort['unit_count']} unit(s)"
+                            + ("" if model_number else " (model not recorded on these units)")
+                        ),
+                        affected_count=cohort["unit_count"],
+                        organization_id=org.id,
+                        source_id=cohort_source_id,
+                        source_type="design_problem_cohort",
+                        # Template's own baked-in roles don't reliably match
+                        # every org's real role names -- the catalogue's
+                        # default_roles are already confirmed real, firing
+                        # KPTCL roles elsewhere.
+                        recipient_roles_override=["CEE_TRANSMISSION_ZONE", "EE_TLSS"],
+                    )
+                    notified += 1
+                except Exception as _fe:
+                    logger.warning(
+                        f"[Notif] Design problem alert fire failed org={org.id} "
+                        f"cohort=({equipment_type},{manufacturer},{model_number}): {_fe}"
+                    )
+
+        db.commit()
+        if notified:
+            logger.info(f"[Notif] Design problem alert check: {notified} notification(s) sent")
+    except Exception as e:
+        logger.error(f"[Notif] Design problem alert job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_design_problem_alerts,
+    trigger="cron",
+    hour=10,
+    minute=0,
+    id="design_problem_alert_job",
+)
+
+
 # Monthly MIS Report (runs on the 1st of each month at 06:00 UTC)
 # Collects per-org stats for the previous calendar month and fires
 # notify_monthly_mis_report() → sends to Senior Management / Supervisory roles.

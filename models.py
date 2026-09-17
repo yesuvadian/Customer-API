@@ -5507,6 +5507,39 @@ class EquipmentHealthBandThreshold(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class FailureCohortThresholdConfig(Base):
+    """Admin-configurable thresholds for failure-cohort computation
+    (EquipmentService.compute_failure_cohort_stats) -- replaces the
+    previously .env-only DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE and
+    FAILURE_COHORT_MIN_UNITS config.py constants.
+
+    organization_id NULL = the system-wide default -- same "org can
+    override, default always exists" pattern NotificationTemplate already
+    uses. An org only gets its own row once it explicitly overrides the
+    default; compute_failure_cohort_stats() looks up the org-specific row
+    first, falls back to the NULL row, and falls back to the .env
+    constants as a last resort if even that's missing (e.g. before the
+    seed script has run). No DB-level uniqueness on organization_id --
+    same as NotificationTemplate, de-duplication is the seed/update
+    endpoint's own get-or-create check, not a constraint.
+    """
+    __tablename__ = "failure_cohort_threshold_configs"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    min_failure_rate = Column(Numeric(5, 2), nullable=False, default=1.0)
+    min_cohort_units = Column(Integer, nullable=False, default=3)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class TestStatusCondition(Base):
     """Admin-configurable label for each test-evaluation status
     (NORMAL/ALERT/CRITICAL) — replaces the previously hardcoded _CONDITION
