@@ -95,6 +95,7 @@ def _stage_out(s: TrWfStage, db: Session = None) -> dict:
         "is_mandatory": s.is_mandatory,
         "is_active": s.is_active,
         "default_duration_days": s.default_duration_days,
+        "default_duration_hours": s.default_duration_hours,
         "show_recommendation": s.show_recommendation,
         "is_result_stage": s.is_result_stage,
         "use_l2_route": s.use_l2_route,
@@ -502,6 +503,13 @@ def create_stage(
     current_user: User = Depends(get_current_user),
 ):
     _assert_no_active_instances(db, def_id)
+    duration_days = body.get("default_duration_days")
+    duration_hours = body.get("default_duration_hours")
+    if duration_days is None and duration_hours is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide a stage duration in days or hours.",
+        )
     stage = TrWfStage(
         wf_definition_id=def_id,
         status_id=body.get("status_id"),
@@ -511,7 +519,8 @@ def create_stage(
         weight=body.get("weight", 10),
         is_mandatory=body.get("is_mandatory", True),
         is_active=body.get("is_active", True),
-        default_duration_days=body.get("default_duration_days"),
+        default_duration_days=duration_days,
+        default_duration_hours=duration_hours,
     )
     db.add(stage)
     db.commit()
@@ -532,9 +541,20 @@ def patch_stage(
         raise HTTPException(status_code=404, detail="Stage not found")
     for k in ("name", "code", "sequence", "weight", "status_id",
               "is_mandatory", "is_active", "default_duration_days",
+              "default_duration_hours",
               "show_recommendation", "is_result_stage", "use_l2_route", "is_role_scoped"):
         if k in body:
             setattr(stage, k, body[k])
+    # Only re-check "at least one duration required" when this update
+    # actually touches one of the two duration fields — otherwise an
+    # unrelated edit (e.g. rename) on a pre-existing stage that predates
+    # SLA support (both fields still NULL) would be blocked for no reason.
+    if ("default_duration_days" in body or "default_duration_hours" in body) \
+            and stage.default_duration_days is None and stage.default_duration_hours is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide a stage duration in days or hours.",
+        )
     db.commit()
     return _stage_out(_load_stage(db, stage.id), db)
 

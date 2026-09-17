@@ -1251,6 +1251,55 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # "no equipment" rather than a misleading 100%.
         dqi_pct = int((dqi_ready / dqi_total) * 100) if dqi_total > 0 else None
 
+        # Result Review SLA compliance — % of closed Result Review stage
+        # instances (TrWfStage.is_result_stage) that finished within their
+        # configured stage duration. Blended across severities, not the
+        # spec's 24h-ALERT/2h-CRITICAL split: severity is only captured on
+        # fired Notification rows (models.py:4561), not as a stable field
+        # on TestingRequest/TrWfStageInstance a historical report can join
+        # against, so a single stage-level duration is all that's available
+        # today. Only counts stages an admin has actually given a duration
+        # to (tr_workflow_config.py's create/patch validation) — every
+        # stage predating that feature is excluded, not treated as 0%.
+        from models import TrWfStageInstance
+        review_rows = (
+            db.query(
+                TrWfStageInstance.started_at,
+                TrWfStageInstance.completed_at,
+                TrWfStage.default_duration_hours,
+                TrWfStage.default_duration_days,
+            )
+            .join(TrWfStage, TrWfStage.id == TrWfStageInstance.stage_id)
+            .join(TrWfInstance, TrWfInstance.id == TrWfStageInstance.wf_instance_id)
+            .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+            .filter(
+                *tr_filters,
+                TrWfStage.is_result_stage.is_(True),
+                TrWfStageInstance.status.in_(("completed", "rejected")),
+                TrWfStageInstance.started_at.isnot(None),
+                TrWfStageInstance.completed_at.isnot(None),
+                _or(
+                    TrWfStage.default_duration_hours.isnot(None),
+                    TrWfStage.default_duration_days.isnot(None),
+                ),
+            )
+            .all()
+        )
+        review_sla_total = len(review_rows)
+        review_sla_compliant = 0
+        for started_at, completed_at, dur_hours, dur_days in review_rows:
+            deadline = (
+                started_at + timedelta(hours=dur_hours)
+                if dur_hours is not None
+                else started_at + timedelta(days=dur_days)
+            )
+            if completed_at <= deadline:
+                review_sla_compliant += 1
+        review_sla_pct = (
+            int((review_sla_compliant / review_sla_total) * 100)
+            if review_sla_total > 0 else None
+        )
+
         return {
             "total_tests": total_requests,
             "overdue_count": overdue_count,
@@ -1262,6 +1311,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "closed_this_week_count": closed_this_week_count,
             "rejected_cancelled_count": rejected_cancelled_count,
             "compliance_pct": compliance_pct,
+            "review_sla_pct": review_sla_pct,
+            "review_sla_total": review_sla_total,
             "dqi_pct": dqi_pct,
             "dqi_ready_count": dqi_ready,
             "dqi_total_count": dqi_total,
@@ -1290,6 +1341,70 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         issues_out = result["issues"]
         total = len(issues_out)
         page = issues_out[offset:offset + limit] if limit is not None else issues_out[offset:]
+        return page, total
+
+    def _review_sla_breaches_list(dept_ids_for_scope, limit=None):
+        """Closed Result Review stage instances that missed their
+        configured SLA -- the actionable detail behind _scope_counts'
+        review_sla_pct, same reasoning as _dqi_issues_list above: the
+        aggregate percentage alone doesn't tell you which ticket to act on.
+        """
+        from models import TrWfStageInstance as _TrWfStageInstance
+        from sqlalchemy import or_ as _or_rsb
+        _tr_filters = [TestingRequest.organization_id == svc.org_id]
+        if dept_ids_for_scope:
+            _tr_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+
+        rows = (
+            db.query(_TrWfStageInstance, TrWfStage, TestingRequest)
+            .join(TrWfStage, TrWfStage.id == _TrWfStageInstance.stage_id)
+            .join(TrWfInstance, TrWfInstance.id == _TrWfStageInstance.wf_instance_id)
+            .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+            .filter(
+                *_tr_filters,
+                TrWfStage.is_result_stage.is_(True),
+                _TrWfStageInstance.status.in_(("completed", "rejected")),
+                _TrWfStageInstance.started_at.isnot(None),
+                _TrWfStageInstance.completed_at.isnot(None),
+                _or_rsb(
+                    TrWfStage.default_duration_hours.isnot(None),
+                    TrWfStage.default_duration_days.isnot(None),
+                ),
+            )
+            .order_by(_TrWfStageInstance.completed_at.desc())
+            .all()
+        )
+
+        breaches = []
+        for si, stage, tr in rows:
+            deadline = (
+                si.started_at + timedelta(hours=stage.default_duration_hours)
+                if stage.default_duration_hours is not None
+                else si.started_at + timedelta(days=stage.default_duration_days)
+            )
+            if si.completed_at <= deadline:
+                continue
+            eq = getattr(tr, "equipment", None)
+            breaches.append({
+                "stage_instance_id": str(si.id),
+                "request_id": str(tr.id),
+                "request_number": tr.request_number,
+                "stage_name": stage.name,
+                # Reuses TicketsPanel's generic "test_type" display slot to
+                # show which stage breached, next to the request number --
+                # no separate widget needed for this one extra label.
+                "test_type": stage.name,
+                "equipment_id": str(eq.id) if eq else None,
+                "equipment_label": eq.ueic if eq else (
+                    tr.equipment_type.name if tr.equipment_type else "Equipment"),
+                "started_at": si.started_at.isoformat(),
+                "completed_at": si.completed_at.isoformat(),
+                "deadline": deadline.isoformat(),
+                "hours_over": round((si.completed_at - deadline).total_seconds() / 3600, 1),
+            })
+
+        total = len(breaches)
+        page = breaches[:limit] if limit is not None else breaches
         return page, total
 
     def _calibration_summary(dept_ids_for_scope):
@@ -1805,6 +1920,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # equipment count is small enough to return in full (unlike the
         # branch shape below, which caps it).
         dqi_issues, _dqi_issues_total = _dqi_issues_list(svc.dept_ids)
+        review_sla_breaches, _review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids)
 
         return {
             "shape": "leaf",
@@ -1814,6 +1930,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "equipment_count": equipment_count,
             "dqi_issues": dqi_issues,
             "dqi_issues_total_count": _dqi_issues_total,
+            "review_sla_breaches": review_sla_breaches,
+            "review_sla_breaches_total_count": _review_sla_breaches_total,
             "can_test": can_test,
             "assigned_test_count": assigned_test_count,
             "can_approve_requests": can_approve_requests,
@@ -1869,6 +1987,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     # substations' worth of equipment), with the true total alongside so the
     # UI can say "showing N of TOTAL" rather than imply the list is complete.
     _branch_dqi_issues, _branch_dqi_issues_total = _dqi_issues_list(svc.dept_ids, limit=50)
+    _branch_review_sla_breaches, _branch_review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids, limit=50)
     return {
         "shape": "branch",
         "scope_name": scope_name,
@@ -1879,6 +1998,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         "summary": _scope_counts(svc.dept_ids),
         "dqi_issues": _branch_dqi_issues,
         "dqi_issues_total_count": _branch_dqi_issues_total,
+        "review_sla_breaches": _branch_review_sla_breaches,
+        "review_sla_breaches_total_count": _branch_review_sla_breaches_total,
         "approvals": _approval_queue(svc.dept_ids),
         "can_approve_requests": can_approve_requests,
         "can_review": can_review,

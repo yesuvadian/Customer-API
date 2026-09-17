@@ -859,6 +859,12 @@ def _check_schedule_notifications():
                     TrWfStageInstance.status == "in_progress",
                     TrWfStageInstance.started_at.isnot(None),
                     TrWfStage.default_duration_days.isnot(None),
+                    # Result Review stages are owned by the more frequent
+                    # (15-minute) _check_review_sla_breaches job below, which
+                    # is hour-precision and understands default_duration_hours
+                    # -- this once-daily, date-truncated pass would otherwise
+                    # double-fire the same breach with a less precise deadline.
+                    TrWfStage.is_result_stage.is_(False),
                 )
                 .all()
             )
@@ -946,6 +952,127 @@ scheduler.add_job(
     hour=7,
     minute=0,
     id="schedule_notification_job",
+)
+
+
+# ── Result Review SLA breach check (every 15 minutes) ────────────────────────
+# Result Review stages (TrWfStage.is_result_stage) can carry an hour-level
+# SLA (default_duration_hours, e.g. 2h for a CRITICAL review) as well as the
+# day-level one every other stage uses -- the once-daily Pass 4 above is far
+# too coarse for that (a 2-hour breach could sit unflagged for up to 24h), so
+# this runs independently and more often, and owns is_result_stage rows
+# exclusively (Pass 4 excludes them to avoid a double-fire).
+#
+# One-shot per breach, not a repeating digest: sla_breach_notified_at is set
+# the moment a stage is flagged, so a still-open, still-breached instance is
+# never re-notified on a later 15-minute pass.
+def _check_review_sla_breaches():
+    db = BackgroundSessionLocal()
+    try:
+        from models import TrWfStageInstance, TrWfStage, TrWfStageRole
+        from services.notification_service import NotificationService
+        from datetime import datetime as _dt5, timezone as _tz5, timedelta
+        from sqlalchemy import or_ as _or5
+
+        now = _dt5.now(_tz5.utc)
+        candidates = (
+            db.query(TrWfStageInstance)
+            .join(TrWfStage, TrWfStageInstance.stage_id == TrWfStage.id)
+            .filter(
+                TrWfStageInstance.status == "in_progress",
+                TrWfStageInstance.started_at.isnot(None),
+                TrWfStageInstance.sla_breach_notified_at.is_(None),
+                TrWfStage.is_result_stage.is_(True),
+                _or5(
+                    TrWfStage.default_duration_hours.isnot(None),
+                    TrWfStage.default_duration_days.isnot(None),
+                ),
+            )
+            .all()
+        )
+
+        notified = 0
+        nsvc = NotificationService(db)
+        for si in candidates:
+            stage = si.stage
+            started_at = si.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=_tz5.utc)
+
+            if stage.default_duration_hours is not None:
+                deadline = started_at + timedelta(hours=stage.default_duration_hours)
+            else:
+                deadline = started_at + timedelta(days=stage.default_duration_days)
+            if now <= deadline:
+                continue
+
+            wf_instance = si.wf_instance
+            tr = getattr(wf_instance, "testing_request", None)
+            if tr is None:
+                # Nothing to notify about or attribute this to -- mark
+                # notified anyway so a dangling instance isn't re-scanned
+                # every 15 minutes forever.
+                si.sla_breach_notified_at = now.replace(tzinfo=None)
+                continue
+
+            hours_overdue = (now - deadline).total_seconds() / 3600
+            eq_obj = getattr(tr, "equipment", None)
+            dept_obj = getattr(tr, "department", None)
+
+            # Roles resolved from THIS stage's actual configuration, not the
+            # wf_stage_overdue template's own hardcoded role list -- those
+            # names (AEE_MAINTENANCE / Reviewing Officer / ...) don't match
+            # every org's real role names (the same class of bug found
+            # earlier in the CAR escalation path), so an override is the
+            # only way this reliably reaches anyone.
+            stage_roles = (
+                db.query(TrWfStageRole)
+                .filter(TrWfStageRole.stage_id == stage.id)
+                .all()
+            )
+            role_names = [r.role.name for r in stage_roles if r.role and r.role.name]
+
+            try:
+                nsvc.fire(
+                    event_type="wf_stage_overdue",
+                    context={
+                        "stage.name": stage.name or "",
+                        "request.number": getattr(tr, "request_number", "") or "",
+                        "equipment.ueic": getattr(eq_obj, "ueic", "") or "",
+                        "equipment.department": getattr(dept_obj, "name", "") or "",
+                        "days_overdue": f"{hours_overdue / 24:.2f}",
+                        "deadline": deadline.isoformat(),
+                        "digest_count": "1",
+                    },
+                    organization_id=getattr(tr, "organization_id", None),
+                    department_id=getattr(tr, "department_id", None),
+                    source_id=si.id,
+                    source_type="tr_wf_stage_instance",
+                    severity="critical",
+                    recipient_roles_override=role_names or None,
+                )
+                notified += 1
+            except Exception as _e:
+                logger.warning(f"[Notif] Review SLA breach fire failed for stage_instance={si.id}: {_e}")
+
+            si.sla_breach_notified_at = now.replace(tzinfo=None)
+
+        db.commit()
+        if notified:
+            logger.info(f"[Notif] Review SLA breach check: {notified} notification(s) sent")
+    except Exception as e:
+        logger.error(f"[Notif] Review SLA breach job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_review_sla_breaches,
+    trigger="interval",
+    minutes=15,
+    id="review_sla_breach_job",
+    max_instances=1,
+    coalesce=True,
 )
 
 
