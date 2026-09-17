@@ -72,6 +72,53 @@ def _svc(db: Session, current_user: User, org_id: Optional[UUID] = None,
     return DashboardService(db, org_id=resolved_org, dept_id=resolved_dept, dept_ids=dept_ids)
 
 
+def _testkit_type_ids(db: Session) -> list:
+    """CategoryMaster IDs for the 'Testing Kit' equipment type. Testing kits
+    aren't real substation assets — routers/analytics.py's AI Analytics
+    Dashboard already excludes them from its equipment totals via this exact
+    lookup; this router's own equipment_count/total_equipment metrics didn't,
+    so the two dashboards' headline equipment counts silently disagreed by
+    exactly the org's testing-kit count. Not org-scoped: the type itself is a
+    global CategoryMaster row, shared across orgs."""
+    from models import CategoryMaster
+    return [c.id for c in db.query(CategoryMaster.id).filter(
+        CategoryMaster.name.ilike("%testing kit%")).all()]
+
+
+def _equipment_scope_filters(db: Session, org_id, dept_ids=None) -> list:
+    """Shared equipment-scope filters for a headline equipment count:
+    excludes retired equipment and Testing Kits, matching the AI Analytics
+    Dashboard's definition (routers/analytics.py's real_total_equipment) so
+    this dashboard's equipment totals stop disagreeing with it."""
+    from models import Equipment
+    filters = [Equipment.organization_id == org_id, Equipment.status != 'retired']
+    testkit_ids = _testkit_type_ids(db)
+    if testkit_ids:
+        filters.append(~Equipment.equipment_type_id.in_(testkit_ids))
+    if dept_ids:
+        filters.append(Equipment.department_id.in_(dept_ids))
+    return filters
+
+
+def _critical_equipment_count(db: Session, org_id, dept_ids=None) -> int:
+    """Shared 'Critical' equipment count: EquipmentAnalytics.risk_level ==
+    'Critical' (the AnalyticsEngine's health-score-driven classification) —
+    NOT Equipment.status == 'under_repair', which this router's per-role
+    endpoints used to check instead. That flag is a manual repair marker set
+    independently of test results, so it silently missed every equipment
+    whose Critical health score never triggered a repair ticket — confirmed
+    live: 16 equipment sit at risk_level='Critical' org-wide while 0 are
+    status='under_repair', so the old logic always showed 0. Matches the AI
+    Analytics Dashboard's and _build_department_rollup's own critical_count
+    definition."""
+    from models import EquipmentAnalytics
+    from sqlalchemy import func
+    filters = [EquipmentAnalytics.organization_id == org_id, EquipmentAnalytics.risk_level == 'Critical']
+    if dept_ids:
+        filters.append(EquipmentAnalytics.department_id.in_(dept_ids))
+    return db.query(func.count(EquipmentAnalytics.id)).filter(*filters).scalar() or 0
+
+
 # ── Role view ──────────────────────────────────────────────────────────────
 
 @router.get("/role-view")
@@ -308,9 +355,12 @@ def get_aee_dashboard(
         TestingRequest.status.in_(['in_progress', 'assigned'])
     ).scalar() or 0
 
+    # dept_ids intentionally omitted: every other metric in this endpoint
+    # (pending_approvals, assigned_tests, maintenance_due below) is org-wide
+    # only, with no department scoping — matching that instead of scoping
+    # just this one count keeps the endpoint internally consistent.
     equipment_count = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.status == 'active'
+        *_equipment_scope_filters(db, svc.org_id)
     ).scalar() or 0
 
     # Maintenance due (equipment without recent maintenance tests)
@@ -398,10 +448,7 @@ def get_aee_dashboard(
 
     under_test = assigned_tests  # Equipment currently being tested
 
-    alert_count = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.status == 'under_repair'
-    ).scalar() or 0
+    alert_count = _critical_equipment_count(db, svc.org_id)
 
     return {
         'kpis': {
@@ -433,10 +480,10 @@ def get_ee_tlss_dashboard(
 
     svc = _svc(db, current_user, org_id, dept_id)
 
-    # Test Compliance Rate
+    # Test Compliance Rate — dept_ids omitted: the rest of this endpoint's
+    # metrics (overdue_tests, open_remediation, etc.) are org-wide only too.
     total_equipment = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.status == 'active'
+        *_equipment_scope_filters(db, svc.org_id)
     ).scalar() or 0
 
     # Equipment with recent tests (within 90 days)
@@ -458,11 +505,11 @@ def get_ee_tlss_dashboard(
         TestingRequest.due_date < datetime.now()
     ).scalar() or 0
 
-    # ALERT/CRITICAL flags (equipment with failed tests or under repair)
-    alert_critical = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.status == 'under_repair'
-    ).scalar() or 0
+    # ALERT/CRITICAL flags — health-score-driven (EquipmentAnalytics.risk_level),
+    # not Equipment.status == 'under_repair' (a manual repair marker set
+    # independently of test results, so it missed every equipment whose
+    # Critical score never triggered a repair ticket).
+    alert_critical = _critical_equipment_count(db, svc.org_id)
 
     # Open Remediation (testing requests with recommendations)
     from models import Recommendation
@@ -1911,8 +1958,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # _scope_counts' pending_approval_count for the branch-scope version).
         from models import Equipment
         equipment_count = db.query(func.count(Equipment.id)).filter(
-            Equipment.organization_id == svc.org_id,
-            Equipment.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
+            *_equipment_scope_filters(db, svc.org_id, svc.dept_ids)
         ).scalar() or 0
 
         # Equipment failing at least one DQI check — see _dqi_issues_list's
@@ -2174,12 +2220,10 @@ def get_see_dashboard(
     svc = _svc(db, current_user, org_id, dept_id)
     dept_ids = svc.dept_ids
     tr_scope = [TestingRequest.department_id.in_(dept_ids)] if dept_ids else []
-    eq_scope = [Equipment.department_id.in_(dept_ids)] if dept_ids else []
 
     # Total equipment
     total_equipment = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id, *eq_scope,
-        Equipment.status == 'active'
+        *_equipment_scope_filters(db, svc.org_id, dept_ids)
     ).scalar() or 0
 
     # Circle Compliance (test completion rate)
@@ -2208,11 +2252,9 @@ def get_see_dashboard(
         TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).scalar() or 0
 
-    # Critical Issues (equipment under repair)
-    critical_issues = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id, *eq_scope,
-        Equipment.status == 'under_repair'
-    ).scalar() or 0
+    # Critical Issues — health-score-driven (EquipmentAnalytics.risk_level),
+    # not Equipment.status == 'under_repair'; see _critical_equipment_count.
+    critical_issues = _critical_equipment_count(db, svc.org_id, dept_ids)
 
     # Pending reviews list
     pending_reviews = db.query(TestingRequest).filter(
@@ -2263,8 +2305,7 @@ def get_cee_dashboard(
 
     # Zone Equipment
     zone_equipment = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id, *eq_scope,
-        Equipment.status == 'active'
+        *_equipment_scope_filters(db, svc.org_id, dept_ids)
     ).scalar() or 0
 
     # Zone Reliability (percentage of equipment in active status)

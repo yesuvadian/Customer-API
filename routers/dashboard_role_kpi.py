@@ -1269,10 +1269,21 @@ def get_test_coordinator_dashboard(
     # 1. KPI Cards (6 cards as per SRS Sec 8.3.2)
     # =========================================================================
     
-    # Total active equipment
+    # Total equipment — excludes retired equipment and Testing Kits (not
+    # real substation assets), matching the AI Analytics Dashboard's
+    # total_equipment definition (routers/analytics.py's real_total_equipment)
+    # so the two dashboards' headline equipment counts stop disagreeing.
+    # dept_cond intentionally not applied here: alert_eq_kpi/critical_eq_kpi
+    # below (this endpoint's other equipment-derived KPIs) are org-wide only
+    # too, so scoping just this one count would make it internally inconsistent
+    # with its own sibling cards.
+    from models import CategoryMaster
+    _testkit_type_ids = [c.id for c in db.query(CategoryMaster.id).filter(
+        CategoryMaster.name.ilike("%testing kit%")).all()]
     total_equipment = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.status == 'active'
+        Equipment.status != 'retired',
+        ~Equipment.equipment_type_id.in_(_testkit_type_ids) if _testkit_type_ids else True,
     ).scalar() or 0
     
     # Test Compliance Rate (%)
