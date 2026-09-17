@@ -30,6 +30,7 @@ from database import get_db
 from models import User
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
 from category_labels import TrWfOutcomeColors
+from utils.business_days import business_days_between
 
 router = APIRouter(
     prefix="/dashboard",
@@ -1338,7 +1339,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         ).all()
         cal_t0 = cal_t7 = cal_t15 = 0
         for (due_date,) in overdue_cal_rows:
-            days_over = (now - due_date).days
+            days_over = business_days_between(due_date.date(), now.date())
             if days_over >= 15:
                 cal_t15 += 1
             elif days_over >= 7:
