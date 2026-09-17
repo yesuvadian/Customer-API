@@ -2174,7 +2174,21 @@ def get_deterioration_watch_list(
             continue  # no zone, or a zone not marked watch-list-worthy (PD/T1)
 
         flagged_by_equipment.setdefault(eq_id, []).append({
-            "analytics_id":          None,
+            # Duval findings have no ParameterAnalytics row to point at (no
+            # numeric trend, just a DGA-zone classification), but the daily
+            # overdue-review job (main.py's _check_deterioration_watch_overdue)
+            # dedupes notifications on NotificationLog.source_id ==
+            # analytics_id. A hardcoded None there compiles to "source_id IS
+            # NULL", which matched every prior Duval-sourced NotificationLog
+            # row regardless of equipment — after the first org-wide Duval
+            # overdue notification, every other equipment's got silently
+            # skipped. The latest transformer_dga TestResult's own id is a
+            # real, distinct UUID per equipment, and changes naturally when a
+            # newer DGA test comes in (a new snapshot correctly reopens
+            # escalation) — the same "one id per snapshot" shape analytics_id
+            # already has for numeric findings (ParameterAnalytics.id, tied
+            # to one specific TestResult).
+            "analytics_id":          str(latest.id),
             "parameter_key":         "duval_zone",
             "parameter_label":       "Duval Triangle Classification",
             "template_key":          "transformer_dga",
