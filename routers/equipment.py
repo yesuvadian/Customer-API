@@ -28,6 +28,7 @@ from schemas import (
     EquipmentCountResponse,
 )
 from services.equipment_service import EquipmentService
+from services.redis_cache import RedisCacheService
 from utils.upload_limits import (
     read_and_validate_upload,
     detect_mime,
@@ -919,6 +920,16 @@ def create_equipment(
         import traceback
         traceback.print_exc()
         print(f"[WARN] instantiate_equipment_schedules failed: {exc}")
+        # instantiate_equipment_schedules failed mid-flush (e.g. a unique
+        # constraint violation from duplicate master templates for this
+        # equipment type), which leaves this Session in "pending rollback" -
+        # every later statement on it (the notification send below, this
+        # endpoint's own response) would raise "transaction has been rolled
+        # back" too, turning one best-effort scheduling failure into the
+        # whole equipment creation request 500ing. Roll back to make the
+        # session usable again; this failure is already logged above and
+        # equipment creation itself already committed before this block.
+        db.rollback()
 
     try:
         from services.notification_service import NotificationService
@@ -1611,6 +1622,29 @@ def get_zones(
     _require_permission(db, current_user, "can_view")
     return _get_departments_at_depth(db, org_id, depth=0)
 
+_DEPT_HIERARCHY_COUNTS_CACHE_TTL = 300  # 5 minutes
+
+
+def _dept_hierarchy_counts_cache_key(
+    org_id, parent_id, scoped_root_id, **filters
+) -> str:
+    """One cache entry per distinct (org, scope, filter-combination) - the
+    filters dict can carry any of get_department_hierarchy_with_counts's
+    many optional query params, so only the ones actually set get folded
+    into the key (two requests differing only in an unset filter must
+    still collide onto the same cached entry)."""
+    parts = [
+        f"equip_dept_hierarchy_counts::{org_id}",
+        f"parent_{parent_id or 'root'}",
+        f"scoped_{scoped_root_id or 'none'}",
+    ]
+    for k in sorted(filters):
+        v = filters[k]
+        if v is not None:
+            parts.append(f"{k}_{v}")
+    return "::".join(parts)
+
+
 @router.get("/department-hierarchy-with-counts")
 def get_department_hierarchy_with_counts(
     parent_id: Optional[UUID] = None,
@@ -1651,6 +1685,35 @@ def get_department_hierarchy_with_counts(
         if not is_admin and user_dept_id:
             scoped_root_id = user_dept_id
 
+    # This loops a subtree lookup + a filtered COUNT query PER department
+    # returned at this hierarchy level (2 DB round-trips x N departments,
+    # all sequential) - for an org with several zones/circles that's easily
+    # 10+ round-trips on every single page load of the cards strip that
+    # calls this. Short-TTL cache so repeat loads (opening the page again,
+    # tweaking an unrelated filter, navigating back) hit Redis instead of
+    # re-running that loop; a 5-minute TTL keeps newly-added/edited
+    # equipment showing up promptly without needing to hunt down every
+    # equipment create/update/delete call site to invalidate this
+    # explicitly (same tradeoff the dashboard cache in dashboard_service.py
+    # already makes).
+    cache_key = _dept_hierarchy_counts_cache_key(
+        org_id, parent_id, scoped_root_id,
+        equipment_type_id=equipment_type_id, status=status,
+        voltage_class=voltage_class, manufacturer=manufacturer,
+        model_number=model_number, search=search,
+        commission_year=commission_year,
+        commission_year_from=commission_year_from,
+        commission_year_to=commission_year_to,
+        failure_year=failure_year, failure_year_from=failure_year_from,
+        failure_year_to=failure_year_to, replacement_year=replacement_year,
+        replacement_year_from=replacement_year_from,
+        replacement_year_to=replacement_year_to,
+        date_from=date_from, date_to=date_to,
+    )
+    cached = RedisCacheService.get(cache_key)
+    if cached is not None:
+        return cached
+
     sql = text(
         """
         SELECT id, name,
@@ -1680,75 +1743,144 @@ def get_department_hierarchy_with_counts(
         }
     ).fetchall()
 
-    result = []
-    for r in rows:
-        dept_id = r[0]
-        dept_ids = EquipmentService._get_department_subtree_ids(db, dept_id)
+    if not rows:
+        RedisCacheService.set(cache_key, [], ttl=_DEPT_HIERARCHY_COUNTS_CACHE_TTL)
+        return []
 
-        query = db.query(func.count(Equipment.id)).filter(
-            Equipment.organization_id == org_id,
-            Equipment.department_id.in_(dept_ids),
+    # Previously: one subtree lookup + one filtered COUNT query PER row here
+    # (2 sequential DB round-trips x N departments). Replaced with exactly
+    # 2 queries total, regardless of N:
+    #   1. one recursive CTE resolving every row's full subtree at once
+    #   2. one grouped COUNT across all of those subtrees' equipment at once
+    # then the per-department counts are rolled up to each row in Python.
+    #
+    # id values coming back from a raw text() SELECT aren't guaranteed to be
+    # the same Python type (str vs uuid.UUID) as those from the ORM count
+    # query below - every dept-id used as a dict key past this point is run
+    # through this first, so lookups can never silently miss on a type
+    # mismatch and report a false zero count.
+    def _as_uuid(v):
+        return v if isinstance(v, UUID) else UUID(str(v))
+
+    # A depth cap alone isn't enough: a cyclic parent_department_id chain
+    # (confirmed to actually exist in this data - a same-org, non-root call
+    # timed out at 50 levels) doesn't just fail to terminate, it blows up
+    # combinatorially, since every level re-walks the same cyclic nodes and
+    # re-multiplies their real children. Tracking the visited-id path per
+    # branch and refusing to step onto an id already in it makes each
+    # branch's growth bounded by the number of distinct departments that
+    # actually exist, so a cycle just gets cut off there instead of
+    # exploding - no arbitrary depth number to tune. The depth cap stays too,
+    # as cheap insurance against a pathologically deep (but non-cyclic) chain.
+    root_ids = [_as_uuid(r[0]) for r in rows]
+    subtree_rows = db.execute(
+        text(
+            """
+            WITH RECURSIVE dept_tree AS (
+                SELECT id AS root_id, id AS descendant_id, 1 AS depth,
+                       ARRAY[id] AS visited
+                FROM public.org_departments
+                WHERE id = ANY(CAST(:root_ids AS uuid[])) AND is_active = true
+                UNION ALL
+                SELECT dt.root_id, d.id, dt.depth + 1, dt.visited || d.id
+                FROM public.org_departments d
+                JOIN dept_tree dt ON d.parent_department_id = dt.descendant_id
+                WHERE d.is_active = true
+                  AND dt.depth < 50
+                  AND NOT (d.id = ANY(dt.visited))
+            )
+            SELECT root_id, descendant_id FROM dept_tree
+            """
+        ),
+        {"root_ids": [str(rid) for rid in root_ids]},
+    ).fetchall()
+
+    # Rows at the same hierarchy level are siblings, so their subtrees are
+    # disjoint - each descendant belongs to exactly one of these roots.
+    descendant_to_root: dict = {}
+    all_descendant_ids: list = []
+    for root_id, descendant_id in subtree_rows:
+        root_id = _as_uuid(root_id)
+        descendant_id = _as_uuid(descendant_id)
+        descendant_to_root[descendant_id] = root_id
+        all_descendant_ids.append(descendant_id)
+
+    count_query = db.query(
+        Equipment.department_id, func.count(Equipment.id)
+    ).filter(
+        Equipment.organization_id == org_id,
+        Equipment.department_id.in_(all_descendant_ids),
+    )
+
+    if equipment_type_id:
+        count_query = count_query.filter(Equipment.equipment_type_id == equipment_type_id)
+    if status:
+        count_query = count_query.filter(Equipment.status == status)
+    if voltage_class:
+        count_query = count_query.filter(Equipment.voltage_class == voltage_class)
+    if manufacturer:
+        count_query = count_query.filter(Equipment.manufacturer.ilike(f"%{manufacturer}%"))
+    if model_number:
+        count_query = count_query.filter(Equipment.model_number.ilike(f"%{model_number}%"))
+    if search:
+        count_query = count_query.filter(
+            (Equipment.ueic.ilike(f"%{search}%")) |
+            (Equipment.bay_number.ilike(f"%{search}%")) |
+            (Equipment.manufacturer.ilike(f"%{search}%")) |
+            (Equipment.model_number.ilike(f"%{search}%")) |
+            (Equipment.factory_serial_number.ilike(f"%{search}%"))
         )
+    if commission_year:
+        count_query = count_query.filter(extract('year', Equipment.commissioned_date) == commission_year)
+    if commission_year_from:
+        count_query = count_query.filter(extract('year', Equipment.commissioned_date) >= commission_year_from)
+    if commission_year_to:
+        count_query = count_query.filter(extract('year', Equipment.commissioned_date) <= commission_year_to)
+    if failure_year:
+        count_query = count_query.filter(extract('year', Equipment.retired_date) == failure_year)
+    if failure_year_from:
+        count_query = count_query.filter(extract('year', Equipment.retired_date) >= failure_year_from)
+    if failure_year_to:
+        count_query = count_query.filter(extract('year', Equipment.retired_date) <= failure_year_to)
+    if replacement_year:
+        count_query = count_query.filter(
+            Equipment.replaces_equipment_id.isnot(None),
+            extract('year', Equipment.commissioned_date) == replacement_year,
+        )
+    if replacement_year_from:
+        count_query = count_query.filter(
+            Equipment.replaces_equipment_id.isnot(None),
+            extract('year', Equipment.commissioned_date) >= replacement_year_from,
+        )
+    if replacement_year_to:
+        count_query = count_query.filter(
+            Equipment.replaces_equipment_id.isnot(None),
+            extract('year', Equipment.commissioned_date) <= replacement_year_to,
+        )
+    if date_from:
+        count_query = count_query.filter(Equipment.cts >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        count_query = count_query.filter(Equipment.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
 
-        if equipment_type_id:
-            query = query.filter(Equipment.equipment_type_id == equipment_type_id)
-        if status:
-            query = query.filter(Equipment.status == status)
-        if voltage_class:
-            query = query.filter(Equipment.voltage_class == voltage_class)
-        if manufacturer:
-            query = query.filter(Equipment.manufacturer.ilike(f"%{manufacturer}%"))
-        if model_number:
-            query = query.filter(Equipment.model_number.ilike(f"%{model_number}%"))
-        if search:
-            query = query.filter(
-                (Equipment.ueic.ilike(f"%{search}%")) |
-                (Equipment.bay_number.ilike(f"%{search}%")) |
-                (Equipment.manufacturer.ilike(f"%{search}%")) |
-                (Equipment.model_number.ilike(f"%{search}%")) |
-                (Equipment.factory_serial_number.ilike(f"%{search}%"))
-            )
-        if commission_year:
-            query = query.filter(extract('year', Equipment.commissioned_date) == commission_year)
-        if commission_year_from:
-            query = query.filter(extract('year', Equipment.commissioned_date) >= commission_year_from)
-        if commission_year_to:
-            query = query.filter(extract('year', Equipment.commissioned_date) <= commission_year_to)
-        if failure_year:
-            query = query.filter(extract('year', Equipment.retired_date) == failure_year)
-        if failure_year_from:
-            query = query.filter(extract('year', Equipment.retired_date) >= failure_year_from)
-        if failure_year_to:
-            query = query.filter(extract('year', Equipment.retired_date) <= failure_year_to)
-        if replacement_year:
-            query = query.filter(
-                Equipment.replaces_equipment_id.isnot(None),
-                extract('year', Equipment.commissioned_date) == replacement_year,
-            )
-        if replacement_year_from:
-            query = query.filter(
-                Equipment.replaces_equipment_id.isnot(None),
-                extract('year', Equipment.commissioned_date) >= replacement_year_from,
-            )
-        if replacement_year_to:
-            query = query.filter(
-                Equipment.replaces_equipment_id.isnot(None),
-                extract('year', Equipment.commissioned_date) <= replacement_year_to,
-            )
-        if date_from:
-            query = query.filter(Equipment.cts >= datetime.combine(date_from, datetime.min.time()))
-        if date_to:
-            query = query.filter(Equipment.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+    count_query = count_query.group_by(Equipment.department_id)
 
-        count = query.scalar() or 0
+    rollup_counts: dict = {rid: 0 for rid in root_ids}
+    for dept_id, cnt in count_query.all():
+        root_id = descendant_to_root.get(_as_uuid(dept_id))
+        if root_id is not None:
+            rollup_counts[root_id] = rollup_counts.get(root_id, 0) + cnt
 
-        result.append({
-            "id": str(dept_id),
+    result = [
+        {
+            "id": str(r[0]),
             "name": r[1],
             "has_children": bool(r[2]),
-            "equipment_count": count,
-        })
+            "equipment_count": rollup_counts.get(_as_uuid(r[0]), 0),
+        }
+        for r in rows
+    ]
 
+    RedisCacheService.set(cache_key, result, ttl=_DEPT_HIERARCHY_COUNTS_CACHE_TTL)
     return result
 
 
@@ -2189,135 +2321,6 @@ def get_testing_kits(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Department hierarchy with per-node equipment counts
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@router.get("/department-hierarchy-with-counts")
-def get_department_hierarchy_with_counts(
-    parent_id: Optional[str] = None,
-    status: Optional[str] = None,
-    equipment_type_id: Optional[int] = None,
-    search: Optional[str] = None,
-    voltage_class: Optional[str] = None,
-    manufacturer: Optional[str] = None,
-    model_number: Optional[str] = None,
-    commission_year: Optional[int] = None,
-    commission_year_from: Optional[int] = None,
-    commission_year_to: Optional[int] = None,
-    failure_year: Optional[int] = None,
-    failure_year_from: Optional[int] = None,
-    failure_year_to: Optional[int] = None,
-    replacement_year: Optional[int] = None,
-    replacement_year_from: Optional[int] = None,
-    replacement_year_to: Optional[int] = None,
-    date_from: Optional[date] = None,
-    date_to: Optional[date] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Return child departments of parent_id (or roots) with equipment counts respecting active filters."""
-    from sqlalchemy import extract as sa_extract, func as sa_func
-
-    org_id = _enforce_org_scope(current_user)
-
-    # Fetch departments at the requested level
-    parent_uuid = None
-    if parent_id:
-        try:
-            parent_uuid = _uuid.UUID(parent_id)
-        except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid parent_id UUID")
-
-    depts = (
-        db.query(OrgDepartment)
-        .filter(
-            OrgDepartment.organization_id == org_id,
-            OrgDepartment.is_active == True,
-            OrgDepartment.parent_department_id == parent_uuid,
-        )
-        .order_by(OrgDepartment.name)
-        .all()
-    )
-
-    result = []
-    for dept in depts:
-        # Check whether this dept has children
-        has_children = (
-            db.query(OrgDepartment.id)
-            .filter(
-                OrgDepartment.parent_department_id == dept.id,
-                OrgDepartment.is_active == True,
-            )
-            .first()
-        ) is not None
-
-        # Count equipment in the full subtree of this dept (applying all active filters)
-        from services.equipment_service import EquipmentService
-        subtree_ids = EquipmentService._get_department_subtree_ids(db, dept.id)
-
-        q = db.query(sa_func.count(Equipment.id)).filter(
-            Equipment.organization_id == org_id,
-            Equipment.department_id.in_(subtree_ids),
-        )
-        if status:
-            q = q.filter(Equipment.status == status)
-        if equipment_type_id:
-            q = q.filter(Equipment.equipment_type_id == equipment_type_id)
-        if voltage_class:
-            q = q.filter(Equipment.voltage_class == voltage_class)
-        if manufacturer:
-            q = q.filter(Equipment.manufacturer.ilike(f"%{manufacturer}%"))
-        if model_number:
-            q = q.filter(Equipment.model_number.ilike(f"%{model_number}%"))
-        if search:
-            q = q.filter(
-                (Equipment.ueic.ilike(f"%{search}%")) |
-                (Equipment.bay_number.ilike(f"%{search}%")) |
-                (Equipment.manufacturer.ilike(f"%{search}%")) |
-                (Equipment.model_number.ilike(f"%{search}%")) |
-                (Equipment.factory_serial_number.ilike(f"%{search}%"))
-            )
-        if commission_year:
-            q = q.filter(sa_extract('year', Equipment.commissioned_date) == commission_year)
-        if commission_year_from:
-            q = q.filter(sa_extract('year', Equipment.commissioned_date) >= commission_year_from)
-        if commission_year_to:
-            q = q.filter(sa_extract('year', Equipment.commissioned_date) <= commission_year_to)
-        if failure_year:
-            q = q.filter(sa_extract('year', Equipment.retired_date) == failure_year)
-        if failure_year_from:
-            q = q.filter(sa_extract('year', Equipment.retired_date) >= failure_year_from)
-        if failure_year_to:
-            q = q.filter(sa_extract('year', Equipment.retired_date) <= failure_year_to)
-        if replacement_year:
-            q = q.filter(sa_extract('year', Equipment.commissioned_date) == replacement_year)
-        if replacement_year_from:
-            q = q.filter(sa_extract('year', Equipment.commissioned_date) >= replacement_year_from)
-        if replacement_year_to:
-            q = q.filter(sa_extract('year', Equipment.commissioned_date) <= replacement_year_to)
-        if date_from:
-            q = q.filter(Equipment.cts >= datetime.combine(date_from, datetime.min.time()))
-        if date_to:
-            q = q.filter(Equipment.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
-
-        count = q.scalar() or 0
-
-        result.append({
-            "id": str(dept.id),
-            "name": dept.name,
-            "department_name": dept.name,
-            "parent_department_id": str(dept.parent_department_id) if dept.parent_department_id else None,
-            "equipment_count": count,
-            "has_children": has_children,
-            "organization_id": str(dept.organization_id),
-        })
-
-    # Sort by count descending
-    result.sort(key=lambda x: x["equipment_count"], reverse=True)
-    return result
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # ③ DYNAMIC ROUTES — all contain /{equipment_id: UUID}
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2581,6 +2584,10 @@ async def replace_equipment(
         import traceback
         traceback.print_exc()
         print(f"[WARN] instantiate_equipment_schedules failed for replacement: {exc}")
+        # Same reasoning as the primary creation path above: a failed flush
+        # here leaves the Session unusable for anything that follows unless
+        # explicitly rolled back.
+        db.rollback()
 
     try:
         from services.notification_service import NotificationService
@@ -3023,5 +3030,11 @@ def sync_equipment_schedules(
             synced += 1
         except Exception as e:
             errors.append({"equipment_id": str(eq.id), "error": str(e)})
+            # Without this, one equipment's failed flush leaves the shared
+            # Session in "pending rollback" for the rest of this loop -
+            # every equipment after the first failure would also report an
+            # error (a misleading cascade), not just the ones that actually
+            # have a conflicting schedule.
+            db.rollback()
 
     return {"synced": synced, "errors": errors}

@@ -319,6 +319,24 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             return await call_next(request)
 
         # --------------------------------------------------
+        # /category_master/** and /category_details/** — GET only skips the
+        # privilege check
+        #
+        # These are the equipment-type / test-type reference lookup used by
+        # several already-permitted features (CM Recommendation Config,
+        # CM/PM Master Template, ...) to resolve names and populate their
+        # equipment-type lists. Gating that lookup behind its own separate,
+        # rarely-granted module meant a role with legitimate view access to
+        # those features still couldn't see the equipment types they depend
+        # on — same "circular permission" problem /modules/user solves
+        # above. POST/PUT/DELETE (actually creating/editing/deleting a
+        # category master or detail) still requires the normal
+        # OrgRolePermission check on that module, same as any other write.
+        # --------------------------------------------------
+        if module_name in ("category_master", "category_details") and request.method == "GET":
+            return await call_next(request)
+
+        # --------------------------------------------------
         # Allow list endpoints (GET /products)
         # --------------------------------------------------
         if request.method == "GET" and len(parts) == 1:

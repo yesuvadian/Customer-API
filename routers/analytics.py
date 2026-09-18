@@ -1215,35 +1215,94 @@ def get_analytics_dashboard(
 
     all_child_dept_ids = [d.id for d in all_child_depts]
 
-    # Test counts + equipment counts per child dept — across entire subtree
+    # Test counts + equipment counts per child dept — across entire subtree.
+    # Previously: one subtree lookup + 2 more filtered queries PER child
+    # department, all sequential (3 x N round-trips). Replaced with 3
+    # queries total regardless of N: one batched multi-root subtree lookup,
+    # one grouped test-count query, one grouped equipment-count query -
+    # then each department's own subtree total is summed in Python.
     child_test_counts: dict = {}
     child_eq_counts: dict = {}
-    for child_id in all_child_dept_ids:
-        subtree_ids = _collect_department_ids(child_id, db)
-        tc_q = (
-            # DISTINCT - _apply_tested_at_filter joins TestResult below, and
-            # a TestingRequest with multiple linked TestResults (e.g.
-            # several test templates run under one request) would otherwise
-            # fan out to multiple rows and get counted more than once, so
-            # this could disagree with kpi_summary.total_tests (which does
-            # use DISTINCT) for the same underlying requests.
-            db.query(func.count(func.distinct(TestingRequest.id)))
+    if all_child_dept_ids:
+        from sqlalchemy import text
+
+        subtree_map_rows = db.execute(
+            text(
+                """
+                WITH RECURSIVE dept_tree AS (
+                    SELECT id AS root_id, id AS descendant_id, 1 AS depth,
+                           ARRAY[id] AS visited
+                    FROM public.org_departments
+                    WHERE id = ANY(CAST(:root_ids AS uuid[])) AND is_active = true
+                    UNION ALL
+                    SELECT dt.root_id, d.id, dt.depth + 1, dt.visited || d.id
+                    FROM public.org_departments d
+                    JOIN dept_tree dt ON d.parent_department_id = dt.descendant_id
+                    WHERE d.is_active = true
+                      AND dt.depth < 50
+                      AND NOT (d.id = ANY(dt.visited))
+                )
+                SELECT root_id, descendant_id FROM dept_tree
+                """
+            ),
+            {"root_ids": [str(cid) for cid in all_child_dept_ids]},
+        ).fetchall()
+
+        # id values from this raw text() SELECT aren't guaranteed to be the
+        # same Python type (str vs uuid.UUID) as those coming back from the
+        # ORM grouped queries below - every dept-id used as a dict key past
+        # this point is normalized through this first, so a lookup can
+        # never silently miss (and undercount) on a type mismatch.
+        def _as_uuid(v):
+            return v if isinstance(v, uuid.UUID) else uuid.UUID(str(v))
+
+        descendant_to_root: dict = {}
+        all_descendant_ids: list = []
+        for root_id, descendant_id in subtree_map_rows:
+            root_id = _as_uuid(root_id)
+            descendant_id = _as_uuid(descendant_id)
+            descendant_to_root[descendant_id] = root_id
+            all_descendant_ids.append(descendant_id)
+
+        # DISTINCT - _apply_tested_at_filter joins TestResult below, and a
+        # TestingRequest with multiple linked TestResults (e.g. several test
+        # templates run under one request) would otherwise fan out to
+        # multiple rows and get counted more than once, so this could
+        # disagree with kpi_summary.total_tests (which does use DISTINCT)
+        # for the same underlying requests.
+        tc_grouped_q = (
+            db.query(Equipment.department_id, func.count(func.distinct(TestingRequest.id)))
             .join(Equipment, Equipment.id == TestingRequest.equipment_id)
             .filter(
-                Equipment.department_id.in_(subtree_ids),
+                Equipment.department_id.in_(all_descendant_ids),
                 TestingRequest.status.in_(("completed", "closed")),
             )
         )
-        tc_q = _apply_tested_at_filter(tc_q, date_from, date_to)
-        tc_rows = tc_q.scalar()
-        eq_cnt = (
-            db.query(func.count(Equipment.id))
-            .filter(Equipment.department_id.in_(subtree_ids),
-                    Equipment.status != "retired")
-            .scalar()
+        tc_grouped_q = _apply_tested_at_filter(tc_grouped_q, date_from, date_to)
+        tc_grouped_q = tc_grouped_q.group_by(Equipment.department_id)
+
+        eq_grouped_q = (
+            db.query(Equipment.department_id, func.count(Equipment.id))
+            .filter(
+                Equipment.department_id.in_(all_descendant_ids),
+                Equipment.status != "retired",
+            )
+            .group_by(Equipment.department_id)
         )
-        child_test_counts[str(child_id)] = tc_rows or 0
-        child_eq_counts[str(child_id)]   = eq_cnt or 0
+
+        child_test_counts = {str(cid): 0 for cid in all_child_dept_ids}
+        for dept_id, cnt in tc_grouped_q.all():
+            root_id = descendant_to_root.get(_as_uuid(dept_id))
+            if root_id is not None:
+                key = str(root_id)
+                child_test_counts[key] = child_test_counts.get(key, 0) + cnt
+
+        child_eq_counts = {str(cid): 0 for cid in all_child_dept_ids}
+        for dept_id, cnt in eq_grouped_q.all():
+            root_id = descendant_to_root.get(_as_uuid(dept_id))
+            if root_id is not None:
+                key = str(root_id)
+                child_eq_counts[key] = child_eq_counts.get(key, 0) + cnt
 
     department_scores = []
     for d in all_child_depts:
@@ -1504,9 +1563,16 @@ def get_dashboard_equipment(
     if tested_only:
         all_eq = [e for e in all_eq if lab_map.get(e.id, (None,))[0] is not None]
 
-    # Apply risk_level filter
+    # Apply risk_level filter using the same all-test-types risk_level the
+    # KPI tile counts (EquipmentAnalytics.risk_level via ea_map), not the
+    # lab-only recompute above. The KPI tile's Critical/High/Medium/Low
+    # counts include OLTC/circuit-breaker counter breaches and TA&QC/Failure
+    # Registry submissions; filtering here by the lab-only definition instead
+    # silently dropped equipment that's Critical only because of one of
+    # those (e.g. "16 Critical" on the tile but only 3 rows in this list).
     if risk_level:
-        all_eq = [e for e in all_eq if lab_map.get(e.id, (None, "Unknown"))[1] == risk_level]
+        all_eq = [e for e in all_eq
+                  if (ea_map[e.id].risk_level if e.id in ea_map else "Unknown") == risk_level]
 
     eq_ids = [e.id for e in all_eq]
 
@@ -1566,8 +1632,22 @@ def get_dashboard_equipment(
 
     _risk_order = _severity_rank_map(db)
 
+    # When filtering by risk_level, sort/display by the same all-test-types
+    # ea_map values used for that filter above (see comment there) so a row
+    # that's in the "Critical" list actually shows a Critical badge, instead
+    # of the lab-only figures which can disagree for OLTC/circuit-breaker/
+    # TA&QC-only-critical equipment. Unfiltered listing keeps the lab-only
+    # figures, which match the equipment-detail modal's chip row.
+    def _eff_score_risk_findings(eq_id):
+        if risk_level:
+            ea = ea_map.get(eq_id)
+            if ea:
+                return ea.health_score, ea.risk_level, (ea.critical_findings or [])
+            return None, "Unknown", []
+        return lab_map.get(eq_id, (None, "Unknown", []))
+
     def _sort_key(eq: Equipment):
-        score, risk, _f = lab_map.get(eq.id, (None, "Unknown", []))
+        score, risk, _f = _eff_score_risk_findings(eq.id)
         if risk in _risk_order:
             s = score if score is not None else 999.0
             return (0, _risk_order[risk], s)
@@ -1585,17 +1665,18 @@ def get_dashboard_equipment(
     items = []
     for eq in page_eq:
         ea = ea_map.get(eq.id)
-        lab_score, lab_risk, lab_findings = lab_map.get(eq.id, (None, "Unknown", []))
-        # Build plain-English reason from the same lab-only critical_findings
-        # shown in health_score/risk_level below, so the reason text can't
-        # cite an excluded test type (e.g. an OLTC counter breach) for a row
-        # that no longer counts OLTC toward its score/risk here.
+        eff_score, eff_risk, eff_findings = _eff_score_risk_findings(eq.id)
+        # Build plain-English reason from the same findings shown in
+        # health_score/risk_level above (lab-only when unfiltered, the
+        # all-test-types ea findings when filtering by risk_level - see
+        # _eff_score_risk_findings), so the reason text can't cite a source
+        # that no longer counts toward the score/risk shown for this row.
         reason = None
-        if lab_findings:
+        if eff_findings:
             # Use rich per-finding reason if available, else fall back to label
             parts = []
             seen = set()
-            for f in lab_findings:
+            for f in eff_findings:
                 label = f.get("label") or f.get("key", "")
                 if label in seen:
                     continue
@@ -1621,15 +1702,15 @@ def get_dashboard_equipment(
             "equipment_type":          type_map.get(eq.equipment_type_id),
             "department":              dept_name_map.get(eq.department_id),
             "department_id":           str(eq.department_id) if eq.department_id else None,
-            "health_score":            lab_score,
-            "risk_level":              lab_risk,
+            "health_score":            eff_score,
+            "risk_level":              eff_risk,
             "condition_summary":       reason,
-            "critical_findings":       lab_findings,
+            "critical_findings":       eff_findings,
             "parameters_at_risk":      ea.parameters_at_risk if ea else 0,
             "at_risk_parameter_names": at_risk_params_map.get(eq.id, []),
             "last_test_date":          ea.last_test_date.isoformat() if ea and ea.last_test_date else None,
             "test_count":              test_count_map.get(eq.id, 0),
-            "tested":                  lab_score is not None,
+            "tested":                  eff_score is not None,
             # Equipment register fields for client-side view-by grouping
             "manufacturer":            eq.manufacturer,
             "model_number":            eq.model_number,
@@ -2906,21 +2987,16 @@ def _apply_tested_at_filter(q, date_from: Optional[date], date_to: Optional[date
 
 
 def _collect_department_ids(root_id: uuid.UUID, db: Session) -> set:
-    """BFS to collect root + all descendant department IDs."""
-    visited: set = set()
-    queue = [root_id]
-    while queue:
-        current = queue.pop()
-        if current in visited:
-            continue
-        visited.add(current)
-        children = (
-            db.query(OrgDepartment.id)
-            .filter(OrgDepartment.parent_department_id == current)
-            .all()
-        )
-        queue.extend(child_id for (child_id,) in children)
-    return visited
+    """Root + all descendant department IDs.
+
+    Was a BFS issuing one query per department node visited (as many DB
+    round-trips as departments in the subtree) - several call sites in this
+    file call it once PER department in an outer loop too, compounding into
+    a doubly-nested N+1. Delegates to utils.common_service.get_dept_subtree_ids
+    instead, which does the exact same walk in a single recursive CTE - same
+    return semantics (root's own id included), just one round-trip."""
+    from utils.common_service import get_dept_subtree_ids
+    return set(get_dept_subtree_ids(db, root_id))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1200,9 +1200,28 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         # any equipment commissioned afterward inherits that inconsistency.
         # Recompute it from start_date so it always matches the current
         # frequency.
+        #
+        # schedule.frequency at this point holds whatever the setattr loop
+        # above just assigned it - the request payload's raw
+        # schemas.ScheduleFrequencyEnum value, not yet coerced by SQLAlchemy
+        # into the domain models.ScheduleFrequency (that coercion only
+        # happens on flush/commit, which hasn't run yet). _advance_date's
+        # comparisons are all `== ScheduleFrequency.<member>`, and members of
+        # two different Enum classes are never equal to each other even with
+        # the same name, so every branch silently failed to match and fell
+        # through to "return current" - next_run_date was left frozen at
+        # start_date no matter what frequency was picked. Re-resolving
+        # through ScheduleFrequency(...) (same fix already used below in the
+        # operational-schedule update path) normalizes it first.
         if "frequency" in data:
+            freq = schedule.frequency
+            freq_enum = (
+                freq
+                if isinstance(freq, ScheduleFrequency)
+                else ScheduleFrequency(freq.value if hasattr(freq, "value") else freq)
+            )
             schedule.next_run_date = _advance_date(
-                schedule.start_date, schedule.frequency
+                schedule.start_date, freq_enum
             )
 
         schedule.modified_by = user_id
