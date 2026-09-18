@@ -806,34 +806,44 @@ async def bulk_import(
                 pass
 
         try:
-            equipment = EquipmentService.create_equipment(
-                db=db,
-                organization_id=org_id,
-                department_id=dept.id,
-                equipment_type_id=eq_type,
-                voltage_class=str(d["voltage_class"]).strip() if d.get("voltage_class") else None,
-                bay_number=str(d["bay_number"]).strip() if d.get("bay_number") else None,
-                nameplate_data=nameplate_data or None,
-                commissioned_date=commissioned_date,
-                manufacturer=str(d["manufacturer"]).strip() if d.get("manufacturer") else None,
-                model_number=str(d["model_number"]).strip() if d.get("model_number") else None,
-                factory_serial_number=str(d["factory_serial_number"]).strip() if d.get("factory_serial_number") else None,
-                year_of_manufacture=d.get("year_of_manufacture"),
-                latitude=d.get("latitude"),
-                longitude=d.get("longitude"),
-                phase=d.get("phase"),
-                ct_ratio_actual=str(d["ct_ratio_actual"]).strip() if d.get("ct_ratio_actual") else None,
-                ct_ratio_current=str(d["ct_ratio_current"]).strip() if d.get("ct_ratio_current") else None,
-                pt_ratio=str(d["pt_ratio"]).strip() if d.get("pt_ratio") else None,
-                vector_group=str(d["vector_group"]).strip() if d.get("vector_group") else None,
-                impedance_pct=d.get("impedance_pct"),
-                scada_tag=str(d["scada_tag"]).strip() if d.get("scada_tag") else None,
-                created_by=current_user.id,
-            )
-            db.flush()
+            # SAVEPOINT-scoped: a failure below only rolls back THIS row.
+            # db.commit() only fires once, after the whole loop, so a bare
+            # db.rollback() here would roll back the entire session —
+            # discarding every earlier row already flushed successfully in
+            # this same batch, while `imported` still counted them as
+            # successful. begin_nested() isolates each row's insert so the
+            # rest of the batch survives a single row's failure.
+            with db.begin_nested():
+                equipment = EquipmentService.create_equipment(
+                    db=db,
+                    organization_id=org_id,
+                    department_id=dept.id,
+                    equipment_type_id=eq_type,
+                    voltage_class=str(d["voltage_class"]).strip() if d.get("voltage_class") else None,
+                    bay_number=str(d["bay_number"]).strip() if d.get("bay_number") else None,
+                    nameplate_data=nameplate_data or None,
+                    commissioned_date=commissioned_date,
+                    manufacturer=str(d["manufacturer"]).strip() if d.get("manufacturer") else None,
+                    model_number=str(d["model_number"]).strip() if d.get("model_number") else None,
+                    factory_serial_number=str(d["factory_serial_number"]).strip() if d.get("factory_serial_number") else None,
+                    year_of_manufacture=d.get("year_of_manufacture"),
+                    latitude=d.get("latitude"),
+                    longitude=d.get("longitude"),
+                    phase=d.get("phase"),
+                    ct_ratio_actual=str(d["ct_ratio_actual"]).strip() if d.get("ct_ratio_actual") else None,
+                    ct_ratio_current=str(d["ct_ratio_current"]).strip() if d.get("ct_ratio_current") else None,
+                    pt_ratio=str(d["pt_ratio"]).strip() if d.get("pt_ratio") else None,
+                    vector_group=str(d["vector_group"]).strip() if d.get("vector_group") else None,
+                    impedance_pct=d.get("impedance_pct"),
+                    scada_tag=str(d["scada_tag"]).strip() if d.get("scada_tag") else None,
+                    created_by=current_user.id,
+                )
+                db.flush()
             imported += 1
 
-            # Non-fatal post-creation hooks
+            # Non-fatal post-creation hooks — deliberately outside the
+            # savepoint above: a failure here must not undo the equipment
+            # row itself, only skip the schedule instantiation.
             try:
                 from services.test_request_schedule_service import TestRequestScheduleService
                 TestRequestScheduleService.instantiate_equipment_schedules(db, equipment, current_user.id)
@@ -841,7 +851,6 @@ async def bulk_import(
                 pass
 
         except Exception as exc:
-            db.rollback()
             skipped += 1
             error_rows.append({"row": result["row"], "errors": [str(exc)]})
             continue
@@ -1315,6 +1324,34 @@ def get_equipment_counts(
         counts[s.value] = c
     counts["total"] = sum(counts.values())
     return counts
+
+
+@router.get("/stats/failure-cohorts")
+def get_failure_cohorts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Failure-rate-by-make/model cohort breakdown (KPTCL spec §2) -- same
+    computation and shape the Overall Dashboard's Failure Reliability panel
+    already uses (EquipmentService.compute_failure_cohort_stats), just
+    exposed as its own endpoint so other screens (e.g. Equipment Registry)
+    can open the same panel without pulling the whole dashboard rollup.
+
+    Scoped to the caller's own department subtree, same as every other
+    endpoint in this router (get_equipment_counts, etc.) -- an org admin
+    sees every cohort org-wide; a department-scoped user only sees cohorts
+    built from equipment within their own department hierarchy.
+    """
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+
+    from utils.common_service import get_user_dept_scope, get_dept_subtree_ids
+    is_admin, scoped_dept = get_user_dept_scope(db, current_user.id, org_id)
+    department_ids = None if is_admin or not scoped_dept else get_dept_subtree_ids(db, scoped_dept)
+
+    from services.equipment_service import EquipmentService
+    return EquipmentService.compute_failure_cohort_stats(db, org_id, department_ids=department_ids)
 
 
 @router.get("/stats/group-counts")

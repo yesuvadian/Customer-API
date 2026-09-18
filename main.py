@@ -859,6 +859,12 @@ def _check_schedule_notifications():
                     TrWfStageInstance.status == "in_progress",
                     TrWfStageInstance.started_at.isnot(None),
                     TrWfStage.default_duration_days.isnot(None),
+                    # Result Review stages are owned by the more frequent
+                    # (15-minute) _check_review_sla_breaches job below, which
+                    # is hour-precision and understands default_duration_hours
+                    # -- this once-daily, date-truncated pass would otherwise
+                    # double-fire the same breach with a less precise deadline.
+                    TrWfStage.is_result_stage.is_(False),
                 )
                 .all()
             )
@@ -946,6 +952,342 @@ scheduler.add_job(
     hour=7,
     minute=0,
     id="schedule_notification_job",
+)
+
+
+# ── Result Review SLA breach check (every 15 minutes) ────────────────────────
+# Result Review stages (TrWfStage.is_result_stage) can carry an hour-level
+# SLA (default_duration_hours, e.g. 2h for a CRITICAL review) as well as the
+# day-level one every other stage uses -- the once-daily Pass 4 above is far
+# too coarse for that (a 2-hour breach could sit unflagged for up to 24h), so
+# this runs independently and more often, and owns is_result_stage rows
+# exclusively (Pass 4 excludes them to avoid a double-fire).
+#
+# One-shot per breach, not a repeating digest: sla_breach_notified_at is set
+# the moment a stage is flagged, so a still-open, still-breached instance is
+# never re-notified on a later 15-minute pass.
+def _check_review_sla_breaches():
+    db = BackgroundSessionLocal()
+    try:
+        from models import TrWfStageInstance, TrWfStage, TrWfStageRole
+        from services.notification_service import NotificationService
+        from datetime import datetime as _dt5, timezone as _tz5, timedelta
+        from sqlalchemy import or_ as _or5
+
+        now = _dt5.now(_tz5.utc)
+        candidates = (
+            db.query(TrWfStageInstance)
+            .join(TrWfStage, TrWfStageInstance.stage_id == TrWfStage.id)
+            .filter(
+                TrWfStageInstance.status == "in_progress",
+                TrWfStageInstance.started_at.isnot(None),
+                TrWfStageInstance.sla_breach_notified_at.is_(None),
+                TrWfStage.is_result_stage.is_(True),
+                _or5(
+                    TrWfStage.default_duration_hours.isnot(None),
+                    TrWfStage.default_duration_days.isnot(None),
+                ),
+            )
+            .all()
+        )
+
+        notified = 0
+        nsvc = NotificationService(db)
+        for si in candidates:
+            stage = si.stage
+            started_at = si.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=_tz5.utc)
+
+            if stage.default_duration_hours is not None:
+                deadline = started_at + timedelta(hours=stage.default_duration_hours)
+            else:
+                deadline = started_at + timedelta(days=stage.default_duration_days)
+            if now <= deadline:
+                continue
+
+            wf_instance = si.wf_instance
+            tr = getattr(wf_instance, "testing_request", None)
+            if tr is None:
+                # Nothing to notify about or attribute this to -- mark
+                # notified anyway so a dangling instance isn't re-scanned
+                # every 15 minutes forever.
+                si.sla_breach_notified_at = now.replace(tzinfo=None)
+                continue
+
+            hours_overdue = (now - deadline).total_seconds() / 3600
+            eq_obj = getattr(tr, "equipment", None)
+            dept_obj = getattr(tr, "department", None)
+
+            # Roles resolved from THIS stage's actual configuration, not the
+            # wf_stage_overdue template's own hardcoded role list -- those
+            # names (AEE_MAINTENANCE / Reviewing Officer / ...) don't match
+            # every org's real role names (the same class of bug found
+            # earlier in the CAR escalation path), so an override is the
+            # only way this reliably reaches anyone.
+            stage_roles = (
+                db.query(TrWfStageRole)
+                .filter(TrWfStageRole.stage_id == stage.id)
+                .all()
+            )
+            role_names = [r.role.name for r in stage_roles if r.role and r.role.name]
+
+            try:
+                nsvc.fire(
+                    event_type="wf_stage_overdue",
+                    context={
+                        "stage.name": stage.name or "",
+                        "request.number": getattr(tr, "request_number", "") or "",
+                        "equipment.ueic": getattr(eq_obj, "ueic", "") or "",
+                        "equipment.department": getattr(dept_obj, "name", "") or "",
+                        "days_overdue": f"{hours_overdue / 24:.2f}",
+                        "deadline": deadline.isoformat(),
+                        "digest_count": "1",
+                    },
+                    organization_id=getattr(tr, "organization_id", None),
+                    department_id=getattr(tr, "department_id", None),
+                    source_id=si.id,
+                    source_type="tr_wf_stage_instance",
+                    severity="critical",
+                    recipient_roles_override=role_names or None,
+                )
+                notified += 1
+            except Exception as _e:
+                logger.warning(f"[Notif] Review SLA breach fire failed for stage_instance={si.id}: {_e}")
+
+            si.sla_breach_notified_at = now.replace(tzinfo=None)
+
+        db.commit()
+        if notified:
+            logger.info(f"[Notif] Review SLA breach check: {notified} notification(s) sent")
+    except Exception as e:
+        logger.error(f"[Notif] Review SLA breach job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_review_sla_breaches,
+    trigger="interval",
+    minutes=15,
+    id="review_sla_breach_job",
+    max_instances=1,
+    coalesce=True,
+)
+
+
+def _check_auto_close_normal_results():
+    """KPTCL spec D.8 'Auto-close NORMAL results after review period' --
+    same open-review-stage candidate query as _check_review_sla_breaches
+    above, but for stages that opted into TrWfStage.auto_close_normal_
+    after_hours (a separate, admin-configured field -- an org may want a
+    different cadence for quietly closing a clean result than for
+    escalating an overdue one).
+
+    Gates strictly on TestResult.evaluation_result['overall'] == 'NORMAL'
+    for every result on the request, never the tester's own overall_result
+    pass/fail pick -- the same priority _derive_recommendation_from_results
+    (testing_service.py) already gives the computed threshold classification
+    over a human's manual label. A result with no evaluation_result at all
+    (template has no acceptance criteria configured) blocks auto-close
+    rather than being assumed NORMAL.
+    """
+    db = BackgroundSessionLocal()
+    try:
+        from models import TrWfStageInstance, TrWfStage, TrWfStageTransition, TestResult
+        from services.tr_workflow_routing_service import WorkflowRoutingService
+        from datetime import datetime as _dt6, timezone as _tz6, timedelta
+
+        now = _dt6.now(_tz6.utc)
+        candidates = (
+            db.query(TrWfStageInstance)
+            .join(TrWfStage, TrWfStageInstance.stage_id == TrWfStage.id)
+            .filter(
+                TrWfStageInstance.status == "in_progress",
+                TrWfStageInstance.started_at.isnot(None),
+                TrWfStage.is_result_stage.is_(True),
+                TrWfStage.auto_close_normal_after_hours.isnot(None),
+            )
+            .all()
+        )
+
+        svc = WorkflowRoutingService(db)
+        closed = 0
+        for si in candidates:
+            stage = si.stage
+            started_at = si.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=_tz6.utc)
+            deadline = started_at + timedelta(hours=stage.auto_close_normal_after_hours)
+            if now <= deadline:
+                continue
+
+            wf_instance = si.wf_instance
+            tr = getattr(wf_instance, "testing_request", None)
+            if tr is None:
+                continue
+
+            results = (
+                db.query(TestResult)
+                .filter(TestResult.testing_request_id == tr.id)
+                .all()
+            )
+            if not results:
+                continue
+            if not all(
+                (r.evaluation_result or {}).get("overall") == "NORMAL"
+                for r in results
+            ):
+                continue
+
+            # The one outgoing transition that means "no issue, move on" --
+            # every reject/return/cancel transition in this app's seeded
+            # workflows requires a comment; only the forward-progress one
+            # doesn't (routers/tr_workflow_config.py's own convention).
+            # Skip rather than guess if that isn't exactly one transition.
+            positive_transitions = (
+                db.query(TrWfStageTransition)
+                .filter(
+                    TrWfStageTransition.from_stage_id == stage.id,
+                    TrWfStageTransition.is_rejection.is_(False),
+                    TrWfStageTransition.requires_comment.is_(False),
+                    TrWfStageTransition.action_code != "cancel",
+                )
+                .all()
+            )
+            if len(positive_transitions) != 1:
+                logger.warning(
+                    f"[AutoClose] Stage {stage.id} ({stage.code}) has "
+                    f"{len(positive_transitions)} candidate auto-close transition(s), "
+                    f"expected exactly 1 -- skipping."
+                )
+                continue
+
+            try:
+                svc.advance_stage(
+                    testing_request=tr,
+                    action_code=positive_transitions[0].action_code,
+                    performed_by_id=None,
+                    comment="Auto-closed: all results NORMAL, review period elapsed.",
+                )
+                closed += 1
+            except Exception as _e:
+                logger.warning(f"[AutoClose] Failed for stage_instance={si.id}: {_e}")
+
+        db.commit()
+        if closed:
+            logger.info(f"[AutoClose] Auto-closed {closed} NORMAL result review(s)")
+    except Exception as e:
+        logger.error(f"[AutoClose] Auto-close job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_auto_close_normal_results,
+    trigger="interval",
+    minutes=30,
+    id="auto_close_normal_results_job",
+    max_instances=1,
+    coalesce=True,
+)
+
+
+# ── Design Problem Register alert (runs daily at 10:00 UTC) ──────────────────
+# EquipmentService.compute_failure_cohort_stats() already computes
+# is_design_problem_candidate per make/model cohort on every dashboard
+# request -- this is what actually turns that dormant flag into a proactive
+# alert. A cohort isn't a real persisted row (it's computed fresh from
+# Equipment/TestingRequest joins every call, no id of its own), so instead of
+# a new table, dedup reuses the existing NotificationLog audit trail: a
+# deterministic UUID5 of (org, equipment_type, manufacturer, model_number)
+# becomes this fire's source_id, and "has design_problem_alert ever logged
+# against that source_id" is the one-shot guard -- a cohort that stays
+# flagged (nothing resolves it -- there's no "clear" action) doesn't
+# re-notify every day.
+def _check_design_problem_alerts():
+    db = BackgroundSessionLocal()
+    try:
+        import uuid as _uuid
+        from models import Organization, NotificationLog
+        from services.equipment_service import EquipmentService
+        from services.notification_service import NotificationService
+
+        orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        notified = 0
+        nsvc = NotificationService(db)
+        _cohort_ns = _uuid.UUID("6f2b6b6a-6b3a-4b8e-9e2a-7a3b1c9d4e5f")
+
+        for org in orgs:
+            try:
+                cohorts = EquipmentService.compute_failure_cohort_stats(db, org.id)
+            except Exception as _ce:
+                logger.warning(f"[Notif] Design problem cohort computation failed org={org.id}: {_ce}")
+                continue
+
+            for cohort in cohorts:
+                if not cohort.get("is_design_problem_candidate"):
+                    continue
+                equipment_type = cohort["equipment_type"]
+                manufacturer = cohort["manufacturer"]
+                model_number = cohort.get("model_number")
+
+                cohort_source_id = _uuid.uuid5(
+                    _cohort_ns, f"{org.id}|{equipment_type}|{manufacturer}|{model_number}"
+                )
+
+                already = (
+                    db.query(NotificationLog.id)
+                    .filter(
+                        NotificationLog.event_type == "design_problem_alert",
+                        NotificationLog.source_id == cohort_source_id,
+                    )
+                    .first()
+                )
+                if already:
+                    continue
+
+                try:
+                    nsvc.notify_design_problem_alert(
+                        manufacturer=manufacturer,
+                        equipment_type=equipment_type,
+                        problem_description=(
+                            f"Failure rate {cohort['failure_rate_per_unit']:.2f} per unit "
+                            f"across {cohort['unit_count']} unit(s)"
+                            + ("" if model_number else " (model not recorded on these units)")
+                        ),
+                        affected_count=cohort["unit_count"],
+                        organization_id=org.id,
+                        source_id=cohort_source_id,
+                        source_type="design_problem_cohort",
+                        # Template's own baked-in roles don't reliably match
+                        # every org's real role names -- the catalogue's
+                        # default_roles are already confirmed real, firing
+                        # KPTCL roles elsewhere.
+                        recipient_roles_override=["CEE_TRANSMISSION_ZONE", "EE_TLSS"],
+                    )
+                    notified += 1
+                except Exception as _fe:
+                    logger.warning(
+                        f"[Notif] Design problem alert fire failed org={org.id} "
+                        f"cohort=({equipment_type},{manufacturer},{model_number}): {_fe}"
+                    )
+
+        db.commit()
+        if notified:
+            logger.info(f"[Notif] Design problem alert check: {notified} notification(s) sent")
+    except Exception as e:
+        logger.error(f"[Notif] Design problem alert job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_design_problem_alerts,
+    trigger="cron",
+    hour=10,
+    minute=0,
+    id="design_problem_alert_job",
 )
 
 

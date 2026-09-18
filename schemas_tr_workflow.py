@@ -119,6 +119,7 @@ class TrWfStageOut(BaseModel):
     is_mandatory: bool
     is_active: bool
     default_duration_days: Optional[int]
+    default_duration_hours: Optional[int]
     show_recommendation: bool = False
     is_result_stage: bool = False
     use_l2_route: bool = False
@@ -137,6 +138,7 @@ class TrWfStageCreate(BaseModel):
     weight: int = 10
     is_mandatory: bool = True
     default_duration_days: Optional[int] = None
+    default_duration_hours: Optional[int] = None
     status_id: Optional[UUID] = None
     show_recommendation: bool = False
     is_result_stage: bool = False
@@ -151,6 +153,7 @@ class TrWfStagePatch(BaseModel):
     is_mandatory: Optional[bool] = None
     is_active: Optional[bool] = None
     default_duration_days: Optional[int] = None
+    default_duration_hours: Optional[int] = None
     status_id: Optional[UUID] = None
     show_recommendation: Optional[bool] = None
     is_result_stage: Optional[bool] = None
