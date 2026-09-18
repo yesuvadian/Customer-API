@@ -38,6 +38,11 @@ class DprStageActionRequest(BaseModel):
     remarks: Optional[str] = None
 
 
+class DprOverrideRequest(BaseModel):
+    target_stage_id: Optional[UUID] = None
+    justification: str
+
+
 @router.post("")
 def create_project(
     payload: DprProjectCreate,
@@ -193,5 +198,22 @@ def reject_stage(
 ):
     try:
         return DprProjectService(db).reject_stage(project_id, payload.remarks, user)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{project_id}/override")
+def override_stage(
+    project_id: UUID,
+    payload: DprOverrideRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Supervisory override -- see RepairWorkflowService.override_stage's
+    own docstring for the mechanics."""
+    try:
+        return DprProjectService(db).override_stage(
+            project_id, payload.target_stage_id, payload.justification, user,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))

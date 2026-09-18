@@ -303,6 +303,31 @@ class EquipmentService:
         
         voltage_class = cls._normalize_voltage_class(voltage_class)
 
+        # KPTCL spec §1: "no two active equipment units may share the same
+        # serial number within the same equipment class and substation."
+        # Scoped to active units only — a serial can legitimately reappear
+        # once the earlier unit is retired/scrapped/replaced.
+        serial = (factory_serial_number or "").strip()
+        if serial:
+            dup = (
+                db.query(Equipment)
+                .filter(
+                    Equipment.equipment_type_id == equipment_type_id,
+                    Equipment.department_id == department_id,
+                    Equipment.factory_serial_number == serial,
+                    Equipment.status == EquipmentStatus.active,
+                )
+                .first()
+            )
+            if dup:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"An active {eq_type.name} with serial number '{serial}' "
+                        f"already exists at this substation (UEIC {dup.ueic})."
+                    ),
+                )
+
         ueic = cls.generate_ueic(
             db, department_id, eq_type.name, voltage_class, bay_number,
             manufacturer=manufacturer,
@@ -551,6 +576,32 @@ class EquipmentService:
             "phase", "ct_ratio_actual", "ct_ratio_current",
             "pt_ratio", "vector_group", "impedance_pct",
         ]
+
+        new_serial = kwargs.get("factory_serial_number")
+        if new_serial is not None:
+            new_serial = new_serial.strip()
+            if new_serial and new_serial != (equipment.factory_serial_number or ""):
+                dup = (
+                    db.query(Equipment)
+                    .filter(
+                        Equipment.id != equipment.id,
+                        Equipment.equipment_type_id == equipment.equipment_type_id,
+                        Equipment.department_id == equipment.department_id,
+                        Equipment.factory_serial_number == new_serial,
+                        Equipment.status == EquipmentStatus.active,
+                    )
+                    .first()
+                )
+                if dup:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"An active unit of this equipment class with serial "
+                            f"number '{new_serial}' already exists at this "
+                            f"substation (UEIC {dup.ueic})."
+                        ),
+                    )
+
         for key, value in kwargs.items():
             if key == "voltage_class" and value is not None:
                 value = cls._normalize_voltage_class(value)
@@ -921,9 +972,27 @@ class EquipmentService:
         default every call site used before this parameter existed).
         """
         import config as _config
-        from models import TestingRequest, TestResult, CategoryMaster
+        from models import TestingRequest, TestResult, CategoryMaster, FailureCohortThresholdConfig
 
-        min_units = _config.FAILURE_COHORT_MIN_UNITS
+        # Org-specific override -> system-wide default (organization_id
+        # NULL) -> .env constant as a last resort (e.g. before the seed
+        # script has run). Same lookup shape as NotificationTemplate.
+        _threshold_row = (
+            db.query(FailureCohortThresholdConfig)
+            .filter(FailureCohortThresholdConfig.organization_id == organization_id)
+            .first()
+            or db.query(FailureCohortThresholdConfig)
+            .filter(FailureCohortThresholdConfig.organization_id.is_(None))
+            .first()
+        )
+        min_units = (
+            _threshold_row.min_cohort_units if _threshold_row is not None
+            else _config.FAILURE_COHORT_MIN_UNITS
+        )
+        outlier_z_threshold = (
+            float(_threshold_row.outlier_z_score) if _threshold_row is not None
+            else _config.ANALYTICS_ANOMALY_Z
+        )
         limit     = _config.FAILURE_COHORT_DASHBOARD_LIMIT
 
         equip_q = (
@@ -1043,6 +1112,29 @@ class EquipmentService:
                     "failure_count": unit_failure_count,
                     "mtbf_days": round(unit_mtbf, 1) if unit_mtbf is not None else None,
                 })
+            # Within-cohort outlier detection (KPTCL spec §2/12.3): flag a
+            # unit whose OWN failure_count is a statistical outlier against
+            # its cohort peers -- distinct from analytics_engine.py's
+            # per-unit anomaly detection, which compares a unit's latest
+            # reading against that same unit's own history over time, never
+            # against other units. Needs >= 4 units with a real spread
+            # (same materiality floor analytics_engine.py's own Z-score
+            # anomaly check uses) -- below that, mean/stdev over 2-3 points
+            # is noise, not a signal, so every unit is left unflagged.
+            from statistics import mean as _mean, stdev as _stdev
+            _counts = [u["failure_count"] for u in entry["equipment"]]
+            if len(_counts) >= 4 and _stdev(_counts) > 0:
+                _mu = _mean(_counts)
+                _sigma = _stdev(_counts)
+                for _u in entry["equipment"]:
+                    _z = (_u["failure_count"] - _mu) / _sigma
+                    _u["is_outlier"] = _z >= outlier_z_threshold
+                    _u["outlier_z_score"] = round(_z, 2)
+            else:
+                for _u in entry["equipment"]:
+                    _u["is_outlier"] = False
+                    _u["outlier_z_score"] = None
+
             # Worst unit first within the cohort, same convention as the
             # cohort-level worst-first sort below.
             entry["equipment"].sort(key=lambda u: -u["failure_count"])
@@ -1061,7 +1153,10 @@ class EquipmentService:
             ]
             del entry["unit_ids"]
 
-        design_problem_rate = _config.DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE
+        design_problem_rate = (
+            float(_threshold_row.min_failure_rate) if _threshold_row is not None
+            else _config.DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE
+        )
         results = []
         for entry in cohorts.values():
             if entry["unit_count"] < min_units:

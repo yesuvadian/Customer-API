@@ -1186,7 +1186,8 @@ def tr_wf_get_audit_log(
     current_user: User = Depends(get_current_user),
 ):
     """Return the full audit trail plus pending future stages for the request's workflow instance."""
-    from models import TrWfAuditLog, TrWfStage, TrWfInstance, User as UserModel
+    from datetime import timedelta
+    from models import TrWfAuditLog, TrWfStage, TrWfInstance, TrWfStageInstance, User as UserModel
     from services.tr_workflow_routing_service import stage_mapped_roles
 
     req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
@@ -1212,8 +1213,54 @@ def tr_wf_get_audit_log(
             return None
         return f"{u.firstname or ''} {u.lastname or ''}".strip() or u.email
 
-    entries = [
-        {
+    # SLA lookup — for each transition, was the stage it just LEFT (from_stage_id)
+    # still open longer than its configured default_duration_hours/days? Matched
+    # against TrWfStageInstance by request's wf_instance_id directly (not the
+    # "active" instance query below, which is empty once this request's
+    # workflow has completed — exactly the case this feature needs to work
+    # for: reviewing history on an already-closed request).
+    stage_instances_by_stage: dict = {}
+    if req and req.wf_instance_id:
+        for si in (
+            db.query(TrWfStageInstance)
+            .filter(TrWfStageInstance.wf_instance_id == req.wf_instance_id)
+            .order_by(TrWfStageInstance.created_at)
+            .all()
+        ):
+            stage_instances_by_stage.setdefault(str(si.stage_id), []).append(si)
+
+    def _sla_info(from_stage_id, action_at):
+        """(is_breached, hours_over) for the stage instance this transition
+        closed, or (None, None) when that stage has no SLA configured or
+        can't be matched (e.g. no from_stage_id — the initial 'create' entry)."""
+        if not from_stage_id or action_at is None:
+            return None, None
+        stage = db.query(TrWfStage).filter(TrWfStage.id == from_stage_id).first()
+        if not stage or (stage.default_duration_hours is None and stage.default_duration_days is None):
+            return None, None
+        candidates = stage_instances_by_stage.get(str(from_stage_id), [])
+        best = None
+        for si in candidates:
+            if si.completed_at is None or si.started_at is None:
+                continue
+            if best is None or abs((si.completed_at - action_at).total_seconds()) < \
+                    abs((best.completed_at - action_at).total_seconds()):
+                best = si
+        if not best:
+            return None, None
+        deadline = (
+            best.started_at + timedelta(hours=stage.default_duration_hours)
+            if stage.default_duration_hours is not None
+            else best.started_at + timedelta(days=stage.default_duration_days)
+        )
+        if best.completed_at <= deadline:
+            return False, 0.0
+        return True, round((best.completed_at - deadline).total_seconds() / 3600, 1)
+
+    entries = []
+    for log in logs:
+        is_sla_breached, sla_hours_over = _sla_info(log.from_stage_id, log.created_at)
+        entries.append({
             "id": str(log.id),
             "from_stage": _stage_name(log.from_stage_id),
             "to_stage": _stage_name(log.to_stage_id),
@@ -1225,9 +1272,9 @@ def tr_wf_get_audit_log(
             "is_send_back": log.is_send_back,
             "is_terminal": log.is_terminal,
             "created_at": log.created_at.isoformat(),
-        }
-        for log in logs
-    ]
+            "is_sla_breached": is_sla_breached,
+            "sla_hours_over": sla_hours_over,
+        })
 
     # Build pending stages: ordered stages in the workflow def beyond the current stage
     pending_stages: list = []

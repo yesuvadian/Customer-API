@@ -18,7 +18,7 @@ from schemas import (
     TestingRequestResponse,
 )
 from services.reporting_service import _date
-from services.testing_request_service import TestingRequestService
+from services.testing_request_service import TestingRequestService, _cached_lookup
 from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
 
 _DEFAULT_PAGE_SIZE = int(os.getenv("TR_PAGE_SIZE", "20"))
@@ -427,24 +427,34 @@ def get_department_root(dept_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/department_ancestors/{dept_id}")
-def get_department_ancestors(dept_id: UUID, db: Session = Depends(get_db)):
+def get_department_ancestors(
+    dept_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Return the chain from the root down to the given dept (exclusive of dept itself).
     e.g. [KPTCL, Bangalore Zone, BMAZ South, Hoody] for dept=400kV Hoody"""
-    from models import OrgDepartment
-    chain = []
-    current = db.query(OrgDepartment).filter_by(id=dept_id).first()
-    if not current:
-        raise HTTPException(status_code=404, detail="Department not found")
-    # walk up, collect ancestors (not the dept itself)
-    node = current
-    while node.parent_department_id:
-        parent = db.query(OrgDepartment).filter_by(id=node.parent_department_id).first()
-        if not parent:
-            break
-        chain.append({"id": str(parent.id), "name": parent.name})
-        node = parent
-    chain.reverse()  # root first
-    return chain
+    def _compute():
+        from models import OrgDepartment
+        chain = []
+        current = db.query(OrgDepartment).filter_by(id=dept_id).first()
+        if not current:
+            raise HTTPException(status_code=404, detail="Department not found")
+        # walk up, collect ancestors (not the dept itself)
+        node = current
+        while node.parent_department_id:
+            parent = db.query(OrgDepartment).filter_by(id=node.parent_department_id).first()
+            if not parent:
+                break
+            chain.append({"id": str(parent.id), "name": parent.name})
+            node = parent
+        chain.reverse()  # root first
+        return chain
+
+    return _cached_lookup(
+        f"org::{current_user.organization_id}::department_ancestors::{dept_id}",
+        _compute,
+    )
 
 
 @router.get("/department_search")
@@ -563,6 +573,7 @@ def list_lifecycle_types(db: Session = Depends(get_db)):
 def list_all_test_types(
     category: str = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Return all CategoryDetails (test types) grouped by category_type, with
     lifecycle flags resolved from their OrgTestTemplate.
@@ -574,16 +585,20 @@ def list_all_test_types(
     Relay Calibration, Circuit Breaker Operations Count, etc.) are accessible
     without first picking a specific registered equipment.
     """
-    return TestingRequestService(db).list_all_test_types(category=category)
+    return TestingRequestService(db).list_all_test_types(category=category, org_id=current_user.organization_id)
 
 
 # ─── Generic dropdown by master description ─────────────
 @router.get("/dropdown/{master_desc}")
-def get_dropdown_values(master_desc: str, db: Session = Depends(get_db)):
+def get_dropdown_values(
+    master_desc: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Returns CategoryDetails for a CategoryMaster identified by description.
     E.g. /dropdown/Testing Priority → [{id, name}, ...]
     """
-    return TestingRequestService(db).get_dropdown_values(master_desc)
+    return TestingRequestService(db).get_dropdown_values(master_desc, org_id=current_user.organization_id)
 
 
 # ─── List testers (users with Tester role, optionally filtered by location) ───

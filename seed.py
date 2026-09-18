@@ -20,7 +20,7 @@ from models import (
     ReportDefinition,
     # Repair Workflow
     RepairStageDefinition, RepairStageTemplate, RepairStageRole,
-    RepairStageTransition, RepairWorkflowDefinition, OrgTestTemplate,
+    RepairStageTransition, RepairWorkflowDefinition, RepairWorkflowOverrideRole, OrgTestTemplate,
     # Surveillance Workflow
     SurveillanceConfig, SurveillanceTestConfig,
     # Notification config tables
@@ -12767,6 +12767,16 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] System Administrator permissions failed (non-fatal): {_e}")
 
+        # Supervisory-override default grant — must run after both
+        # seed_system_admin_permissions (System Administrator OrgRoles
+        # exist) and the repair-workflow definitions being seeded
+        # (Annual Audit etc., seeded earlier in this same function)
+        print("\n--- Default Override Roles (System Administrator) ---")
+        try:
+            seed_default_override_roles(session)
+        except Exception as _e:
+            print(f"[WARN] Default override roles seed failed (non-fatal): {_e}")
+
         # Org Registration Config — system_config rows + fix any existing orgs
         # with no admin role (idempotent, safe to run every time)
         print("\n--- Org Registration Config ---")
@@ -13069,6 +13079,71 @@ def seed_system_admin_permissions(session) -> int:
     session.commit()
     print(f"[OK] seed_system_admin_permissions: {len(roles)} role(s), {total_upserted} permission rows upserted")
     return total_upserted
+
+
+def seed_default_override_roles(session) -> int:
+    """
+    Idempotently grant every 'System Administrator' OrgRole supervisory-
+    override access (RepairWorkflowOverrideRole) on every active repair-
+    workflow definition (Annual Audit, Breakdown Repair, Calibration, DPR
+    Approval, Overhaul, Post-Commission Surveillance, ...).
+
+    Mirrors alter_seed_default_override_roles.py so a newly-provisioned
+    org's System Administrator has override access out of the box, with
+    no separate manual script run needed -- same reasoning as
+    seed_system_admin_permissions just above. RepairWorkflowDefinition has
+    no organization_id (shared across every org), so this seeds by NAME:
+    RepairWorkflowService._user_org_role_ids already expands a caller's
+    own role name to every OrgRole.id sharing that name across all orgs,
+    so one seeded row per (workflow_definition, name-matching OrgRole)
+    covers every org's own System Administrator, present or future.
+
+    Only inserts a (workflow_definition_id, role_id) pair that doesn't
+    already exist, so an org admin who has already customized a
+    workflow's override roles is never overwritten.
+    """
+    workflows = (
+        session.query(RepairWorkflowDefinition)
+        .filter(RepairWorkflowDefinition.is_active.is_(True))
+        .all()
+    )
+    if not workflows:
+        print("[WARN] seed_default_override_roles: no active workflow definitions found — skipping")
+        return 0
+
+    admin_roles = (
+        session.query(OrgRole)
+        .filter(OrgRole.name == "System Administrator")
+        .all()
+    )
+    if not admin_roles:
+        print("[WARN] seed_default_override_roles: no 'System Administrator' OrgRole found — skipping")
+        return 0
+
+    existing = {
+        (r.workflow_definition_id, r.role_id)
+        for r in session.query(RepairWorkflowOverrideRole).all()
+    }
+
+    inserted = 0
+    for wf in workflows:
+        for role in admin_roles:
+            key = (wf.id, role.id)
+            if key in existing:
+                continue
+            session.add(RepairWorkflowOverrideRole(
+                workflow_definition_id=wf.id,
+                role_id=role.id,
+            ))
+            existing.add(key)
+            inserted += 1
+
+    session.commit()
+    print(
+        f"[OK] seed_default_override_roles: {inserted} grant(s) across "
+        f"{len(workflows)} workflow(s) and {len(admin_roles)} role(s)"
+    )
+    return inserted
 
 
 def seed_sample_equipment(session, org):

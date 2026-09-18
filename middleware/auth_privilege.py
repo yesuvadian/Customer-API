@@ -1,9 +1,70 @@
+import re
+
 from fastapi import Request, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from database import SessionLocal
-from models import Module, UserRole, RoleModulePrivilege, User, OrgUserRole, OrgRolePermission
+from models import (
+    Module, UserRole, RoleModulePrivilege, User, OrgUserRole, OrgRolePermission,
+    TestingRequest, TrWfInstance, TrWfStageRole,
+)
 import auth_utils
 from fastapi import Request
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+
+# --------------------------------------------------
+# Modules whose access, for a call scoped to one specific TestingRequest,
+# is decided by tr_wf_stage_roles.can_act_as_tester on that request's
+# current active workflow stage — NOT by OrgRolePermission. A call to one
+# of these modules that isn't scoped to a specific request (no TestingRequest
+# UUID in the path — list/reference endpoints like /testing/my-assignments
+# or /equipment/types-by-category/12) still falls back to OrgRolePermission,
+# since there's no stage to check against.
+# --------------------------------------------------
+STAGE_BASED_MODULES = {"testing", "testing_requests", "equipment"}
+
+
+def _find_stage_gate(db, parts, org_role_ids):
+    """
+    Look for a TestingRequest.id among the URL's path segments. If one is
+    found, return True/False for whether the caller's org role(s) have
+    can_act_as_tester on that request's current active workflow stage —
+    this REPLACES the OrgRolePermission check entirely for that call.
+    Returns None if no TestingRequest is named in the path, meaning the
+    caller should fall back to the normal OrgRolePermission check.
+    """
+    for segment in parts[1:]:
+        if not _UUID_RE.match(segment):
+            continue
+        testing_request = db.query(TestingRequest).filter_by(id=segment).first()
+        if not testing_request:
+            continue
+
+        instance = (
+            db.query(TrWfInstance)
+            .filter(
+                TrWfInstance.testing_request_id == testing_request.id,
+                TrWfInstance.status == "active",
+            )
+            .first()
+        )
+        if not instance or not instance.current_stage_id:
+            return None
+
+        allowed = (
+            db.query(TrWfStageRole)
+            .filter(
+                TrWfStageRole.stage_id == instance.current_stage_id,
+                TrWfStageRole.role_id.in_(org_role_ids),
+                TrWfStageRole.can_act_as_tester == True,
+            )
+            .first()
+        )
+        return bool(allowed)
+    return None
 
 async def auth_and_privilege_middleware(request: Request, call_next):
 
@@ -15,11 +76,17 @@ async def auth_and_privilege_middleware(request: Request, call_next):
 
 # --------------------------------------------------
 # Public endpoints (NO authentication required)
+#
+# CRITICAL: every real path starts with "/", so a bare "/" or "/api" entry
+# here makes `path.startswith(p)` true for EVERY request, bypassing auth and
+# the whole privilege system for the entire API — not just the literal root.
+# The true root ("/", "/api", "/api/" exactly) is already handled correctly
+# above by exact match, so those entries never belonged in a startswith()
+# list and have been removed. Keep every future entry here either an exact
+# leaf path or a genuine "/namespace/" prefix — never a path fragment that
+# could also be the start of something unrelated.
 # --------------------------------------------------
 PUBLIC_ENDPOINTS = [
-    "/",            # local root
-    "/api",         # production root
-    "/api/",        # production root with slash
     "/token",
     "/docs",
     "/openapi.json",
@@ -27,17 +94,22 @@ PUBLIC_ENDPOINTS = [
     "/register/",
     "/auth/",
     "/files/",
-    "/zoho_register/",
-    "/zohocontacts/",
     "/health",      # external load-test monitoring poll - no auth token available
-    "/public-config",   # safe non-secret settings (e.g. max_upload_mb) - fetched by the UI before login
     "/billing/webhook",   # Razorpay webhook — no auth
     "/billing/plans",     # Plan list — no auth needed
 ]
-ZOHO_PREFIXES = (
-    "/zoho",
-    "/webhooks/zoho",
-)
+
+# --------------------------------------------------
+# Optional-auth endpoints: never require a token (no 401 for a missing or
+# invalid one), but if a valid Bearer token IS present, current_user gets
+# resolved onto request.state.user same as a normal authenticated request —
+# so a route can personalize its response for a logged-in caller while still
+# answering an anonymous one. Different from PUBLIC_ENDPOINTS, which never
+# even attempts to resolve a user.
+# --------------------------------------------------
+AUTH_PUBLIC_ENDPOINTS = [
+    "/public-config",   # safe non-secret settings (e.g. max_upload_mb) - fetched by the UI before login
+]
 
 # --------------------------------------------------
 # HTTP method → privilege mapping
@@ -84,16 +156,33 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         return await call_next(request)
 
     # --------------------------------------------------
-    # 3. Allow Zoho webhooks (FIXED)
-    # --------------------------------------------------
-    if path.startswith("/webhooks/zoho"):
-        print("✅ Skipping auth for Zoho webhook")
-        return await call_next(request)
-
-    # --------------------------------------------------
     # 4. Allow public endpoints
     # --------------------------------------------------
     if any(path.startswith(p) for p in PUBLIC_ENDPOINTS):
+        return await call_next(request)
+
+    # --------------------------------------------------
+    # 4b. Optional-auth endpoints — resolve current_user if a valid token
+    # happens to be present, but never reject the request for a missing or
+    # invalid one.
+    # --------------------------------------------------
+    if any(path.startswith(p) for p in AUTH_PUBLIC_ENDPOINTS):
+        auth_header = (
+            request.headers.get("Authorization")
+            or request.headers.get("authorization")
+        )
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+            payload = auth_utils.decode_access_token(token)
+            user_id = payload.get("sub") if payload else None
+            if user_id:
+                db = SessionLocal()
+                try:
+                    user = db.query(User).filter_by(id=user_id).first()
+                    if user:
+                        request.state.user = user
+                finally:
+                    db.close()
         return await call_next(request)
 
     # --------------------------------------------------
@@ -134,6 +223,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # Payment token (scope=billing) — allow only /billing/* paths
         if payload.get("scope") == "billing":
             if path.startswith("/billing/"):
+                db.close()
                 return await call_next(request)
             raise HTTPException(status_code=403, detail="Payment token only valid for billing endpoints")
 
@@ -185,6 +275,22 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # Skip privilege check for KYC
         # --------------------------------------------------
         if path.startswith("/kyc/"):
+            db.close()
+            return await call_next(request)
+
+        # --------------------------------------------------
+        # Skip privilege check for logout
+        #
+        # POST /users/logout was being gated on can_add for the "users"
+        # module (POST -> can_add per METHOD_ACTION_MAP) — a role with no
+        # user-creation permission (i.e. most roles) couldn't log out at
+        # all. Logging out only needs a valid, already-authenticated user
+        # (enforced above and by routers/users.py's own get_current_user
+        # dependency) — it must never depend on a module permission, same
+        # reasoning as the KYC exemption above.
+        # --------------------------------------------------
+        if path == "/users/logout":
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -197,18 +303,50 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         module_name = parts[0] if parts else None
 
         if not module_name:
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
-        # Skip privilege check for /modules/**
+        # /modules/** — GET only skips the privilege check
+        #
+        # GET /modules/user (list_user_modules) returns each caller's own
+        # permitted module list for their sidebar — every role needs it, and
+        # gating "which modules can you see" behind "do you have can_view on
+        # modules" is circular. GET /modules itself is already covered by
+        # the single-segment-GET rule below, so this only adds /modules/user.
+        # POST/PUT/DELETE (create/update/delete Module rows — platform-wide,
+        # affecting every org) fall through to the normal OrgRolePermission
+        # check like any other module: grant can_add/can_edit/can_delete on
+        # the "App Modules" module (id=2) to whichever role should manage it.
         # --------------------------------------------------
-        if module_name == "modules":
+        if module_name == "modules" and request.method == "GET":
+            db.close()
+            return await call_next(request)
+
+        # --------------------------------------------------
+        # /category_master/** and /category_details/** — GET only skips the
+        # privilege check
+        #
+        # These are the equipment-type / test-type reference lookup used by
+        # several already-permitted features (CM Recommendation Config,
+        # CM/PM Master Template, ...) to resolve names and populate their
+        # equipment-type lists. Gating that lookup behind its own separate,
+        # rarely-granted module meant a role with legitimate view access to
+        # those features still couldn't see the equipment types they depend
+        # on — same "circular permission" problem /modules/user solves
+        # above. POST/PUT/DELETE (actually creating/editing/deleting a
+        # category master or detail) still requires the normal
+        # OrgRolePermission check on that module, same as any other write.
+        # --------------------------------------------------
+        if module_name in ("category_master", "category_details") and request.method == "GET":
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
         # Allow list endpoints (GET /products)
         # --------------------------------------------------
         if request.method == "GET" and len(parts) == 1:
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -229,6 +367,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             action = METHOD_ACTION_MAP.get(request.method)
 
         if not action:
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -237,6 +376,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         resolved_module_name = API_TO_MODULE_PATH.get(module_name, module_name)
         module = db.query(Module).filter_by(path=resolved_module_name).first()
         if not module:
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -245,6 +385,23 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         org_user_roles = db.query(OrgUserRole).filter_by(user_id=user.id, is_active=True).all()
         if org_user_roles:
             org_role_ids = [r.org_role_id for r in org_user_roles]
+
+            if module_name in STAGE_BASED_MODULES:
+                stage_verdict = _find_stage_gate(db, parts, org_role_ids)
+                if stage_verdict is not None:
+                    if not stage_verdict:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=(
+                                f"Access denied: role is not the active tester "
+                                f"for this request's current stage ('{module_name}')"
+                            ),
+                        )
+                    db.close()
+                    return await call_next(request)
+                # No TestingRequest named in this path (list/reference call) —
+                # fall through to the normal OrgRolePermission check below.
+
             allowed = (
                 db.query(OrgRolePermission)
                 .filter(
@@ -259,6 +416,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                     status_code=403,
                     detail=f"Access denied for '{action}' on '{module_name}'",
                 )
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -267,6 +425,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         try:
             user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
             if not user_roles:
+                db.close()
                 return await call_next(request)
 
             role_ids = [r.role_id for r in user_roles]
@@ -287,12 +446,26 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         except Exception as e:
             print(f"[INFO] Role system error in middleware: {e}")
             db.rollback()
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
         # ALL GOOD
         # --------------------------------------------------
+        db.close()
         return await call_next(request)
 
+    except HTTPException as exc:
+        # A middleware registered via app.middleware("http") sits OUTSIDE
+        # Starlette's ExceptionMiddleware, so an HTTPException raised in here
+        # (every 401/403 above) is NOT auto-converted to a response the way
+        # one raised inside a route handler is — left uncaught, it propagates
+        # to ServerErrorMiddleware and surfaces to the caller as a bare 500,
+        # masking the real 401/403 entirely. Convert it explicitly.
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=exc.headers or {},
+        )
     finally:
         db.close()

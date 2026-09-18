@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, text
 from models import TestResult
 from datetime import datetime, timedelta
+from utils.sequence_locks import TESTING_REQUEST_NUMBER_LOCK
 
 from models import (
     TestingRequest, TestingRequestStatus, User,
@@ -19,8 +20,44 @@ from models import (
     TrWfStageRole,
     TrWfInstance,
     TrWfStatus,
+    TestRequestSchedule, ScheduleFrequency,
 )
 from utils.common_service import UTCDateTimeMixin, get_dept_subtree_ids, get_user_dept_scope
+from services.redis_cache import RedisCacheService
+
+# equipment_types/all-test-types/dropdown/*/department_ancestors are
+# admin-configured reference data (CategoryMaster/CategoryDetails/
+# OrgTestTemplate/OrgDepartment) that changes rarely, but a real
+# 50-concurrent-thread load test showed these exact lookup endpoints
+# dominating the slow-endpoint list under load - each one runs several
+# joined queries per call. LOOKUP_CACHE_TTL is a safety-net upper bound on
+# staleness (same 15-min TTL dashboard_service.py already uses); the CRUD
+# routers for this data (category_master.py, category_details.py,
+# org_test_templates.py, org_departments.py) also call
+# invalidate_lookup_cache() on every write so edits show up immediately
+# rather than waiting out the TTL.
+LOOKUP_CACHE_TTL = 900
+_LOOKUP_CACHE_PREFIX = "org::"
+
+
+def _cached_lookup(key: str, compute_fn):
+    cached = RedisCacheService.get(key)
+    if cached is not None:
+        return cached
+    result = compute_fn()
+    RedisCacheService.set(key, result, ttl=LOOKUP_CACHE_TTL)
+    return result
+
+
+def invalidate_lookup_cache() -> None:
+    """Clear every cached lookup (equipment_types/all_test_types/dropdown/
+    department_ancestors) across ALL orgs. Called from the CRUD routers for
+    CategoryMaster, CategoryDetails, OrgTestTemplate, and OrgDepartment -
+    edits to this reference data are rare admin operations, so a broad
+    flush (rather than precisely targeting just the affected org/master) is
+    the simpler, safer choice: correctness here matters far more than
+    saving a few cache rebuilds on an infrequent write path."""
+    RedisCacheService.delete_pattern(f"{_LOOKUP_CACHE_PREFIX}*")
 
 # Legacy TestingRequestStatus enum -> display label/color, used to label
 # get_breakdown() buckets for requests that never entered the tr_wf_* engine
@@ -230,9 +267,98 @@ class TestingRequestService:
 
         return False
 
+    # KPTCL spec §4: "prevent duplicate active test requests for the same
+    # UEIC and test type within the same scheduling period." Terminal
+    # statuses only — anything not in this set is still "active" for this
+    # check's purposes (deliberately conservative: better to block a real
+    # duplicate than let two open requests for the same equipment+test-type
+    # coexist). Kept local to this check rather than reused elsewhere, since
+    # "closed" status sets already disagree between this service and
+    # dashboard_service.py — not fixing that broader inconsistency here.
+    _DUPLICATE_CHECK_TERMINAL_STATUSES = {
+        TestingRequestStatus.rejected,
+        TestingRequestStatus.completed,
+        TestingRequestStatus.outcome_active,
+        TestingRequestStatus.commissioned,
+        TestingRequestStatus.closed,
+        TestingRequestStatus.procurement_initiated,
+    }
+
+    @staticmethod
+    def _as_date(value):
+        """datetime -> date; date/None passed through, so due_date diffs
+        never blow up on a type mismatch between the two sides."""
+        if value is not None and hasattr(value, "date") and callable(value.date):
+            return value.date()
+        return value
+
     def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
-        request_number = self._generate_request_number(org_id=data.get("organization_id"))
         test_type_id = data.get("test_type_id")
+
+        equipment_id = data.get("equipment_id")
+        if equipment_id and test_type_id and not data.get("is_schedule_template"):
+            candidates = (
+                self.db.query(TestingRequest)
+                .filter(
+                    TestingRequest.equipment_id == equipment_id,
+                    TestingRequest.test_type_id == test_type_id,
+                    TestingRequest.is_schedule_template.is_(False),
+                    ~TestingRequest.status.in_(self._DUPLICATE_CHECK_TERMINAL_STATUSES),
+                )
+                .all()
+            )
+            if candidates:
+                # "Same scheduling period" — not "ever coexisting": a request
+                # due next quarter is a different cadence cycle from one due
+                # this week, even for the identical equipment+test-type, and
+                # must be allowed (e.g. an ad-hoc test now alongside the
+                # already-auto-created next recurring instance). Use this
+                # equipment's own configured recurring cadence for this test
+                # type, when one exists, as the period width; 30 days
+                # ("monthly") otherwise — conservative enough to still catch
+                # true duplicates without a configured schedule to measure
+                # against.
+                new_due = self._as_date(data.get("due_date"))
+                active_schedule = (
+                    self.db.query(TestRequestSchedule)
+                    .filter(
+                        TestRequestSchedule.equipment_id == equipment_id,
+                        TestRequestSchedule.test_type_id == test_type_id,
+                        TestRequestSchedule.is_recurring.is_(True),
+                        TestRequestSchedule.is_deleted.is_(False),
+                    )
+                    .first()
+                )
+                period_days = ScheduleFrequency.cooldown(
+                    active_schedule.frequency.value
+                    if active_schedule and active_schedule.frequency else None,
+                    default=30,
+                )
+
+                conflict = None
+                for existing in candidates:
+                    existing_due = self._as_date(existing.due_date)
+                    # No due_date on either side to compare against — can't
+                    # tell the periods apart, so stay conservative and treat
+                    # it as a conflict rather than silently allow a real dup.
+                    if new_due is None or existing_due is None:
+                        conflict = existing
+                        break
+                    if abs((existing_due - new_due).days) < period_days:
+                        conflict = existing
+                        break
+
+                if conflict:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"An active test request for this equipment and test "
+                            f"type already exists within the same scheduling "
+                            f"period ({conflict.request_number}, status: "
+                            f"{conflict.status.value})."
+                        ),
+                    )
+
         is_cumulative = self._resolve_is_cumulative(test_type_id)
         is_calibration = self._resolve_is_calibration(test_type_id)
         _tpl_multi, _tpl_sessions, _tpl_interval = self._resolve_is_multi_session(test_type_id)
@@ -240,48 +366,64 @@ class TestingRequestService:
         _is_multi = data.get("is_multi_session") or _tpl_multi
         _total    = data.get("total_sessions_planned") or _tpl_sessions
         _interval = data.get("session_interval_days") or _tpl_interval
-        request = TestingRequest(
-            request_number=request_number,
-            title=data["title"],
-            description=data.get("description"),
-            transformer_type=data.get("transformer_type"),
-            transformer_rating=data.get("transformer_rating"),
-            manufacturer=data.get("manufacturer"),
-            serial_number=data.get("serial_number"),
-            equipment_type_id=data.get("equipment_type_id"),
-            test_type_id=test_type_id,
-            equipment_id=data.get("equipment_id"),
-            request_category=data.get("request_category", "test"),
-            organization_id=data.get("organization_id"),
-            department_id=data.get("department_id"),
-            zone=data.get("zone"),
-            ce_circle=data.get("ce_circle"),
-            se_division=data.get("se_division"),
-            ee_subdivision=data.get("ee_subdivision"),
-            aee_section=data.get("aee_section"),
-            ae_je=data.get("ae_je"),
-            assigned_tester_id=data.get("assigned_tester_id"),
-            priority=data.get("priority", "normal"),
-            requested_date=data.get("requested_date"),
-            due_date=data.get("due_date"),
-            scheduled_start_date=data.get("scheduled_start_date"),
-            notes=data.get("notes"),
-            status=TestingRequestStatus.draft,
-            originator_id=originator_id,
-            created_by=originator_id,
-            is_multi_session=bool(_is_multi),
-            total_sessions_planned=_total,
-            session_interval_days=_interval,
-            is_cumulative=is_cumulative,
-            is_calibration=is_calibration,
-            is_schedule_template=data.get("is_schedule_template", False),
-            source_schedule_id=data.get("source_schedule_id"),
-            surveillance_workflow_id=data.get("surveillance_workflow_id"),
-            surveillance_quarter=data.get("surveillance_quarter"),
-        )
-        self.db.add(request)
-        self.db.commit()
-        self.db.refresh(request)
+
+        # _generate_request_number() reads the current MAX sequence and adds
+        # 1 - not atomic, so two concurrent creates for the same org/year
+        # could read the same MAX before either commits and compute the
+        # identical "next" number, which the unique constraint on
+        # request_number then rejects with an IntegrityError. A real
+        # concurrent load test (5+ simultaneous creates) reproduced this;
+        # the same requests run sequentially never collide.
+        # TESTING_REQUEST_NUMBER_LOCK (see utils/sequence_locks.py) - shared
+        # with every other service that also writes TestingRequest.
+        # request_number (approval_service's repair-TR auto-create,
+        # direct_submission_service) - serializes generate-then-insert-then-
+        # commit across ALL of them, not just this function, so no two
+        # threads anywhere can read the same MAX before one has committed.
+        with TESTING_REQUEST_NUMBER_LOCK:
+            request_number = self._generate_request_number(org_id=data.get("organization_id"))
+            request = TestingRequest(
+                request_number=request_number,
+                title=data["title"],
+                description=data.get("description"),
+                transformer_type=data.get("transformer_type"),
+                transformer_rating=data.get("transformer_rating"),
+                manufacturer=data.get("manufacturer"),
+                serial_number=data.get("serial_number"),
+                equipment_type_id=data.get("equipment_type_id"),
+                test_type_id=test_type_id,
+                equipment_id=data.get("equipment_id"),
+                request_category=data.get("request_category", "test"),
+                organization_id=data.get("organization_id"),
+                department_id=data.get("department_id"),
+                zone=data.get("zone"),
+                ce_circle=data.get("ce_circle"),
+                se_division=data.get("se_division"),
+                ee_subdivision=data.get("ee_subdivision"),
+                aee_section=data.get("aee_section"),
+                ae_je=data.get("ae_je"),
+                assigned_tester_id=data.get("assigned_tester_id"),
+                priority=data.get("priority", "normal"),
+                requested_date=data.get("requested_date"),
+                due_date=data.get("due_date"),
+                scheduled_start_date=data.get("scheduled_start_date"),
+                notes=data.get("notes"),
+                status=TestingRequestStatus.draft,
+                originator_id=originator_id,
+                created_by=originator_id,
+                is_multi_session=bool(_is_multi),
+                total_sessions_planned=_total,
+                session_interval_days=_interval,
+                is_cumulative=is_cumulative,
+                is_calibration=is_calibration,
+                is_schedule_template=data.get("is_schedule_template", False),
+                source_schedule_id=data.get("source_schedule_id"),
+                surveillance_workflow_id=data.get("surveillance_workflow_id"),
+                surveillance_quarter=data.get("surveillance_quarter"),
+            )
+            self.db.add(request)
+            self.db.commit()
+            self.db.refresh(request)
         return request
 
     def get_request(self, request_id: UUID) -> TestingRequest:
@@ -1373,6 +1515,12 @@ class TestingRequestService:
         exclusion list AND that either carries description='Testing Equipment' OR
         has at least one active CategoryDetail — so newly created equipment types
         appear here as soon as they have test/maintenance types defined."""
+        return _cached_lookup(
+            f"org::{org_id or 'global'}::equipment_types",
+            lambda: self._compute_equipment_types(org_id),
+        )
+
+    def _compute_equipment_types(self, org_id=None) -> list:
         masters = (
             self.db.query(CategoryMaster)
             .filter(
@@ -1466,13 +1614,24 @@ class TestingRequestService:
                 })
         return result
 
-    def list_all_test_types(self, category: str = None) -> list:
+    def list_all_test_types(self, category: str = None, org_id=None) -> list:
         """Return all CategoryDetails (test types) across ALL equipment types,
         with lifecycle flags resolved from OrgTestTemplate.
 
         Optionally filtered by category_type (test / maintenance / inspection /
         repair_lifecycle).  Used by the form when no equipment type is selected.
+
+        org_id only partitions the CACHE key here (defense against ever
+        serving one org's cached response to another) - CategoryMaster/
+        CategoryDetails have no organization_id column, so the underlying
+        query itself is org-agnostic by design, same as before caching.
         """
+        return _cached_lookup(
+            f"org::{org_id or 'global'}::all_test_types::{category or 'all'}",
+            lambda: self._compute_all_test_types(category),
+        )
+
+    def _compute_all_test_types(self, category: str = None) -> list:
         query = (
             self.db.query(CategoryDetails, CategoryMaster)
             .join(CategoryMaster, CategoryMaster.id == CategoryDetails.category_master_id)
@@ -1570,8 +1729,17 @@ class TestingRequestService:
 
         return result
 
-    def get_dropdown_values(self, master_desc: str) -> list:
-        """Return CategoryDetails for the CategoryMaster identified by description."""
+    def get_dropdown_values(self, master_desc: str, org_id=None) -> list:
+        """Return CategoryDetails for the CategoryMaster identified by description.
+
+        org_id only partitions the CACHE key (see list_all_test_types for why -
+        CategoryMaster has no organization_id column)."""
+        return _cached_lookup(
+            f"org::{org_id or 'global'}::dropdown::{master_desc}",
+            lambda: self._compute_dropdown_values(master_desc),
+        )
+
+    def _compute_dropdown_values(self, master_desc: str) -> list:
         master = (
             self.db.query(CategoryMaster)
             .filter(

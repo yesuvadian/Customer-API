@@ -232,6 +232,30 @@ class RepairStageRole(Base):
     __table_args__ = (UniqueConstraint("stage_id", "role_id", name="uq_repair_stage_role"),)
 
 
+class RepairWorkflowOverrideRole(Base):
+    """Workflow-wide (not per-stage) supervisory-override authorization.
+
+    Deliberately separate from RepairStageRole: override is meant to work
+    from whatever stage the workflow is currently stuck in, not just one
+    -- putting it on a per-stage list would mean re-configuring the same
+    role on every stage of a workflow (5 stages for Annual Audit's CAR
+    flow) and risking a gap on whichever one gets missed. One list per
+    RepairWorkflowDefinition covers every stage of that workflow type.
+
+    Holding this role grants exactly one extra action (force-transition
+    with a mandatory justification, logged as its own audit action) --
+    it does NOT also grant can_edit/can_approve/can_assign on stages the
+    role wasn't already given those through RepairStageRole.
+    """
+    __tablename__ = "repair_workflow_override_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_definition_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflow_definitions.id", ondelete="CASCADE"))
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"))
+
+    __table_args__ = (UniqueConstraint("workflow_definition_id", "role_id", name="uq_repair_workflow_override_role"),)
+
+
 class RepairStageTransition(Base):
     """Directed transition graph.  action: 'approve' | 'reject'.  to_stage_id=NULL → terminal."""
     __tablename__ = "repair_stage_transitions"
@@ -840,8 +864,16 @@ class TrWfStage(Base):
     is_mandatory = Column(Boolean, default=True)
     is_active = Column(Boolean, default=True)
     default_duration_days = Column(Integer, nullable=True)
+    default_duration_hours = Column(Integer, nullable=True)
     show_recommendation = Column(Boolean, default=False, server_default="false")
     is_result_stage = Column(Boolean, default=False, server_default="false")
+    # Only meaningful when is_result_stage is True -- how long a result
+    # review stays open, after which the _check_auto_close_normal_results
+    # job (main.py) auto-closes it IF every TestResult on the request
+    # evaluated NORMAL (never the tester's own overall_result pass/fail
+    # pick -- see _derive_recommendation_from_results' same precedent).
+    # Null = auto-close disabled for this stage (opt-in, admin-configured).
+    auto_close_normal_after_hours = Column(Integer, nullable=True)
     use_l2_route = Column(Boolean, default=False, server_default="false")
     is_role_scoped = Column(Boolean, default=False, server_default="false")
     created_at = Column(DateTime, server_default=func.now())
@@ -972,6 +1004,7 @@ class TrWfStageInstance(Base):
     completed_at = Column(DateTime, nullable=True)
     completed_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     comment = Column(Text, nullable=True)
+    sla_breach_notified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     wf_instance = relationship("TrWfInstance", back_populates="stage_instances")
@@ -5500,6 +5533,45 @@ class EquipmentHealthBandThreshold(Base):
     notes     = Column(Text, nullable=True)
 
     created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class FailureCohortThresholdConfig(Base):
+    """Admin-configurable thresholds for failure-cohort computation
+    (EquipmentService.compute_failure_cohort_stats) -- replaces the
+    previously .env-only DESIGN_PROBLEM_CANDIDATE_MIN_FAILURE_RATE and
+    FAILURE_COHORT_MIN_UNITS config.py constants.
+
+    organization_id NULL = the system-wide default -- same "org can
+    override, default always exists" pattern NotificationTemplate already
+    uses. An org only gets its own row once it explicitly overrides the
+    default; compute_failure_cohort_stats() looks up the org-specific row
+    first, falls back to the NULL row, and falls back to the .env
+    constants as a last resort if even that's missing (e.g. before the
+    seed script has run). No DB-level uniqueness on organization_id --
+    same as NotificationTemplate, de-duplication is the seed/update
+    endpoint's own get-or-create check, not a constraint.
+    """
+    __tablename__ = "failure_cohort_threshold_configs"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    min_failure_rate = Column(Numeric(5, 2), nullable=False, default=1.0)
+    min_cohort_units = Column(Integer, nullable=False, default=3)
+    # Within-cohort outlier detection (KPTCL spec §2/12.3): a unit whose own
+    # failure_count Z-score against its cohort's mean/stdev clears this
+    # threshold is flagged is_outlier. Same default as the unrelated
+    # per-unit time-series anomaly detector (config.py's ANALYTICS_ANOMALY_Z)
+    # for consistency, not because the two are the same calculation.
+    outlier_z_score = Column(Numeric(4, 2), nullable=False, default=3.0)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

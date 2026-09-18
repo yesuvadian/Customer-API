@@ -30,7 +30,7 @@ from models import (
     User,
 )
 from fastapi.responses import FileResponse
-from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitRequest, RepairAssignRequest
+from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitRequest, RepairAssignRequest, RepairOverrideRequest
 from services.repair_workflow_service import RepairWorkflowService
 from services.surveillance_template_service import SurveillanceTemplateService
 from utils.common_service import get_user_dept_scope
@@ -680,6 +680,24 @@ def advance_stage(
     _check_workflow_access(db, workflow_id, user)
     try:
         return RepairWorkflowService(db).advance_stage(workflow_id, payload.remarks, user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{workflow_id}/override")
+def override_stage(
+    workflow_id: UUID,
+    payload: RepairOverrideRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Supervisory override -- see RepairWorkflowService.override_stage's
+    own docstring for the mechanics."""
+    _check_workflow_access(db, workflow_id, user)
+    try:
+        return RepairWorkflowService(db).override_stage(
+            workflow_id, payload.target_stage_id, payload.justification, user.id,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
 

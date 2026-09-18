@@ -30,6 +30,7 @@ from database import get_db
 from models import User
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
 from category_labels import TrWfOutcomeColors
+from utils.business_days import business_days_between
 
 router = APIRouter(
     prefix="/dashboard",
@@ -69,6 +70,53 @@ def _svc(db: Session, current_user: User, org_id: Optional[UUID] = None,
     if resolved_dept:
         dept_ids = get_dept_subtree_ids(db, resolved_dept)
     return DashboardService(db, org_id=resolved_org, dept_id=resolved_dept, dept_ids=dept_ids)
+
+
+def _testkit_type_ids(db: Session) -> list:
+    """CategoryMaster IDs for the 'Testing Kit' equipment type. Testing kits
+    aren't real substation assets — routers/analytics.py's AI Analytics
+    Dashboard already excludes them from its equipment totals via this exact
+    lookup; this router's own equipment_count/total_equipment metrics didn't,
+    so the two dashboards' headline equipment counts silently disagreed by
+    exactly the org's testing-kit count. Not org-scoped: the type itself is a
+    global CategoryMaster row, shared across orgs."""
+    from models import CategoryMaster
+    return [c.id for c in db.query(CategoryMaster.id).filter(
+        CategoryMaster.name.ilike("%testing kit%")).all()]
+
+
+def _equipment_scope_filters(db: Session, org_id, dept_ids=None) -> list:
+    """Shared equipment-scope filters for a headline equipment count:
+    excludes retired equipment and Testing Kits, matching the AI Analytics
+    Dashboard's definition (routers/analytics.py's real_total_equipment) so
+    this dashboard's equipment totals stop disagreeing with it."""
+    from models import Equipment
+    filters = [Equipment.organization_id == org_id, Equipment.status != 'retired']
+    testkit_ids = _testkit_type_ids(db)
+    if testkit_ids:
+        filters.append(~Equipment.equipment_type_id.in_(testkit_ids))
+    if dept_ids:
+        filters.append(Equipment.department_id.in_(dept_ids))
+    return filters
+
+
+def _critical_equipment_count(db: Session, org_id, dept_ids=None) -> int:
+    """Shared 'Critical' equipment count: EquipmentAnalytics.risk_level ==
+    'Critical' (the AnalyticsEngine's health-score-driven classification) —
+    NOT Equipment.status == 'under_repair', which this router's per-role
+    endpoints used to check instead. That flag is a manual repair marker set
+    independently of test results, so it silently missed every equipment
+    whose Critical health score never triggered a repair ticket — confirmed
+    live: 16 equipment sit at risk_level='Critical' org-wide while 0 are
+    status='under_repair', so the old logic always showed 0. Matches the AI
+    Analytics Dashboard's and _build_department_rollup's own critical_count
+    definition."""
+    from models import EquipmentAnalytics
+    from sqlalchemy import func
+    filters = [EquipmentAnalytics.organization_id == org_id, EquipmentAnalytics.risk_level == 'Critical']
+    if dept_ids:
+        filters.append(EquipmentAnalytics.department_id.in_(dept_ids))
+    return db.query(func.count(EquipmentAnalytics.id)).filter(*filters).scalar() or 0
 
 
 # ── Role view ──────────────────────────────────────────────────────────────
@@ -307,9 +355,12 @@ def get_aee_dashboard(
         TestingRequest.status.in_(['in_progress', 'assigned'])
     ).scalar() or 0
 
+    # dept_ids intentionally omitted: every other metric in this endpoint
+    # (pending_approvals, assigned_tests, maintenance_due below) is org-wide
+    # only, with no department scoping — matching that instead of scoping
+    # just this one count keeps the endpoint internally consistent.
     equipment_count = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.status == 'active'
+        *_equipment_scope_filters(db, svc.org_id)
     ).scalar() or 0
 
     # Maintenance due (equipment without recent maintenance tests)
@@ -397,10 +448,7 @@ def get_aee_dashboard(
 
     under_test = assigned_tests  # Equipment currently being tested
 
-    alert_count = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.status == 'under_repair'
-    ).scalar() or 0
+    alert_count = _critical_equipment_count(db, svc.org_id)
 
     return {
         'kpis': {
@@ -432,10 +480,10 @@ def get_ee_tlss_dashboard(
 
     svc = _svc(db, current_user, org_id, dept_id)
 
-    # Test Compliance Rate
+    # Test Compliance Rate — dept_ids omitted: the rest of this endpoint's
+    # metrics (overdue_tests, open_remediation, etc.) are org-wide only too.
     total_equipment = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.status == 'active'
+        *_equipment_scope_filters(db, svc.org_id)
     ).scalar() or 0
 
     # Equipment with recent tests (within 90 days)
@@ -457,11 +505,11 @@ def get_ee_tlss_dashboard(
         TestingRequest.due_date < datetime.now()
     ).scalar() or 0
 
-    # ALERT/CRITICAL flags (equipment with failed tests or under repair)
-    alert_critical = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id,
-        Equipment.status == 'under_repair'
-    ).scalar() or 0
+    # ALERT/CRITICAL flags — health-score-driven (EquipmentAnalytics.risk_level),
+    # not Equipment.status == 'under_repair' (a manual repair marker set
+    # independently of test results, so it missed every equipment whose
+    # Critical score never triggered a repair ticket).
+    alert_critical = _critical_equipment_count(db, svc.org_id)
 
     # Open Remediation (testing requests with recommendations)
     from models import Recommendation
@@ -1250,6 +1298,55 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # "no equipment" rather than a misleading 100%.
         dqi_pct = int((dqi_ready / dqi_total) * 100) if dqi_total > 0 else None
 
+        # Result Review SLA compliance — % of closed Result Review stage
+        # instances (TrWfStage.is_result_stage) that finished within their
+        # configured stage duration. Blended across severities, not the
+        # spec's 24h-ALERT/2h-CRITICAL split: severity is only captured on
+        # fired Notification rows (models.py:4561), not as a stable field
+        # on TestingRequest/TrWfStageInstance a historical report can join
+        # against, so a single stage-level duration is all that's available
+        # today. Only counts stages an admin has actually given a duration
+        # to (tr_workflow_config.py's create/patch validation) — every
+        # stage predating that feature is excluded, not treated as 0%.
+        from models import TrWfStageInstance
+        review_rows = (
+            db.query(
+                TrWfStageInstance.started_at,
+                TrWfStageInstance.completed_at,
+                TrWfStage.default_duration_hours,
+                TrWfStage.default_duration_days,
+            )
+            .join(TrWfStage, TrWfStage.id == TrWfStageInstance.stage_id)
+            .join(TrWfInstance, TrWfInstance.id == TrWfStageInstance.wf_instance_id)
+            .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+            .filter(
+                *tr_filters,
+                TrWfStage.is_result_stage.is_(True),
+                TrWfStageInstance.status.in_(("completed", "rejected")),
+                TrWfStageInstance.started_at.isnot(None),
+                TrWfStageInstance.completed_at.isnot(None),
+                _or(
+                    TrWfStage.default_duration_hours.isnot(None),
+                    TrWfStage.default_duration_days.isnot(None),
+                ),
+            )
+            .all()
+        )
+        review_sla_total = len(review_rows)
+        review_sla_compliant = 0
+        for started_at, completed_at, dur_hours, dur_days in review_rows:
+            deadline = (
+                started_at + timedelta(hours=dur_hours)
+                if dur_hours is not None
+                else started_at + timedelta(days=dur_days)
+            )
+            if completed_at <= deadline:
+                review_sla_compliant += 1
+        review_sla_pct = (
+            int((review_sla_compliant / review_sla_total) * 100)
+            if review_sla_total > 0 else None
+        )
+
         return {
             "total_tests": total_requests,
             "overdue_count": overdue_count,
@@ -1261,6 +1358,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "closed_this_week_count": closed_this_week_count,
             "rejected_cancelled_count": rejected_cancelled_count,
             "compliance_pct": compliance_pct,
+            "review_sla_pct": review_sla_pct,
+            "review_sla_total": review_sla_total,
             "dqi_pct": dqi_pct,
             "dqi_ready_count": dqi_ready,
             "dqi_total_count": dqi_total,
@@ -1289,6 +1388,70 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         issues_out = result["issues"]
         total = len(issues_out)
         page = issues_out[offset:offset + limit] if limit is not None else issues_out[offset:]
+        return page, total
+
+    def _review_sla_breaches_list(dept_ids_for_scope, limit=None):
+        """Closed Result Review stage instances that missed their
+        configured SLA -- the actionable detail behind _scope_counts'
+        review_sla_pct, same reasoning as _dqi_issues_list above: the
+        aggregate percentage alone doesn't tell you which ticket to act on.
+        """
+        from models import TrWfStageInstance as _TrWfStageInstance
+        from sqlalchemy import or_ as _or_rsb
+        _tr_filters = [TestingRequest.organization_id == svc.org_id]
+        if dept_ids_for_scope:
+            _tr_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+
+        rows = (
+            db.query(_TrWfStageInstance, TrWfStage, TestingRequest)
+            .join(TrWfStage, TrWfStage.id == _TrWfStageInstance.stage_id)
+            .join(TrWfInstance, TrWfInstance.id == _TrWfStageInstance.wf_instance_id)
+            .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+            .filter(
+                *_tr_filters,
+                TrWfStage.is_result_stage.is_(True),
+                _TrWfStageInstance.status.in_(("completed", "rejected")),
+                _TrWfStageInstance.started_at.isnot(None),
+                _TrWfStageInstance.completed_at.isnot(None),
+                _or_rsb(
+                    TrWfStage.default_duration_hours.isnot(None),
+                    TrWfStage.default_duration_days.isnot(None),
+                ),
+            )
+            .order_by(_TrWfStageInstance.completed_at.desc())
+            .all()
+        )
+
+        breaches = []
+        for si, stage, tr in rows:
+            deadline = (
+                si.started_at + timedelta(hours=stage.default_duration_hours)
+                if stage.default_duration_hours is not None
+                else si.started_at + timedelta(days=stage.default_duration_days)
+            )
+            if si.completed_at <= deadline:
+                continue
+            eq = getattr(tr, "equipment", None)
+            breaches.append({
+                "stage_instance_id": str(si.id),
+                "request_id": str(tr.id),
+                "request_number": tr.request_number,
+                "stage_name": stage.name,
+                # Reuses TicketsPanel's generic "test_type" display slot to
+                # show which stage breached, next to the request number --
+                # no separate widget needed for this one extra label.
+                "test_type": stage.name,
+                "equipment_id": str(eq.id) if eq else None,
+                "equipment_label": eq.ueic if eq else (
+                    tr.equipment_type.name if tr.equipment_type else "Equipment"),
+                "started_at": si.started_at.isoformat(),
+                "completed_at": si.completed_at.isoformat(),
+                "deadline": deadline.isoformat(),
+                "hours_over": round((si.completed_at - deadline).total_seconds() / 3600, 1),
+            })
+
+        total = len(breaches)
+        page = breaches[:limit] if limit is not None else breaches
         return page, total
 
     def _calibration_summary(dept_ids_for_scope):
@@ -1338,7 +1501,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         ).all()
         cal_t0 = cal_t7 = cal_t15 = 0
         for (due_date,) in overdue_cal_rows:
-            days_over = (now - due_date).days
+            days_over = business_days_between(due_date.date(), now.date())
             if days_over >= 15:
                 cal_t15 += 1
             elif days_over >= 7:
@@ -1743,6 +1906,14 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             _logging.getLogger(__name__).warning(
                 "failure cohort reliability computation failed", exc_info=True
             )
+            # A DB-level error (e.g. a missing table/column) leaves this
+            # session's transaction aborted in Postgres — every later query
+            # on the same `db` in this request would raise
+            # InFailedSqlTransaction otherwise, cascading this one caught
+            # failure into unrelated widgets computed further down in
+            # _build_department_rollup (confirmed live: _ticket_lists failed
+            # right after this swallowed exception, same request).
+            db.rollback()
             return []
 
     if not children:
@@ -1795,8 +1966,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # _scope_counts' pending_approval_count for the branch-scope version).
         from models import Equipment
         equipment_count = db.query(func.count(Equipment.id)).filter(
-            Equipment.organization_id == svc.org_id,
-            Equipment.department_id.in_(svc.dept_ids) if svc.dept_ids else True,
+            *_equipment_scope_filters(db, svc.org_id, svc.dept_ids)
         ).scalar() or 0
 
         # Equipment failing at least one DQI check — see _dqi_issues_list's
@@ -1804,6 +1974,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # equipment count is small enough to return in full (unlike the
         # branch shape below, which caps it).
         dqi_issues, _dqi_issues_total = _dqi_issues_list(svc.dept_ids)
+        review_sla_breaches, _review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids)
 
         return {
             "shape": "leaf",
@@ -1813,6 +1984,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "equipment_count": equipment_count,
             "dqi_issues": dqi_issues,
             "dqi_issues_total_count": _dqi_issues_total,
+            "review_sla_breaches": review_sla_breaches,
+            "review_sla_breaches_total_count": _review_sla_breaches_total,
             "can_test": can_test,
             "assigned_test_count": assigned_test_count,
             "can_approve_requests": can_approve_requests,
@@ -1868,6 +2041,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     # substations' worth of equipment), with the true total alongside so the
     # UI can say "showing N of TOTAL" rather than imply the list is complete.
     _branch_dqi_issues, _branch_dqi_issues_total = _dqi_issues_list(svc.dept_ids, limit=50)
+    _branch_review_sla_breaches, _branch_review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids, limit=50)
     return {
         "shape": "branch",
         "scope_name": scope_name,
@@ -1878,6 +2052,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         "summary": _scope_counts(svc.dept_ids),
         "dqi_issues": _branch_dqi_issues,
         "dqi_issues_total_count": _branch_dqi_issues_total,
+        "review_sla_breaches": _branch_review_sla_breaches,
+        "review_sla_breaches_total_count": _branch_review_sla_breaches_total,
         "approvals": _approval_queue(svc.dept_ids),
         "can_approve_requests": can_approve_requests,
         "can_review": can_review,
@@ -2052,12 +2228,10 @@ def get_see_dashboard(
     svc = _svc(db, current_user, org_id, dept_id)
     dept_ids = svc.dept_ids
     tr_scope = [TestingRequest.department_id.in_(dept_ids)] if dept_ids else []
-    eq_scope = [Equipment.department_id.in_(dept_ids)] if dept_ids else []
 
     # Total equipment
     total_equipment = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id, *eq_scope,
-        Equipment.status == 'active'
+        *_equipment_scope_filters(db, svc.org_id, dept_ids)
     ).scalar() or 0
 
     # Circle Compliance (test completion rate)
@@ -2086,11 +2260,9 @@ def get_see_dashboard(
         TestingRequest.status.in_(['submitted', 'pending_approval'])
     ).scalar() or 0
 
-    # Critical Issues (equipment under repair)
-    critical_issues = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id, *eq_scope,
-        Equipment.status == 'under_repair'
-    ).scalar() or 0
+    # Critical Issues — health-score-driven (EquipmentAnalytics.risk_level),
+    # not Equipment.status == 'under_repair'; see _critical_equipment_count.
+    critical_issues = _critical_equipment_count(db, svc.org_id, dept_ids)
 
     # Pending reviews list
     pending_reviews = db.query(TestingRequest).filter(
@@ -2141,8 +2313,7 @@ def get_cee_dashboard(
 
     # Zone Equipment
     zone_equipment = db.query(func.count(Equipment.id)).filter(
-        Equipment.organization_id == svc.org_id, *eq_scope,
-        Equipment.status == 'active'
+        *_equipment_scope_filters(db, svc.org_id, dept_ids)
     ).scalar() or 0
 
     # Zone Reliability (percentage of equipment in active status)

@@ -20,6 +20,7 @@ from database import get_db
 from models import OrgTestTemplate, User
 from schemas import OrgTestTemplateCreate, OrgTestTemplateResponse, OrgTestTemplateUpdate
 from services.org_test_template_service import OrgTestTemplateService, active_template_filter
+from services.testing_request_service import invalidate_lookup_cache
 
 router = APIRouter(
     prefix="/org-test-templates",
@@ -75,6 +76,7 @@ def provision_overall_assessment(
     """Seed or update the global overall assessment template."""
     svc = OrgTestTemplateService(db)
     inserted = svc.provision_overall_assessment()
+    invalidate_lookup_cache()
     return {"inserted": inserted, "message": "Provisioned" if inserted else "Updated"}
 
 
@@ -247,13 +249,15 @@ def create_template(
     current_user: User = Depends(get_current_user),
 ):
     svc = OrgTestTemplateService(db)
-    return svc.create_template(
+    result = svc.create_template(
         template_key=body.template_key,
         template_data=body.template_data,
         test_type_id=body.test_type_id,
         org_id=body.org_id,
         created_by=current_user.id,
     )
+    invalidate_lookup_cache()
+    return result
 
 
 # ─── New test type + org template (atomic) ────────────────────────────────────
@@ -317,6 +321,7 @@ def create_new_type_template(
         created_by=current_user.id,
     )
     db.commit()
+    invalidate_lookup_cache()
     return tpl
 
 
@@ -330,11 +335,13 @@ def update_template(
     current_user: User = Depends(get_current_user),
 ):
     svc = OrgTestTemplateService(db)
-    return svc.update_template(
+    result = svc.update_template(
         template_id=template_id,
         template_data=body.template_data,
         modified_by=current_user.id,
     )
+    invalidate_lookup_cache()
+    return result
 
 
 # ─── Reset to global default ─────────────────────────────────────────────────
@@ -347,7 +354,9 @@ def reset_to_global(
 ):
     """Reset an org-specific template back to the global default."""
     svc = OrgTestTemplateService(db)
-    return svc.reset_to_global(template_id=template_id, modified_by=current_user.id)
+    result = svc.reset_to_global(template_id=template_id, modified_by=current_user.id)
+    invalidate_lookup_cache()
+    return result
 
 
 # ─── Enable / disable ────────────────────────────────────────────────────────
@@ -386,6 +395,7 @@ def set_template_active(
 
     db.commit()
     db.refresh(tpl)
+    invalidate_lookup_cache()
     return tpl
 
 
@@ -399,6 +409,7 @@ def delete_template(
 ):
     svc = OrgTestTemplateService(db)
     svc.delete_template(template_id)
+    invalidate_lookup_cache()
 
 
 # ─── Provisioning ────────────────────────────────────────────────────────────
@@ -411,6 +422,7 @@ def provision_global(
     """Seed global default templates from static test_templates.py dict."""
     svc = OrgTestTemplateService(db)
     count = svc.provision_global_defaults()
+    invalidate_lookup_cache()
     return {"inserted": count, "message": f"Provisioned {count} global templates"}
 
 
@@ -423,6 +435,7 @@ def provision_for_org(
     """Clone all global defaults for a specific org."""
     svc = OrgTestTemplateService(db)
     count = svc.provision_for_org(org_id=org_id, created_by=current_user.id)
+    invalidate_lookup_cache()
     return {"inserted": count, "message": f"Provisioned {count} templates for org {org_id}"}
 
 
