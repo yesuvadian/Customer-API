@@ -32,13 +32,6 @@ from services.org_test_template_service import active_template_filter
 ANNUAL_AUDIT_WORKFLOW_CODE = "ANNUAL_AUDIT"
 ANNUAL_AUDIT_ENTITY_TYPE = "annual_audit_observation"
 
-# Intake approval chain (before the ANNUAL_AUDIT workflow above even
-# starts) -- see alter_annual_audit_intake_workflow.py for the seeded
-# 2-stage default. Mirrors PreCommissionService/DprProjectService's
-# own INTAKE_WORKFLOW_CODE constants.
-ANNUAL_AUDIT_INTAKE_WORKFLOW_CODE = "ANNUAL_AUDIT_INTAKE"
-ANNUAL_AUDIT_INTAKE_ENTITY_TYPE = "annual_audit_intake"
-
 # Semantic action label per stage — used in audit log for meaningful timeline display
 STAGE_ACTION_LABELS: dict[str, str] = {
     "OBSERVATION_REPORTING": "assign",
@@ -177,9 +170,8 @@ class AnnualAuditService:
         self.db.add(observation)
         self.db.flush()
 
-        intake_workflow = self._create_intake_workflow(inspection, observation, user)
-        observation.intake_workflow_id = intake_workflow.id
-        self._sync_intake_stage_code(observation)
+        workflow = self._create_runtime_workflow(inspection, observation, user)
+        observation.workflow_id = workflow.id
         self.db.commit()
         self.db.refresh(observation)
         return self._observation_to_dict(observation)
@@ -216,20 +208,10 @@ class AnnualAuditService:
         if observation.workflow_id:
             result["workflow"] = self.workflow.get_workflow_detail(observation.workflow_id)
             result["timeline"] = self.workflow.get_timeline(observation.workflow_id)
-        elif observation.intake_workflow_id:
-            # Still in the intake review chain -- the remediation workflow
-            # doesn't exist yet, so show the intake's own stage progress.
-            result["workflow"] = self.workflow.get_workflow_detail(observation.intake_workflow_id)
-            result["timeline"] = self.workflow.get_timeline(observation.intake_workflow_id)
         return result
 
     def current_form(self, observation_id: UUID, user: User) -> dict:
-        # QAP-equivalent form filling only applies once the real
-        # ANNUAL_AUDIT workflow exists -- the intake chain is pure
-        # sign-off with no per-level form (see _create_intake_workflow).
         observation = self._get_observation(observation_id, user)
-        if not observation.workflow_id:
-            raise ValueError("No remediation workflow created yet — observation is pending intake review.")
         data = self.workflow.get_current_form(observation.workflow_id)
         if not data.get("template_data") and observation.template:
             data["template_data"] = observation.template.template_data
@@ -237,24 +219,12 @@ class AnnualAuditService:
         return data
 
     def timeline(self, observation_id: UUID, user: User) -> list:
-        # Falls back to the intake workflow while workflow_id isn't set
-        # yet, so the approval screen can show intake progress before
-        # the ANNUAL_AUDIT workflow exists.
         observation = self._get_observation(observation_id, user)
-        workflow_id = observation.workflow_id or observation.intake_workflow_id
-        if not workflow_id:
-            return []
-        return self.workflow.get_timeline(workflow_id)
+        return self.workflow.get_timeline(observation.workflow_id)
 
     def available_actions(self, observation_id: UUID, user: User) -> dict:
         observation = self._get_observation(observation_id, user)
-        workflow_id = observation.workflow_id or observation.intake_workflow_id
-        if not workflow_id:
-            return {
-                "can_assign": False, "can_submit": False, "can_approve": False,
-                "can_reject": False, "can_cancel": False, "can_override": False,
-            }
-        return self.workflow.get_available_transitions(workflow_id, user.id)
+        return self.workflow.get_available_transitions(observation.workflow_id, user.id)
 
     def assignment_queue(self, user: User) -> list[dict]:
         q = (
@@ -320,96 +290,16 @@ class AnnualAuditService:
         return result
 
     def approve_stage(self, observation_id: UUID, remarks: Optional[str], user: User) -> dict:
-        """
-        While workflow_id is unset, this advances the intake chain one
-        level instead of the real ANNUAL_AUDIT workflow. On the final
-        level's approval, intake completes and the real remediation
-        workflow starts -- everything in between (however many levels an
-        admin has configured) is handled generically by
-        RepairWorkflowService.advance_stage, the same engine every other
-        workflow type uses.
-        """
         observation = self._get_observation(observation_id, user)
-        in_intake = not observation.workflow_id and bool(observation.intake_workflow_id)
-        workflow_id = observation.workflow_id or observation.intake_workflow_id
-        if not workflow_id:
-            raise ValueError("No workflow found for this observation.")
-
         action_label = STAGE_ACTION_LABELS.get(observation.current_stage_code or "", "approve")
-        result = self.workflow.advance_stage(workflow_id, remarks, user.id, action_label=action_label)
+        result = self.workflow.advance_stage(observation.workflow_id, remarks, user.id, action_label=action_label)
         observation.reviewer_id = user.id
-
-        if in_intake:
-            intake = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
-            if intake and intake.status == "completed":
-                # Final level approved -- intake done, start the real
-                # remediation workflow.
-                inspection = observation.inspection
-                runtime_wf = self._create_runtime_workflow(inspection, observation, user)
-                observation.workflow_id = runtime_wf.id
-                self._sync_stage(observation)
-            elif intake and intake.current_stage_instance_id:
-                # Moved to the next level -- auto-submit it too. Same
-                # reasoning as the first stage in _create_intake_workflow:
-                # nothing new to fill in per level, each one just reviews
-                # the same observation.
-                next_inst = self.db.query(RepairStageInstance).filter(
-                    RepairStageInstance.id == intake.current_stage_instance_id
-                ).first()
-                if next_inst:
-                    next_inst.status = "submitted"
-                self._sync_intake_stage_code(observation)
-        else:
-            self._sync_stage(observation)
-
+        self._sync_stage(observation)
         self.db.commit()
         return result
 
     def reject_stage(self, observation_id: UUID, remarks: Optional[str], user: User) -> dict:
-        """
-        Terminates the intake review directly when it's still in
-        progress -- deliberately NOT RepairWorkflowService.reject_stage(),
-        whose only non-"send back to an earlier stage" behavior is
-        "re-queue the same stage", not "end the workflow". A rejected
-        intake should end the review, not loop back for reassignment.
-        See alter_annual_audit_intake_workflow.py's docstring for the
-        full reasoning. Once the real ANNUAL_AUDIT workflow exists,
-        reject keeps its original "send back" semantics via the generic
-        engine, unchanged.
-        """
         observation = self._get_observation(observation_id, user)
-        if not observation.workflow_id and observation.intake_workflow_id:
-            intake = self.db.query(RepairWorkflow).filter(
-                RepairWorkflow.id == observation.intake_workflow_id
-            ).first()
-            if not intake or intake.status != "active":
-                raise ValueError("Intake review is not active.")
-
-            current_inst = self.db.query(RepairStageInstance).filter(
-                RepairStageInstance.workflow_id == intake.id,
-                RepairStageInstance.stage_id == intake.current_stage_id,
-            ).first()
-            if current_inst:
-                current_inst.status = "rejected"
-                current_inst.completed_at = self._utc_now()
-
-            intake.status = "rejected"
-            intake.completed_at = self._utc_now()
-            intake.assignment_pending = False
-
-            self.db.add(RepairStageAuditLog(
-                workflow_id=intake.id,
-                stage_id=intake.current_stage_id,
-                action="reject",
-                performed_by=user.id,
-                note=remarks,
-            ))
-
-            observation.reviewer_id = user.id
-            observation.current_stage_code = "REJECTED"
-            self.db.commit()
-            return self._observation_to_dict(observation)
-
         result = self.workflow.reject_stage(observation.workflow_id, remarks, user.id)
         observation.reviewer_id = user.id
         self._sync_stage(observation)
@@ -626,91 +516,6 @@ class AnnualAuditService:
         )
         return workflow
 
-    def _create_intake_workflow(
-        self,
-        inspection: TAQCAnnualInspection,
-        observation: TAQCObservation,
-        user: User,
-    ) -> RepairWorkflow:
-        """
-        Mirrors PreCommissionService._create_intake_workflow / DprProject
-        Service._create_intake_workflow -- a 2-level (by default, admin-
-        configurable) review chain that gates BEFORE the real
-        ANNUAL_AUDIT remediation workflow starts. The first stage begins
-        'submitted' immediately (not 'not_started'/'pending') since
-        there's no separate per-level form -- each level just reviews the
-        observation as logged, same pure sign-off design as the other
-        two intake chains.
-        """
-        wf_def = (
-            self.db.query(RepairWorkflowDefinition)
-            .filter_by(workflow_code=ANNUAL_AUDIT_INTAKE_WORKFLOW_CODE, is_active=True)
-            .first()
-        )
-        if not wf_def:
-            raise ValueError(
-                "ANNUAL_AUDIT_INTAKE workflow definition not found. Run alter_annual_audit_intake_workflow.py first."
-            )
-        stages = (
-            self.db.query(RepairStageDefinition)
-            .filter(RepairStageDefinition.workflow_definition_id == wf_def.id)
-            .order_by(RepairStageDefinition.sequence)
-            .all()
-        )
-        if not stages:
-            raise ValueError("ANNUAL_AUDIT_INTAKE workflow stages are not configured. Run alter_annual_audit_intake_workflow.py first.")
-
-        first_stage = stages[0]
-        workflow = RepairWorkflow(
-            # Suffixed: repair_workflows.workflow_number is unique, and
-            # this observation will also get an ANNUAL_AUDIT RepairWorkflow
-            # (same observation_number) once intake completes -- they
-            # can't share the raw number.
-            workflow_number=f"{observation.observation_number}-INTAKE",
-            workflow_code=ANNUAL_AUDIT_INTAKE_WORKFLOW_CODE,
-            entity_type=ANNUAL_AUDIT_INTAKE_ENTITY_TYPE,
-            entity_id=observation.id,
-            equipment_id=None,
-            organization_id=inspection.organization_id,
-            current_stage_id=first_stage.id,
-            status="active",
-            assignment_pending=False,
-            progress=0,
-            priority="normal",
-            created_by=user.id,
-        )
-        self.db.add(workflow)
-        self.db.flush()
-
-        first_instance = None
-        for stage in stages:
-            is_first = stage.id == first_stage.id
-            instance = RepairStageInstance(
-                workflow_id=workflow.id,
-                stage_id=stage.id,
-                status="submitted" if is_first else "not_started",
-                assignment_pending=False,
-                started_at=self._utc_now() if is_first else None,
-                created_by=user.id,
-            )
-            self.db.add(instance)
-            self.db.flush()
-            if is_first:
-                first_instance = instance
-
-        workflow.current_stage_instance_id = first_instance.id if first_instance else None
-
-        self.db.add(
-            RepairStageAuditLog(
-                workflow_id=workflow.id,
-                stage_id=first_stage.id,
-                action="created",
-                performed_by=user.id,
-                note=f"Annual Audit intake review started for {observation.observation_number}",
-            )
-        )
-        return workflow
-
     def _sync_stage(self, observation: TAQCObservation) -> None:
         if not observation.workflow_id:
             return
@@ -722,23 +527,6 @@ class AnnualAuditService:
             observation.current_stage_code = stage.code if stage else observation.current_stage_code
         elif workflow and workflow.status == "completed":
             observation.current_stage_code = "OBSERVATION_CLOSURE"
-
-    def _sync_intake_stage_code(self, observation: TAQCObservation) -> None:
-        """Current_stage_code while still in the intake chain -- kept
-        separate from _sync_stage, which reads observation.workflow_id
-        specifically and would otherwise incorrectly set
-        OBSERVATION_CLOSURE the moment the INTAKE (not the real
-        remediation workflow) completes."""
-        if observation.workflow_id or not observation.intake_workflow_id:
-            return
-        intake = self.db.query(RepairWorkflow).filter(
-            RepairWorkflow.id == observation.intake_workflow_id
-        ).first()
-        if intake and intake.current_stage_id:
-            stage = self.db.query(RepairStageDefinition).filter(
-                RepairStageDefinition.id == intake.current_stage_id
-            ).first()
-            observation.current_stage_code = stage.code if stage else observation.current_stage_code
 
     def _next_number(self, prefix: str) -> str:
         today = self._utc_now().strftime("%Y%m%d")
@@ -810,7 +598,6 @@ class AnnualAuditService:
             "category_name": observation.category.name if observation.category else None,
             "template_id": str(observation.template_id) if observation.template_id else None,
             "workflow_id": str(observation.workflow_id) if observation.workflow_id else None,
-            "intake_workflow_id": str(observation.intake_workflow_id) if observation.intake_workflow_id else None,
             "severity": observation.severity,
             "target_compliance_date": observation.target_compliance_date.isoformat() if observation.target_compliance_date else None,
             "observation_description": observation.observation_description,

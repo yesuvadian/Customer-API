@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 One-time setup: grant System Administrator approve access by default on
-every stage of the three intake review chains (Precommission Intake, DPR
-Intake, Annual Audit Intake).
+every stage of the two intake review chains (Precommission Intake, DPR
+Intake).
 
 Without this, RepairStageRole starts empty for these stages and the
 intake chains are unreachable by anyone until an org admin manually
@@ -35,7 +35,6 @@ DEFAULT_ROLE_NAME = "System Administrator"
 INTAKE_WORKFLOW_CODES = [
     "PRECOMMISSION_INTAKE",
     "DPR_INTAKE",
-    "ANNUAL_AUDIT_INTAKE",
 ]
 
 

@@ -12754,11 +12754,6 @@ def run_seed():
             seed_dpr_intake_stages(session)
         except Exception as _e:
             print(f"[WARN] DPR intake workflow seed failed (non-fatal): {_e}")
-        try:
-            from alter_annual_audit_intake_workflow import seed_annual_audit_intake_stages
-            seed_annual_audit_intake_stages(session)
-        except Exception as _e:
-            print(f"[WARN] Annual Audit intake workflow seed failed (non-fatal): {_e}")
 
         # NOTE: All workflow role mappings moved after seed_seacms_roles_users
         # so KPTCL OrgRoles exist before stage→role assignments are made
