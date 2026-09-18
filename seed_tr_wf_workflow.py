@@ -330,6 +330,9 @@ def seed_tr_wf_workflow(session, org=None):
     role_ae_je = session.query(OrgRole).filter_by(
         organization_id=org.id, name="AE_JE"
     ).first()
+    role_taqc_inspector = session.query(OrgRole).filter_by(
+        organization_id=org.id, name="TA&QC Inspector"
+    ).first()
     # Mark AE_JE tester-assignable if it exists
     if role_ae_je and not role_ae_je.is_tester_assignable:
         role_ae_je.is_tester_assignable = True
@@ -380,6 +383,7 @@ def seed_tr_wf_workflow(session, org=None):
 
     wf_failure = _get_or_create_definition(session, org.id, "PM Workflow", "pm")
     wf_special = _get_or_create_definition(session, org.id, "Special Test Workflow",     "special")
+    wf_taqc    = _get_or_create_definition(session, org.id, "TAQC Inspection Workflow",  "taqc_inspection")
 
     # Set default L3 role + default tester role on Standard Test Workflow
     if wf_normal.default_l3_role_id is None and role_aee_rt:
@@ -479,7 +483,7 @@ def seed_tr_wf_workflow(session, org=None):
             session.delete(_stale)
             print(f"  [DEL] TrWfRoutingRule: stale request_type='{_stale_type}' removed")
 
-    for req_type, wf_def in [("pm", wf_failure), ("special", wf_special)]:
+    for req_type, wf_def in [("pm", wf_failure), ("special", wf_special), ("taqc_inspection", wf_taqc)]:
         _rt_master = _get_or_create_rule_master(
             session, org.id, f"{wf_def.name} Routing", 10)
         existing_rt = session.query(TrWfRoutingRule).filter_by(
@@ -551,6 +555,35 @@ def seed_tr_wf_workflow(session, org=None):
                                requires_comment=True, terminal_status=st_fr_can)
     session.flush()
     print("  [OK] PM Workflow stages seeded")
+
+    # ── TAQC Inspection Workflow: single-stage approval gate ─────────────────
+    # TAQC requests are always station-scoped (never equipment-specific — see
+    # taqc_inspection_page.dart), so this is a plain accept/reject checkpoint
+    # before the request is commissioned into a TAQCAnnualInspection, not a
+    # multi-stage lifecycle. Approve triggers the same recommendation_finalize
+    # post_action every other request type's final approve uses — see
+    # workflow_dispatch_service.dispatch()'s own taqc_inspection branch, which
+    # already handles this (auto-creates TAQCAnnualInspection + schedule).
+    st_taqc_pending = _get_or_create_status(session, wf_taqc, "taqc_pending_approval", "Pending Approval", 10, "#F59E0B", approval=True)
+    st_taqc_done    = _get_or_create_status(session, wf_taqc, "taqc_commissioned",     "Commissioned",     20, "#10B981", terminal=True)
+    st_taqc_rej     = _get_or_create_status(session, wf_taqc, "taqc_rejected",         "Rejected",         30, "#EF4444", terminal=True)
+    st_taqc_can     = _get_or_create_status(session, wf_taqc, "taqc_cancelled",        "Cancelled",        40, "#6B7280", terminal=True)
+    session.flush()
+
+    sg_taqc_approve = _get_or_create_stage(session, wf_taqc, st_taqc_pending, "TAQC Approval", "taqc_approve", 1)
+    session.flush()
+
+    if role_taqc_inspector:
+        _get_or_create_stage_role(session, sg_taqc_approve, role_taqc_inspector, can_approve=True)
+
+    _get_or_create_transition(session, sg_taqc_approve, None, "approve",
+                               terminal_status=st_taqc_done, post_action="recommendation_finalize")
+    _get_or_create_transition(session, sg_taqc_approve, None, "reject",
+                               requires_comment=True, is_rejection=True, terminal_status=st_taqc_rej)
+    _get_or_create_transition(session, sg_taqc_approve, None, "cancel",
+                               requires_comment=True, terminal_status=st_taqc_can)
+    session.flush()
+    print("  [OK] TAQC Inspection Workflow stage seeded")
 
     # ── R&D role override rules ───────────────────────────────────────────────
     # For these test types the override_role (AEE-R&D) takes precedence over the
