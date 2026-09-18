@@ -1076,6 +1076,123 @@ scheduler.add_job(
 )
 
 
+def _check_auto_close_normal_results():
+    """KPTCL spec D.8 'Auto-close NORMAL results after review period' --
+    same open-review-stage candidate query as _check_review_sla_breaches
+    above, but for stages that opted into TrWfStage.auto_close_normal_
+    after_hours (a separate, admin-configured field -- an org may want a
+    different cadence for quietly closing a clean result than for
+    escalating an overdue one).
+
+    Gates strictly on TestResult.evaluation_result['overall'] == 'NORMAL'
+    for every result on the request, never the tester's own overall_result
+    pass/fail pick -- the same priority _derive_recommendation_from_results
+    (testing_service.py) already gives the computed threshold classification
+    over a human's manual label. A result with no evaluation_result at all
+    (template has no acceptance criteria configured) blocks auto-close
+    rather than being assumed NORMAL.
+    """
+    db = BackgroundSessionLocal()
+    try:
+        from models import TrWfStageInstance, TrWfStage, TrWfStageTransition, TestResult
+        from services.tr_workflow_routing_service import WorkflowRoutingService
+        from datetime import datetime as _dt6, timezone as _tz6, timedelta
+
+        now = _dt6.now(_tz6.utc)
+        candidates = (
+            db.query(TrWfStageInstance)
+            .join(TrWfStage, TrWfStageInstance.stage_id == TrWfStage.id)
+            .filter(
+                TrWfStageInstance.status == "in_progress",
+                TrWfStageInstance.started_at.isnot(None),
+                TrWfStage.is_result_stage.is_(True),
+                TrWfStage.auto_close_normal_after_hours.isnot(None),
+            )
+            .all()
+        )
+
+        svc = WorkflowRoutingService(db)
+        closed = 0
+        for si in candidates:
+            stage = si.stage
+            started_at = si.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=_tz6.utc)
+            deadline = started_at + timedelta(hours=stage.auto_close_normal_after_hours)
+            if now <= deadline:
+                continue
+
+            wf_instance = si.wf_instance
+            tr = getattr(wf_instance, "testing_request", None)
+            if tr is None:
+                continue
+
+            results = (
+                db.query(TestResult)
+                .filter(TestResult.testing_request_id == tr.id)
+                .all()
+            )
+            if not results:
+                continue
+            if not all(
+                (r.evaluation_result or {}).get("overall") == "NORMAL"
+                for r in results
+            ):
+                continue
+
+            # The one outgoing transition that means "no issue, move on" --
+            # every reject/return/cancel transition in this app's seeded
+            # workflows requires a comment; only the forward-progress one
+            # doesn't (routers/tr_workflow_config.py's own convention).
+            # Skip rather than guess if that isn't exactly one transition.
+            positive_transitions = (
+                db.query(TrWfStageTransition)
+                .filter(
+                    TrWfStageTransition.from_stage_id == stage.id,
+                    TrWfStageTransition.is_rejection.is_(False),
+                    TrWfStageTransition.requires_comment.is_(False),
+                    TrWfStageTransition.action_code != "cancel",
+                )
+                .all()
+            )
+            if len(positive_transitions) != 1:
+                logger.warning(
+                    f"[AutoClose] Stage {stage.id} ({stage.code}) has "
+                    f"{len(positive_transitions)} candidate auto-close transition(s), "
+                    f"expected exactly 1 -- skipping."
+                )
+                continue
+
+            try:
+                svc.advance_stage(
+                    testing_request=tr,
+                    action_code=positive_transitions[0].action_code,
+                    performed_by_id=None,
+                    comment="Auto-closed: all results NORMAL, review period elapsed.",
+                )
+                closed += 1
+            except Exception as _e:
+                logger.warning(f"[AutoClose] Failed for stage_instance={si.id}: {_e}")
+
+        db.commit()
+        if closed:
+            logger.info(f"[AutoClose] Auto-closed {closed} NORMAL result review(s)")
+    except Exception as e:
+        logger.error(f"[AutoClose] Auto-close job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_auto_close_normal_results,
+    trigger="interval",
+    minutes=30,
+    id="auto_close_normal_results_job",
+    max_instances=1,
+    coalesce=True,
+)
+
+
 # ── Design Problem Register alert (runs daily at 10:00 UTC) ──────────────────
 # EquipmentService.compute_failure_cohort_stats() already computes
 # is_design_problem_candidate per make/model cohort on every dashboard

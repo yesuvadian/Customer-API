@@ -843,6 +843,13 @@ class TrWfStage(Base):
     default_duration_hours = Column(Integer, nullable=True)
     show_recommendation = Column(Boolean, default=False, server_default="false")
     is_result_stage = Column(Boolean, default=False, server_default="false")
+    # Only meaningful when is_result_stage is True -- how long a result
+    # review stays open, after which the _check_auto_close_normal_results
+    # job (main.py) auto-closes it IF every TestResult on the request
+    # evaluated NORMAL (never the tester's own overall_result pass/fail
+    # pick -- see _derive_recommendation_from_results' same precedent).
+    # Null = auto-close disabled for this stage (opt-in, admin-configured).
+    auto_close_normal_after_hours = Column(Integer, nullable=True)
     use_l2_route = Column(Boolean, default=False, server_default="false")
     is_role_scoped = Column(Boolean, default=False, server_default="false")
     created_at = Column(DateTime, server_default=func.now())
@@ -5535,6 +5542,12 @@ class FailureCohortThresholdConfig(Base):
     )
     min_failure_rate = Column(Numeric(5, 2), nullable=False, default=1.0)
     min_cohort_units = Column(Integer, nullable=False, default=3)
+    # Within-cohort outlier detection (KPTCL spec §2/12.3): a unit whose own
+    # failure_count Z-score against its cohort's mean/stdev clears this
+    # threshold is flagged is_outlier. Same default as the unrelated
+    # per-unit time-series anomaly detector (config.py's ANALYTICS_ANOMALY_Z)
+    # for consistency, not because the two are the same calculation.
+    outlier_z_score = Column(Numeric(4, 2), nullable=False, default=3.0)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

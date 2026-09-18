@@ -155,11 +155,13 @@ class ConditionBandResponse(BaseModel):
 class FailureCohortThresholdUpdate(BaseModel):
     min_failure_rate: Optional[float] = None
     min_cohort_units: Optional[int] = None
+    outlier_z_score: Optional[float] = None
 
 
 class FailureCohortThresholdResponse(BaseModel):
     min_failure_rate: float
     min_cohort_units: int
+    outlier_z_score: float
     # True when this org has its own override row; False means the value
     # shown is the inherited system-wide default -- lets the UI show
     # "(default)" vs "(customized)" without a second round trip.
@@ -620,6 +622,7 @@ def get_failure_cohort_thresholds(
         return FailureCohortThresholdResponse(
             min_failure_rate=float(org_row.min_failure_rate),
             min_cohort_units=org_row.min_cohort_units,
+            outlier_z_score=float(org_row.outlier_z_score),
             is_org_override=True,
         )
 
@@ -636,6 +639,7 @@ def get_failure_cohort_thresholds(
     return FailureCohortThresholdResponse(
         min_failure_rate=float(default_row.min_failure_rate),
         min_cohort_units=default_row.min_cohort_units,
+        outlier_z_score=float(default_row.outlier_z_score),
         is_org_override=False,
     )
 
@@ -664,6 +668,7 @@ def update_failure_cohort_thresholds(
             organization_id=current_user.organization_id,
             min_failure_rate=default_row.min_failure_rate if default_row else 1.0,
             min_cohort_units=default_row.min_cohort_units if default_row else 3,
+            outlier_z_score=default_row.outlier_z_score if default_row else 3.0,
         )
         db.add(row)
 
@@ -677,6 +682,7 @@ def update_failure_cohort_thresholds(
     return FailureCohortThresholdResponse(
         min_failure_rate=float(row.min_failure_rate),
         min_cohort_units=row.min_cohort_units,
+        outlier_z_score=float(row.outlier_z_score),
         is_org_override=True,
     )
 
