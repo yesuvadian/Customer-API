@@ -2708,6 +2708,13 @@ class RepairCancelRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class RepairOverrideRequest(BaseModel):
+    # None target_stage_id = close the workflow entirely rather than
+    # jumping to a specific stage.
+    target_stage_id: Optional[UUID] = None
+    justification: str
+
+
 class RepairStageDefResponse(BaseModel):
     id: UUID
     name: str

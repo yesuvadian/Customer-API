@@ -237,6 +237,20 @@ class DprProjectService:
         self.db.commit()
         return result
 
+    def override_stage(
+        self, project_id: UUID, target_stage_id: Optional[UUID],
+        justification: str, user: User,
+    ) -> dict:
+        """Thin delegate to RepairWorkflowService.override_stage -- see
+        approve_stage/reject_stage's own delegate pattern above."""
+        project = self._get_project(project_id, user)
+        result = self.workflow.override_stage(
+            project.workflow_id, target_stage_id, justification, user.id,
+        )
+        self._sync_stage(project)
+        self.db.commit()
+        return result
+
     # ========================================
     # INTERNAL HELPERS
     # ========================================

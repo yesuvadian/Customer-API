@@ -59,6 +59,22 @@ class StageRolesReplace(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Workflow-wide override roles (supervisory override, not per-stage)
+# ---------------------------------------------------------------------------
+
+class OverrideRoleOut(BaseModel):
+    role_id: UUID
+    role_name: str
+
+    class Config:
+        from_attributes = True
+
+
+class OverrideRolesReplace(BaseModel):
+    role_ids: List[UUID]
+
+
+# ---------------------------------------------------------------------------
 # Stage transitions
 # ---------------------------------------------------------------------------
 

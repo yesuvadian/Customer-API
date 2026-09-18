@@ -232,6 +232,30 @@ class RepairStageRole(Base):
     __table_args__ = (UniqueConstraint("stage_id", "role_id", name="uq_repair_stage_role"),)
 
 
+class RepairWorkflowOverrideRole(Base):
+    """Workflow-wide (not per-stage) supervisory-override authorization.
+
+    Deliberately separate from RepairStageRole: override is meant to work
+    from whatever stage the workflow is currently stuck in, not just one
+    -- putting it on a per-stage list would mean re-configuring the same
+    role on every stage of a workflow (5 stages for Annual Audit's CAR
+    flow) and risking a gap on whichever one gets missed. One list per
+    RepairWorkflowDefinition covers every stage of that workflow type.
+
+    Holding this role grants exactly one extra action (force-transition
+    with a mandatory justification, logged as its own audit action) --
+    it does NOT also grant can_edit/can_approve/can_assign on stages the
+    role wasn't already given those through RepairStageRole.
+    """
+    __tablename__ = "repair_workflow_override_roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_definition_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflow_definitions.id", ondelete="CASCADE"))
+    role_id = Column(UUID(as_uuid=True), ForeignKey("public.org_roles.id", ondelete="CASCADE"))
+
+    __table_args__ = (UniqueConstraint("workflow_definition_id", "role_id", name="uq_repair_workflow_override_role"),)
+
+
 class RepairStageTransition(Base):
     """Directed transition graph.  action: 'approve' | 'reject'.  to_stage_id=NULL → terminal."""
     __tablename__ = "repair_stage_transitions"
