@@ -12809,6 +12809,17 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Default override roles seed failed (non-fatal): {_e}")
 
+        # Default intake approval roles — same reasoning and ordering
+        # constraint as the override grant just above: must run after
+        # System Administrator OrgRoles exist and the intake workflow
+        # definitions/stages are seeded (earlier in this same function).
+        print("\n--- Default Intake Approval Roles (System Administrator) ---")
+        try:
+            from alter_seed_default_intake_approval_roles import seed_default_intake_approval_roles
+            seed_default_intake_approval_roles(session)
+        except Exception as _e:
+            print(f"[WARN] Default intake approval roles seed failed (non-fatal): {_e}")
+
         # Org Registration Config — system_config rows + fix any existing orgs
         # with no admin role (idempotent, safe to run every time)
         print("\n--- Org Registration Config ---")
