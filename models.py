@@ -1384,6 +1384,14 @@ class TAQCObservation(Base):
     category_detail_id = Column(Integer, ForeignKey("public.CategoryDetails.id"), nullable=False)
     template_id = Column(UUID(as_uuid=True), ForeignKey("public.org_test_templates.id"), nullable=True)
     workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id"), nullable=True, index=True)
+    # Intake approval chain (RepairWorkflowDefinition workflow_code=
+    # ANNUAL_AUDIT_INTAKE, 2 stages by default, admin-configurable) —
+    # created when the observation is logged, gates BEFORE the real
+    # ANNUAL_AUDIT remediation workflow above even starts. Mirrors
+    # PreCommissionRequest.intake_workflow_id / DprProject.
+    # intake_workflow_id — same idiom, see alter_precommission_intake_
+    # workflow.py for the pattern.
+    intake_workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
     severity = Column(String(20), nullable=True)
     target_compliance_date = Column(Date, nullable=True)
     observation_description = Column(Text, nullable=True)

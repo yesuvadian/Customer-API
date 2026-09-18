@@ -12728,6 +12728,38 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Pre-commission workflow seed failed (non-fatal): {_e}")
 
+        # DPR Approval Workflow — 5-stage capital works / major maintenance
+        # proposal lifecycle (was never wired into seed.py before -- only
+        # runnable standalone via seed_dpr_workflow.py)
+        print("\n--- DPR Approval Workflow Seeding ---")
+        try:
+            from seed_dpr_workflow import seed_dpr_stages
+            seed_dpr_stages(session)
+        except Exception as _e:
+            print(f"[WARN] DPR workflow seed failed (non-fatal): {_e}")
+
+        # Intake review chains — Precommission / DPR / Annual Audit each
+        # gate their real workflow behind an admin-configurable N-stage
+        # sign-off chain before it starts. Org-agnostic definitions (no
+        # organization_id on these tables), so seeding once here covers
+        # every org, current and future.
+        print("\n--- Intake Review Chains Seeding ---")
+        try:
+            from alter_precommission_intake_workflow import seed_precommission_intake_stages
+            seed_precommission_intake_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Precommission intake workflow seed failed (non-fatal): {_e}")
+        try:
+            from alter_dpr_intake_workflow import seed_dpr_intake_stages
+            seed_dpr_intake_stages(session)
+        except Exception as _e:
+            print(f"[WARN] DPR intake workflow seed failed (non-fatal): {_e}")
+        try:
+            from alter_annual_audit_intake_workflow import seed_annual_audit_intake_stages
+            seed_annual_audit_intake_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Annual Audit intake workflow seed failed (non-fatal): {_e}")
+
         # NOTE: All workflow role mappings moved after seed_seacms_roles_users
         # so KPTCL OrgRoles exist before stage→role assignments are made
 

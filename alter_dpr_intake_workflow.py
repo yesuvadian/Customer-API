@@ -23,13 +23,19 @@ file), leaving reject_stage() itself untouched.
 
 Idempotent: get-or-create throughout, safe to re-run.
 
+seed_dpr_intake_stages(db) is also called from seed.py (org-agnostic --
+these tables have no organization_id -- so a brand-new deployment gets
+this workflow definition for free, same as
+seed_precommission_stages/seed_dpr_stages/seed_annual_audit_stages).
+This script's own main() is for upgrading an EXISTING database that
+predates this feature.
+
 Usage:
     python alter_dpr_intake_workflow.py
 """
 import uuid
 
 from sqlalchemy import text
-from database import VendorSessionLocal
 from models import RepairWorkflowDefinition, RepairStageDefinition, RepairStageTransition
 
 WORKFLOW_CODE = "DPR_INTAKE"
@@ -47,7 +53,73 @@ TRANSITIONS = [
 ]
 
 
+def seed_dpr_intake_stages(db) -> None:
+    wf_def = db.query(RepairWorkflowDefinition).filter_by(
+        workflow_code=WORKFLOW_CODE
+    ).first()
+    if not wf_def:
+        wf_def = RepairWorkflowDefinition(
+            id=uuid.uuid4(),
+            workflow_code=WORKFLOW_CODE,
+            name="DPR Intake",
+            is_active=True,
+        )
+        db.add(wf_def)
+        db.flush()
+    print(f"[OK] RepairWorkflowDefinition {WORKFLOW_CODE}: {wf_def.id}")
+
+    code_map = {}
+    inserted = 0
+    for s in STAGES:
+        existing = db.query(RepairStageDefinition).filter_by(
+            workflow_definition_id=wf_def.id, code=s["code"]
+        ).first()
+        if existing:
+            existing.name = s["name"]
+            existing.sequence = s["sequence"]
+            code_map[s["code"]] = existing.id
+            continue
+        stage = RepairStageDefinition(
+            id=uuid.uuid4(),
+            workflow_definition_id=wf_def.id,
+            name=s["name"],
+            code=s["code"],
+            sequence=s["sequence"],
+            weight=round(100 / len(STAGES)),
+            is_active=True,
+            is_mandatory=True,
+        )
+        db.add(stage)
+        db.flush()
+        code_map[s["code"]] = stage.id
+        inserted += 1
+    print(f"[OK] DPR Intake stages: {inserted} inserted ({len(code_map)} total)")
+
+    for from_code, to_code in TRANSITIONS:
+        from_id = code_map.get(from_code)
+        to_id = code_map.get(to_code) if to_code else None
+        if not from_id:
+            continue
+        exists = db.query(RepairStageTransition).filter_by(
+            from_stage_id=from_id, action="approve"
+        ).first()
+        if not exists:
+            db.add(RepairStageTransition(
+                id=uuid.uuid4(),
+                from_stage_id=from_id,
+                to_stage_id=to_id,
+                action="approve",
+            ))
+        else:
+            exists.to_stage_id = to_id
+
+    db.commit()
+    print(f"[OK] DPR Intake workflow seeded ({len(TRANSITIONS)} transitions). "
+          f"No roles assigned yet -- add them via Workflow Configuration > DPR Intake > Roles.")
+
+
 def main():
+    from database import VendorSessionLocal
     db = VendorSessionLocal()
     try:
         db.execute(text(
@@ -57,69 +129,7 @@ def main():
         ))
         db.commit()
         print("Ensured dpr_projects.intake_workflow_id column exists.")
-
-        wf_def = db.query(RepairWorkflowDefinition).filter_by(
-            workflow_code=WORKFLOW_CODE
-        ).first()
-        if not wf_def:
-            wf_def = RepairWorkflowDefinition(
-                id=uuid.uuid4(),
-                workflow_code=WORKFLOW_CODE,
-                name="DPR Intake",
-                is_active=True,
-            )
-            db.add(wf_def)
-            db.flush()
-        print(f"[OK] RepairWorkflowDefinition {WORKFLOW_CODE}: {wf_def.id}")
-
-        code_map = {}
-        inserted = 0
-        for s in STAGES:
-            existing = db.query(RepairStageDefinition).filter_by(
-                workflow_definition_id=wf_def.id, code=s["code"]
-            ).first()
-            if existing:
-                existing.name = s["name"]
-                existing.sequence = s["sequence"]
-                code_map[s["code"]] = existing.id
-                continue
-            stage = RepairStageDefinition(
-                id=uuid.uuid4(),
-                workflow_definition_id=wf_def.id,
-                name=s["name"],
-                code=s["code"],
-                sequence=s["sequence"],
-                weight=round(100 / len(STAGES)),
-                is_active=True,
-                is_mandatory=True,
-            )
-            db.add(stage)
-            db.flush()
-            code_map[s["code"]] = stage.id
-            inserted += 1
-        print(f"[OK] DPR Intake stages: {inserted} inserted ({len(code_map)} total)")
-
-        for from_code, to_code in TRANSITIONS:
-            from_id = code_map.get(from_code)
-            to_id = code_map.get(to_code) if to_code else None
-            if not from_id:
-                continue
-            exists = db.query(RepairStageTransition).filter_by(
-                from_stage_id=from_id, action="approve"
-            ).first()
-            if not exists:
-                db.add(RepairStageTransition(
-                    id=uuid.uuid4(),
-                    from_stage_id=from_id,
-                    to_stage_id=to_id,
-                    action="approve",
-                ))
-            else:
-                exists.to_stage_id = to_id
-
-        db.commit()
-        print(f"[OK] DPR Intake workflow seeded ({len(TRANSITIONS)} transitions). "
-              f"No roles assigned yet -- add them via Workflow Configuration > DPR Intake > Roles.")
+        seed_dpr_intake_stages(db)
     finally:
         db.close()
 
