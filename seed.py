@@ -5789,6 +5789,16 @@ def seed_report_definitions(session):
             "group_name": "TA&QC",
             "notification_event": "taqc_report_ready",
         },
+        # ── Result Review group ───────────────────────────────────────────────────
+        {
+            "name": "Monthly Result Review Compliance Report",
+            "description": "% of Result Review stages closed within SLA, by zone/circle/substation (SRS D.8).",
+            "query_key": "result_review_compliance_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Result Review",
+            "notification_event": "result_review_report_ready",
+        },
         # ── Vendor & Repairer group ───────────────────────────────────────────────
         {
             "name": "Vendor Performance Ranking Report",
@@ -6994,6 +7004,62 @@ WHERE  EXTRACT(MONTH FROM ti.cts)
   {org_clause}
   AND  (:department_id IS NULL OR tai.department_id = :department_id::uuid)
 GROUP  BY d.name, cd.name
+ORDER  BY compliance_pct ASC NULLS LAST
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Result Review
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="result_review_compliance_report",
+            label="Monthly Result Review Compliance Report",
+            group_name="Result Review",
+            description="% of Result Review stages closed within their configured SLA, "
+                        "grouped by zone / circle / subdivision / substation. Same "
+                        "computation as the Overall Dashboard's review_sla_pct tile "
+                        "(TrWfStage.is_result_stage + default_duration_hours/days), "
+                        "packaged as a monthly report (SRS D.8).",
+            parameters_schema={"month": "int", "year": "int", "department_id": "uuid"},
+            sort_order=10,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    d4.name                         AS zone,
+    d3.name                         AS ce_circle,
+    d2.name                         AS ee_subdivision,
+    d.name                          AS substation,
+    COUNT(tsi.id)                   AS reviews_closed,
+    COUNT(CASE WHEN tsi.completed_at <= (
+        tsi.started_at + (COALESCE(ws.default_duration_hours, ws.default_duration_days * 24) * interval '1 hour')
+    ) THEN 1 END)                   AS reviews_within_sla,
+    ROUND(
+        COUNT(CASE WHEN tsi.completed_at <= (
+            tsi.started_at + (COALESCE(ws.default_duration_hours, ws.default_duration_days * 24) * interval '1 hour')
+        ) THEN 1 END)::numeric
+        / NULLIF(COUNT(tsi.id), 0) * 100, 1
+    )                                AS compliance_pct
+FROM   public.tr_wf_stage_instances tsi
+JOIN   public.tr_wf_stages          ws ON ws.id = tsi.stage_id
+JOIN   public.tr_wf_instances       wi ON wi.id = tsi.wf_instance_id
+JOIN   public.testing_requests      tr ON tr.id = wi.testing_request_id
+LEFT JOIN public.equipment          e  ON e.id  = tr.equipment_id
+LEFT JOIN public.org_departments    d  ON d.id  = e.department_id
+LEFT JOIN public.org_departments    d2 ON d2.id = d.parent_department_id
+LEFT JOIN public.org_departments    d3 ON d3.id = d2.parent_department_id
+LEFT JOIN public.org_departments    d4 ON d4.id = d3.parent_department_id
+WHERE  ws.is_result_stage IS TRUE
+  AND  tsi.status IN ('completed', 'rejected')
+  AND  tsi.started_at IS NOT NULL
+  AND  tsi.completed_at IS NOT NULL
+  AND  (ws.default_duration_hours IS NOT NULL OR ws.default_duration_days IS NOT NULL)
+  AND  EXTRACT(MONTH FROM tsi.completed_at)
+         = COALESCE(:month, EXTRACT(MONTH FROM NOW()))
+  AND  EXTRACT(YEAR  FROM tsi.completed_at)
+         = COALESCE(:year,  EXTRACT(YEAR  FROM NOW()))
+  {org_clause}
+  AND  (:department_id IS NULL OR d.id = :department_id::uuid)
+GROUP  BY d4.name, d3.name, d2.name, d.name
 ORDER  BY compliance_pct ASC NULLS LAST
 """),
 
@@ -10133,6 +10199,14 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when the monthly TA&QC Observation Compliance Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
             default_roles=["EE_TLSS", "SEE_WM"],
+        ),
+        dict(
+            event_type="result_review_report_ready",
+            label="Result Review Compliance Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Result Review Compliance Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["AEE R&T", "AEE-R&D", "EE_TLSS"],
         ),
         dict(
             event_type="vendor_report_ready",
