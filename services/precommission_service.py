@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import (
+    CategoryMaster,
     Equipment,
     Module,
     OrgRole,
@@ -29,6 +30,11 @@ from utils.common_service import get_dept_subtree_ids, get_user_dept_scope
 WORKFLOW_CODE   = "PRE_COMMISSION"
 ENTITY_TYPE     = "precommission_request"
 FIRST_STAGE     = "QAP_RAW_MATERIAL"
+
+# Intake approval chain (before the QAP workflow above even starts) -- see
+# alter_precommission_intake_workflow.py for the seeded 2-stage default.
+INTAKE_WORKFLOW_CODE = "PRECOMMISSION_INTAKE"
+INTAKE_ENTITY_TYPE   = "precommission_intake"
 
 STAGE_CODES = [
     "QAP_RAW_MATERIAL",
@@ -97,6 +103,12 @@ class PreCommissionService:
         ) is not None
 
     def _pcr_to_dict(self, pcr: PreCommissionRequest) -> dict:
+        equipment_type_name = None
+        if pcr.equipment_type_id:
+            cm = self.db.query(CategoryMaster).filter(
+                CategoryMaster.id == pcr.equipment_type_id
+            ).first()
+            equipment_type_name = cm.name if cm else None
         return {
             "id":                     str(pcr.id),
             "request_number":         pcr.request_number,
@@ -104,6 +116,7 @@ class PreCommissionService:
             "dept_id":                str(pcr.dept_id) if pcr.dept_id else None,
             "dept_name":              pcr.department.name if pcr.department else None,
             "equipment_type_id":      pcr.equipment_type_id,
+            "equipment_type_name":    equipment_type_name,
             "vendor_name":            pcr.vendor_name,
             "purchase_order_number":  pcr.purchase_order_number,
             "po_date":                pcr.po_date.isoformat() if pcr.po_date else None,
@@ -123,6 +136,7 @@ class PreCommissionService:
             "rejected_by":            str(pcr.rejected_by) if pcr.rejected_by else None,
             "rejected_at":            pcr.rejected_at.isoformat() if pcr.rejected_at else None,
             "workflow_id":            str(pcr.workflow_id) if pcr.workflow_id else None,
+            "intake_workflow_id":     str(pcr.intake_workflow_id) if pcr.intake_workflow_id else None,
             "equipment_id":           str(pcr.equipment_id) if pcr.equipment_id else None,
             "created_by":             str(pcr.created_by) if pcr.created_by else None,
             "cts":                    pcr.cts.isoformat() if pcr.cts else None,
@@ -155,6 +169,11 @@ class PreCommissionService:
             modified_by=user.id,
         )
         self.db.add(pcr)
+        self.db.flush()
+
+        intake_workflow = self._create_intake_workflow(pcr, user)
+        pcr.intake_workflow_id = intake_workflow.id
+
         self.db.commit()
         self.db.refresh(pcr)
         return self._pcr_to_dict(pcr)
@@ -221,36 +240,105 @@ class PreCommissionService:
         if pcr.workflow_id:
             result["workflow"] = self.workflow.get_workflow_detail(pcr.workflow_id)
             result["timeline"] = self.workflow.get_timeline(pcr.workflow_id)
+        elif pcr.intake_workflow_id:
+            # Still in the intake review chain -- QAP workflow doesn't
+            # exist yet, so show the intake's own stage progress instead.
+            result["workflow"] = self.workflow.get_workflow_detail(pcr.intake_workflow_id)
+            result["timeline"] = self.workflow.get_timeline(pcr.intake_workflow_id)
         return result
 
     # ── Approval ──────────────────────────────────────────────────────────────
 
     def approve_request(self, request_id: UUID, notes: Optional[str], user: User) -> dict:
+        """
+        Advance exactly one level of the intake review chain. On the final
+        level's approval, the intake completes and the real QAP workflow
+        starts -- everything in between (however many levels an admin has
+        configured) is handled generically by RepairWorkflowService.
+        advance_stage, the same engine every other workflow type uses.
+        """
         pcr = self._get_request(request_id, user)
         if pcr.approval_status != "pending":
             raise ValueError(f"Request is already {pcr.approval_status}.")
+        if not pcr.intake_workflow_id:
+            raise ValueError("No intake review found for this request.")
         if not self._can_approve(user):
             raise ValueError("You do not have permission to approve pre-commission requests.")
 
-        pcr.approval_status = "approved"
-        pcr.approved_by     = user.id
-        pcr.approved_at     = self._utc_now()
-        pcr.approval_notes  = notes
-        pcr.modified_by     = user.id
+        self.workflow.advance_stage(
+            pcr.intake_workflow_id, notes, user.id, action_label="approve",
+        )
+        pcr.modified_by = user.id
 
-        workflow = self._create_qap_workflow(pcr, user)
-        pcr.workflow_id = workflow.id
+        intake = self.db.query(RepairWorkflow).filter(
+            RepairWorkflow.id == pcr.intake_workflow_id
+        ).first()
+
+        if intake and intake.status == "completed":
+            # Final level approved -- intake done, start the real QAP workflow.
+            pcr.approval_status = "approved"
+            pcr.approved_by     = user.id
+            pcr.approved_at     = self._utc_now()
+            pcr.approval_notes  = notes
+            qap_workflow = self._create_qap_workflow(pcr, user)
+            pcr.workflow_id = qap_workflow.id
+        elif intake and intake.current_stage_instance_id:
+            # Moved to the next level -- auto-submit it too. Same reasoning
+            # as the first stage in _create_intake_workflow: nothing new to
+            # fill in per level, each one just reviews the same request.
+            next_inst = self.db.query(RepairStageInstance).filter(
+                RepairStageInstance.id == intake.current_stage_instance_id
+            ).first()
+            if next_inst:
+                next_inst.status = "submitted"
 
         self.db.commit()
         self.db.refresh(pcr)
         return self._pcr_to_dict(pcr)
 
     def reject_request(self, request_id: UUID, notes: Optional[str], user: User) -> dict:
+        """
+        Terminate the intake review entirely -- deliberately NOT
+        RepairWorkflowService.reject_stage(), whose only non-"send back to
+        an earlier stage" behavior is "re-queue the same stage", not "end
+        the workflow". A rejected intake should end the review, not loop
+        back for reassignment, so this ends it directly. See
+        alter_precommission_intake_workflow.py's docstring for the full
+        reasoning.
+        """
         pcr = self._get_request(request_id, user)
         if pcr.approval_status != "pending":
             raise ValueError(f"Request is already {pcr.approval_status}.")
+        if not pcr.intake_workflow_id:
+            raise ValueError("No intake review found for this request.")
         if not self._can_approve(user):
             raise ValueError("You do not have permission to reject pre-commission requests.")
+
+        intake = self.db.query(RepairWorkflow).filter(
+            RepairWorkflow.id == pcr.intake_workflow_id
+        ).first()
+        if not intake or intake.status != "active":
+            raise ValueError("Intake review is not active.")
+
+        current_inst = self.db.query(RepairStageInstance).filter(
+            RepairStageInstance.workflow_id == intake.id,
+            RepairStageInstance.stage_id == intake.current_stage_id,
+        ).first()
+        if current_inst:
+            current_inst.status = "rejected"
+            current_inst.completed_at = self._utc_now()
+
+        intake.status = "rejected"
+        intake.completed_at = self._utc_now()
+        intake.assignment_pending = False
+
+        self.db.add(RepairStageAuditLog(
+            workflow_id=intake.id,
+            stage_id=intake.current_stage_id,
+            action="reject",
+            performed_by=user.id,
+            note=notes,
+        ))
 
         pcr.approval_status = "rejected"
         pcr.rejected_by     = user.id
@@ -316,16 +404,21 @@ class PreCommissionService:
         return result
 
     def timeline(self, request_id: UUID, user: User) -> list:
+        # Falls back to the intake workflow while approval_status=='pending'
+        # (workflow_id isn't set yet) so the approval screen can show intake
+        # progress before the QAP workflow exists.
         pcr = self._get_request(request_id, user)
-        if not pcr.workflow_id:
+        workflow_id = pcr.workflow_id or pcr.intake_workflow_id
+        if not workflow_id:
             return []
-        return self.workflow.get_timeline(pcr.workflow_id)
+        return self.workflow.get_timeline(workflow_id)
 
     def available_actions(self, request_id: UUID, user: User) -> dict:
         pcr = self._get_request(request_id, user)
-        if not pcr.workflow_id:
+        workflow_id = pcr.workflow_id or pcr.intake_workflow_id
+        if not workflow_id:
             return {"actions": []}
-        return self.workflow.get_available_transitions(pcr.workflow_id, user.id)
+        return self.workflow.get_available_transitions(workflow_id, user.id)
 
     # ── Internal workflow creation ────────────────────────────────────────────
 
@@ -414,13 +507,97 @@ class PreCommissionService:
 
         return workflow
 
+    def _create_intake_workflow(self, pcr: PreCommissionRequest, user: User) -> RepairWorkflow:
+        """
+        Create the PRECOMMISSION_INTAKE review chain for a just-created
+        request. Unlike _create_qap_workflow's first stage (status='pending',
+        waiting to be picked up and worked), the intake's first stage starts
+        already 'submitted' -- there's no separate form to fill in per level,
+        the request's own creation payload is what each level reviews, so
+        the first approver can act immediately without a pointless extra
+        submit click from anyone.
+        """
+        wf_def = self.db.query(RepairWorkflowDefinition).filter_by(
+            workflow_code=INTAKE_WORKFLOW_CODE
+        ).first()
+        if not wf_def:
+            raise ValueError(
+                "PRECOMMISSION_INTAKE workflow definition not found. "
+                "Run alter_precommission_intake_workflow.py first."
+            )
+
+        stages = (
+            self.db.query(RepairStageDefinition)
+            .filter(
+                RepairStageDefinition.workflow_definition_id == wf_def.id,
+                RepairStageDefinition.is_active.is_(True),
+            )
+            .order_by(RepairStageDefinition.sequence)
+            .all()
+        )
+        if not stages:
+            raise ValueError("PRECOMMISSION_INTAKE workflow stages not found. Run seed first.")
+
+        first_stage = stages[0]
+
+        workflow = RepairWorkflow(
+            # Suffixed: repair_workflows.workflow_number is unique, and this
+            # request will also get a QAP RepairWorkflow (same request_number)
+            # once intake completes -- they can't share the raw number.
+            workflow_number=f"{pcr.request_number}-INTAKE",
+            workflow_code=INTAKE_WORKFLOW_CODE,
+            entity_type=INTAKE_ENTITY_TYPE,
+            entity_id=pcr.id,
+            equipment_id=None,
+            organization_id=pcr.organization_id,
+            current_stage_id=first_stage.id,
+            status="active",
+            assignment_pending=False,
+            progress=0,
+            priority="normal",
+            created_by=user.id,
+        )
+        self.db.add(workflow)
+        self.db.flush()
+
+        first_instance = None
+        for stage in stages:
+            is_first = stage.id == first_stage.id
+            inst = RepairStageInstance(
+                workflow_id=workflow.id,
+                stage_id=stage.id,
+                status="submitted" if is_first else "not_started",
+                assignment_pending=False,
+                started_at=self._utc_now() if is_first else None,
+                created_by=user.id,
+            )
+            self.db.add(inst)
+            self.db.flush()
+            if is_first:
+                first_instance = inst
+
+        workflow.current_stage_instance_id = first_instance.id if first_instance else None
+
+        self.db.add(
+            RepairStageAuditLog(
+                workflow_id=workflow.id,
+                stage_id=first_stage.id,
+                action="created",
+                performed_by=user.id,
+                note=f"Precommission intake review started for {pcr.request_number}",
+            )
+        )
+
+        return workflow
+
     def _current_stage_code(self, pcr: PreCommissionRequest) -> Optional[str]:
-        """Return the current QAP stage code for display purposes."""
-        if not pcr.workflow_id:
+        """Current stage code for display -- the intake chain while approval
+        is still pending, the QAP workflow once it's actually started."""
+        workflow_id = pcr.workflow_id or pcr.intake_workflow_id
+        if not workflow_id:
             return None
-        from models import RepairStageDefinition
         workflow = self.db.query(RepairWorkflow).filter(
-            RepairWorkflow.id == pcr.workflow_id
+            RepairWorkflow.id == workflow_id
         ).first()
         if not workflow or not workflow.current_stage_id:
             return None

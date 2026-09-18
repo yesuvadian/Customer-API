@@ -1442,6 +1442,13 @@ class PreCommissionRequest(Base):
     workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
     equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True, index=True)
 
+    # Intake approval chain (RepairWorkflowDefinition workflow_code=
+    # PRECOMMISSION_INTAKE, 2 stages by default, admin-configurable) --
+    # created at request time, replaces approval_status as a manually-set
+    # field with a real, N-stage, role-gated review chain. workflow_id
+    # above (the QAP workflow) is only created once THIS one completes.
+    intake_workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
+
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -1453,6 +1460,7 @@ class PreCommissionRequest(Base):
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
     department = relationship("OrgDepartment", foreign_keys=[dept_id])
     workflow = relationship("RepairWorkflow", foreign_keys=[workflow_id])
+    intake_workflow = relationship("RepairWorkflow", foreign_keys=[intake_workflow_id])
     equipment = relationship("Equipment", foreign_keys=[equipment_id])
     approver = relationship("User", foreign_keys=[approved_by])
     rejecter = relationship("User", foreign_keys=[rejected_by])
