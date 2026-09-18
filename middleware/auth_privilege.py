@@ -223,6 +223,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # Payment token (scope=billing) — allow only /billing/* paths
         if payload.get("scope") == "billing":
             if path.startswith("/billing/"):
+                db.close()
                 return await call_next(request)
             raise HTTPException(status_code=403, detail="Payment token only valid for billing endpoints")
 
@@ -274,6 +275,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # Skip privilege check for KYC
         # --------------------------------------------------
         if path.startswith("/kyc/"):
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -288,6 +290,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # reasoning as the KYC exemption above.
         # --------------------------------------------------
         if path == "/users/logout":
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -300,6 +303,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         module_name = parts[0] if parts else None
 
         if not module_name:
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -316,6 +320,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # the "App Modules" module (id=2) to whichever role should manage it.
         # --------------------------------------------------
         if module_name == "modules" and request.method == "GET":
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -334,12 +339,14 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         # OrgRolePermission check on that module, same as any other write.
         # --------------------------------------------------
         if module_name in ("category_master", "category_details") and request.method == "GET":
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
         # Allow list endpoints (GET /products)
         # --------------------------------------------------
         if request.method == "GET" and len(parts) == 1:
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -360,6 +367,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             action = METHOD_ACTION_MAP.get(request.method)
 
         if not action:
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -368,6 +376,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         resolved_module_name = API_TO_MODULE_PATH.get(module_name, module_name)
         module = db.query(Module).filter_by(path=resolved_module_name).first()
         if not module:
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -388,6 +397,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                                 f"for this request's current stage ('{module_name}')"
                             ),
                         )
+                    db.close()
                     return await call_next(request)
                 # No TestingRequest named in this path (list/reference call) —
                 # fall through to the normal OrgRolePermission check below.
@@ -406,6 +416,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                     status_code=403,
                     detail=f"Access denied for '{action}' on '{module_name}'",
                 )
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
@@ -414,6 +425,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         try:
             user_roles = db.query(UserRole).filter_by(user_id=user.id).all()
             if not user_roles:
+                db.close()
                 return await call_next(request)
 
             role_ids = [r.role_id for r in user_roles]
@@ -434,11 +446,13 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         except Exception as e:
             print(f"[INFO] Role system error in middleware: {e}")
             db.rollback()
+            db.close()
             return await call_next(request)
 
         # --------------------------------------------------
         # ALL GOOD
         # --------------------------------------------------
+        db.close()
         return await call_next(request)
 
     except HTTPException as exc:
