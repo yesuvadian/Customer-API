@@ -5799,6 +5799,30 @@ def seed_report_definitions(session):
             "group_name": "Result Review",
             "notification_event": "result_review_report_ready",
         },
+        # ── Calibration group ────────────────────────────────────────────────────
+        {
+            "name": "Calibration Compliance Report",
+            "description": "Relay/ETV calibration on-time %, by zone/circle/subdivision/substation. "
+                           "Same on-time computation as the EE RT Dashboard's calibration_compliance KPI.",
+            "query_key": "calibration_compliance_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Calibration",
+            "notification_event": "calibration_report_ready",
+        },
+        # ── Network Health group ─────────────────────────────────────────────────
+        {
+            "name": "Network Health Summary Report",
+            "description": "Health-band distribution (Critical/High/Medium/Low/Unknown) and average "
+                           "health score by zone/circle/subdivision/substation, worst-first — a "
+                           "tabular heat map of the same equipment_analytics data behind the Overall "
+                           "Dashboard's condition snapshot (SRS 12.5).",
+            "query_key": "network_health_summary_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Network Health",
+            "notification_event": "network_health_report_ready",
+        },
         # ── Vendor & Repairer group ───────────────────────────────────────────────
         {
             "name": "Vendor Performance Ranking Report",
@@ -7061,6 +7085,99 @@ WHERE  ws.is_result_stage IS TRUE
   AND  (:department_id IS NULL OR d.id = :department_id::uuid)
 GROUP  BY d4.name, d3.name, d2.name, d.name
 ORDER  BY compliance_pct ASC NULLS LAST
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Calibration
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="calibration_compliance_report",
+            label="Calibration Compliance Report",
+            group_name="Calibration",
+            description="Relay/ETV calibration on-time %, grouped by zone / circle / "
+                        "subdivision / substation. Same on-time computation as the EE RT "
+                        "Dashboard's calibration_compliance KPI "
+                        "(dashboard_role_kpi.py's K1), packaged as a report.",
+            parameters_schema={"period_start": "date", "period_end": "date", "department_id": "uuid"},
+            sort_order=10,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    d4.name                         AS zone,
+    d3.name                         AS ce_circle,
+    d2.name                         AS ee_subdivision,
+    d.name                          AS substation,
+    COUNT(tr.id)                    AS calibrations_due,
+    COUNT(CASE WHEN tr.status IN ('approved','rejected','outcome_active','commissioned')
+                 AND tr.completed_at <= tr.due_date THEN 1 END) AS calibrations_on_time,
+    COUNT(CASE WHEN tr.due_date < NOW()
+                 AND tr.status IN ('submitted','assigned','accepted','in_progress',
+                                    'test_submitted','under_approval','under_review','finance_pending')
+                THEN 1 END)          AS calibrations_overdue,
+    ROUND(
+        COUNT(CASE WHEN tr.status IN ('approved','rejected','outcome_active','commissioned')
+                     AND tr.completed_at <= tr.due_date THEN 1 END)::numeric
+        / NULLIF(COUNT(tr.id), 0) * 100, 1
+    )                                AS compliance_pct
+FROM   public.testing_requests tr
+LEFT JOIN public.org_departments d  ON d.id  = tr.department_id
+LEFT JOIN public.org_departments d2 ON d2.id = d.parent_department_id
+LEFT JOIN public.org_departments d3 ON d3.id = d2.parent_department_id
+LEFT JOIN public.org_departments d4 ON d4.id = d3.parent_department_id
+WHERE  tr.is_calibration IS TRUE
+  AND  tr.is_schedule_template IS FALSE
+  AND  tr.due_date BETWEEN COALESCE(:period_start, NOW() - INTERVAL '90 days')
+                       AND COALESCE(:period_end, NOW())
+  {org_clause}
+  AND  (:department_id IS NULL OR d.id = :department_id::uuid)
+GROUP  BY d4.name, d3.name, d2.name, d.name
+ORDER  BY compliance_pct ASC NULLS LAST
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Network Health
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="network_health_summary_report",
+            label="Network Health Summary Report",
+            group_name="Network Health",
+            description="Health-band distribution (Critical/High/Medium/Low/Unknown) and average "
+                        "health score, grouped by zone / circle / subdivision / substation, "
+                        "worst-first. Same equipment_analytics.risk_level snapshot behind the "
+                        "Overall Dashboard's condition breakdown, regrouped by department instead "
+                        "of by class (SRS 12.5).",
+            parameters_schema={"department_id": "uuid"},
+            sort_order=10,
+            org_alias="ea",
+            sql_template="""
+SELECT
+    d4.name                                                    AS zone,
+    d3.name                                                    AS ce_circle,
+    d2.name                                                    AS ee_subdivision,
+    d.name                                                      AS substation,
+    COUNT(ea.id)                                                AS total_assessed,
+    COUNT(CASE WHEN ea.risk_level = 'Critical' THEN 1 END)      AS critical_count,
+    COUNT(CASE WHEN ea.risk_level = 'High'     THEN 1 END)      AS high_count,
+    COUNT(CASE WHEN ea.risk_level = 'Medium'   THEN 1 END)      AS medium_count,
+    COUNT(CASE WHEN ea.risk_level = 'Low'      THEN 1 END)      AS low_count,
+    COUNT(CASE WHEN ea.risk_level IS NULL THEN 1 END)           AS unknown_count,
+    ROUND(AVG(ea.health_score), 1)                              AS avg_health_score,
+    ROUND(
+        COUNT(CASE WHEN ea.risk_level = 'Critical' THEN 1 END)::numeric
+        / NULLIF(COUNT(ea.id), 0) * 100, 1
+    )                                                            AS critical_pct
+FROM   public.equipment_analytics ea
+LEFT JOIN public.org_departments d  ON d.id  = ea.department_id
+LEFT JOIN public.org_departments d2 ON d2.id = d.parent_department_id
+LEFT JOIN public.org_departments d3 ON d3.id = d2.parent_department_id
+LEFT JOIN public.org_departments d4 ON d4.id = d3.parent_department_id
+WHERE  1=1
+  {org_clause}
+  AND  (:department_id IS NULL OR d.id = :department_id::uuid)
+GROUP  BY d4.name, d3.name, d2.name, d.name
+ORDER  BY critical_pct DESC NULLS LAST
 """),
 
         # ══════════════════════════════════════════════════════════════════════
@@ -10207,6 +10324,22 @@ def _seed_notification_event_catalogue(session) -> int:
             description="Fired when the monthly Result Review Compliance Report is generated.",
             context_vars=["report_name", "report_period", "download_url", "format"],
             default_roles=["AEE R&T", "AEE-R&D", "EE_TLSS"],
+        ),
+        dict(
+            event_type="calibration_report_ready",
+            label="Calibration Compliance Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Calibration Compliance Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["EE_RT", "SEE_RT"],
+        ),
+        dict(
+            event_type="network_health_report_ready",
+            label="Network Health Summary Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Network Health Summary Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
         ),
         dict(
             event_type="vendor_report_ready",
