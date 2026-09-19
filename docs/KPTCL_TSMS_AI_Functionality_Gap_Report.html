@@ -1,0 +1,586 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>TSMS AI Spec Gap Audit</title>
+<style>
+:root{
+  --bg:#F5F6F8;
+  --surface:#FFFFFF;
+  --surface-2:#EEF0F4;
+  --border:#DCE0E8;
+  --ink:#12172B;
+  --ink-soft:#5B6478;
+  --ink-faint:#8A93A6;
+  --accent:#B5591A;
+  --accent-soft:#F3E3D3;
+  --good:#15803D;
+  --good-bg:#E8F5EC;
+  --warn:#B45309;
+  --warn-bg:#FBF0DE;
+  --bad:#B91C1B;
+  --bad-bg:#FBE7E7;
+  --mono-bg:#F0F1F5;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14171F;
+    --surface:#1B1F29;
+    --surface-2:#20242F;
+    --border:#2E3340;
+    --ink:#EDEFF4;
+    --ink-soft:#A6ACBB;
+    --ink-faint:#767D8E;
+    --accent:#E0873F;
+    --accent-soft:#3A2A1A;
+    --good:#4ADE80;
+    --good-bg:#173322;
+    --warn:#F5B95E;
+    --warn-bg:#3A2A12;
+    --bad:#F87171;
+    --bad-bg:#3A1717;
+    --mono-bg:#20242F;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14171F;
+  --surface:#1B1F29;
+  --surface-2:#20242F;
+  --border:#2E3340;
+  --ink:#EDEFF4;
+  --ink-soft:#A6ACBB;
+  --ink-faint:#767D8E;
+  --accent:#E0873F;
+  --accent-soft:#3A2A1A;
+  --good:#4ADE80;
+  --good-bg:#173322;
+  --warn:#F5B95E;
+  --warn-bg:#3A2A12;
+  --bad:#F87171;
+  --bad-bg:#3A1717;
+  --mono-bg:#20242F;
+}
+
+*{box-sizing:border-box;}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,Segoe UI,sans-serif;
+  margin:0;
+  padding-inline:20px;
+  padding-block:40px 80px;
+  font-size:15px;
+  line-height:1.55;
+}
+.wrap{max-width:920px;margin:0 auto;}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;}
+
+/* Header */
+header{margin-bottom:36px;}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace;
+  font-size:12px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--accent);
+  font-weight:600;
+  margin-bottom:10px;
+}
+h1{
+  font-size:clamp(28px,4vw,38px);
+  font-weight:700;
+  margin:0 0 10px;
+  line-height:1.15;
+  text-wrap:balance;
+  letter-spacing:-.01em;
+}
+.dek{
+  color:var(--ink-soft);
+  font-size:16px;
+  max-width:62ch;
+  margin:0 0 28px;
+}
+.stat-row{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:1px;
+  background:var(--border);
+  border:1px solid var(--border);
+  border-radius:10px;
+  overflow:hidden;
+}
+.stat{
+  background:var(--surface);
+  padding:16px 14px;
+  text-align:center;
+}
+.stat .n{
+  font-family:"IBM Plex Mono",monospace;
+  font-size:26px;
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+  display:block;
+}
+.stat .l{
+  font-size:11.5px;
+  color:var(--ink-soft);
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  margin-top:4px;
+  display:block;
+}
+.stat.exists .n{color:var(--good);}
+.stat.partial .n{color:var(--warn);}
+.stat.missing .n{color:var(--bad);}
+.stat.total .n{color:var(--ink);}
+@media (max-width:560px){ .stat-row{grid-template-columns:repeat(2,1fr);} }
+
+/* Coverage bars */
+.coverage{margin:28px 0 40px;}
+.coverage h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);margin:0 0 14px;font-weight:600;}
+.cov-row{display:grid;grid-template-columns:200px 1fr;gap:12px;align-items:center;padding:5px 0;}
+.cov-label{font-size:13px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cov-bar{display:flex;height:9px;border-radius:5px;overflow:hidden;background:var(--surface-2);}
+.cov-bar span{height:100%;}
+.cov-bar .g{background:var(--good);}
+.cov-bar .w{background:var(--warn);}
+.cov-bar .b{background:var(--bad);}
+@media (max-width:560px){ .cov-row{grid-template-columns:120px 1fr;} }
+
+/* Priority gaps */
+.priority{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-left:3px solid var(--accent);
+  border-radius:10px;
+  padding:22px 24px;
+  margin-bottom:44px;
+}
+.priority h2{
+  font-size:18px;
+  margin:0 0 4px;
+  font-weight:700;
+}
+.priority .sub{color:var(--ink-soft);font-size:13.5px;margin:0 0 18px;}
+.pgap{
+  display:grid;
+  grid-template-columns:22px 1fr;
+  gap:10px;
+  padding:10px 0;
+  border-top:1px solid var(--border);
+}
+.pgap:first-of-type{border-top:none;padding-top:0;}
+.pgap .num{
+  font-family:"IBM Plex Mono",monospace;
+  color:var(--ink-faint);
+  font-size:13px;
+  padding-top:2px;
+}
+.pgap .txt b{font-weight:600;}
+.pgap .tag{
+  font-family:"IBM Plex Mono",monospace;
+  font-size:10.5px;
+  color:var(--accent);
+  text-transform:uppercase;
+  letter-spacing:.03em;
+  margin-right:8px;
+}
+
+/* Module sections */
+.module{margin-bottom:38px;}
+.module-head{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  border-bottom:1px solid var(--border);
+  padding-bottom:8px;
+  margin-bottom:4px;
+}
+.module-head .idx{
+  font-family:"IBM Plex Mono",monospace;
+  color:var(--ink-faint);
+  font-size:13px;
+}
+.module-head h3{
+  font-size:17px;
+  margin:0;
+  font-weight:700;
+}
+.module-head .part{
+  margin-left:auto;
+  font-size:11px;
+  color:var(--ink-faint);
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  font-family:"IBM Plex Mono",monospace;
+}
+
+.req{
+  display:grid;
+  grid-template-columns:86px 172px 1fr;
+  gap:14px;
+  padding:9px 0;
+  border-bottom:1px solid var(--border);
+}
+.req:last-child{border-bottom:none;}
+.pill{
+  font-family:"IBM Plex Mono",monospace;
+  font-size:10.5px;
+  font-weight:600;
+  letter-spacing:.02em;
+  text-align:center;
+  border-radius:5px;
+  padding:3px 0;
+  height:fit-content;
+  text-transform:uppercase;
+}
+.pill.exists{background:var(--good-bg);color:var(--good);}
+.pill.partial{background:var(--warn-bg);color:var(--warn);}
+.pill.missing{background:var(--bad-bg);color:var(--bad);}
+.pill.scope{background:var(--surface-2);color:var(--ink-faint);}
+.req-ui{
+  font-size:11.5px;
+  line-height:1.4;
+  color:var(--ink-faint);
+}
+.req-ui .na{font-style:italic;}
+.req-body b{font-weight:600;}
+.req-body .note{
+  display:block;
+  color:var(--ink-soft);
+  font-size:13px;
+  margin-top:2px;
+}
+.req-body .note code{
+  background:var(--mono-bg);
+  padding:1px 5px;
+  border-radius:4px;
+  font-size:12px;
+  color:var(--ink);
+}
+@media (max-width:820px){
+  .req{grid-template-columns:64px 1fr;grid-template-areas:"pill body" "ui body";row-gap:4px;column-gap:10px;}
+  .pill{grid-area:pill;font-size:9px;}
+  .req-ui{grid-area:ui;font-size:10px;}
+  .req-body{grid-area:body;}
+}
+
+footer{
+  margin-top:50px;
+  padding-top:18px;
+  border-top:1px solid var(--border);
+  color:var(--ink-faint);
+  font-size:12.5px;
+}
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Spec vs. build — compliance audit</div>
+  <h1>KPTCL TSMS AI — Functionality Gap Report</h1>
+  <p class="dek">Every requirement in <em>Final_KPTCL_TSMS_AI_Specification_submission.docx</em> checked against the live codebase (<code>Customer-API</code> + <code>coginiwattcustomer</code>) — file:line evidence for what exists, explicit call-outs for what doesn't. Each item now also names where it lives in the app's real navigation (Drawer Category → Menu Label), from a UI perspective — not a URL, since the app has no interior deep-linking; a single Scaffold swaps sections by drawer selection.</p>
+  <div class="stat-row">
+    <div class="stat total"><span class="n">152</span><span class="l">Requirements checked</span></div>
+    <div class="stat exists"><span class="n">66</span><span class="l">Exists</span></div>
+    <div class="stat partial"><span class="n">78</span><span class="l">Partial</span></div>
+    <div class="stat missing"><span class="n">8</span><span class="l">Not found</span></div>
+  </div>
+</header>
+
+<div class="coverage">
+  <h2>Coverage by module</h2>
+  <div class="cov-row"><div class="cov-label">Equipment Register</div><div class="cov-bar"><span class="g" style="width:45%"></span><span class="w" style="width:45%"></span><span class="b" style="width:9%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Failure Registry</div><div class="cov-bar"><span class="g" style="width:83%"></span><span class="w" style="width:17%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Calibration Lifecycle</div><div class="cov-bar"><span class="g" style="width:38%"></span><span class="w" style="width:62%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Maintenance Monitoring</div><div class="cov-bar"><span class="g" style="width:50%"></span><span class="w" style="width:30%"></span><span class="b" style="width:20%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Test Scheduling</div><div class="cov-bar"><span class="g" style="width:62%"></span><span class="w" style="width:38%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Alerts &amp; Notifications</div><div class="cov-bar"><span class="g" style="width:50%"></span><span class="w" style="width:37%"></span><span class="b" style="width:13%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Test Execution</div><div class="cov-bar"><span class="g" style="width:43%"></span><span class="w" style="width:43%"></span><span class="b" style="width:14%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Evaluation Engine</div><div class="cov-bar"><span class="g" style="width:13%"></span><span class="w" style="width:87%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Review &amp; Approval</div><div class="cov-bar"><span class="g" style="width:25%"></span><span class="w" style="width:75%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Annual Audit</div><div class="cov-bar"><span class="g" style="width:0%"></span><span class="w" style="width:100%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Repair Lifecycle</div><div class="cov-bar"><span class="g" style="width:22%"></span><span class="w" style="width:78%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Workflow Config</div><div class="cov-bar"><span class="g" style="width:44%"></span><span class="w" style="width:56%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">AI Analytics (12.1–12.6)</div><div class="cov-bar"><span class="g" style="width:38%"></span><span class="w" style="width:62%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Reporting</div><div class="cov-bar"><span class="g" style="width:70%"></span><span class="w" style="width:30%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Role Dashboards (6)</div><div class="cov-bar"><span class="g" style="width:83%"></span><span class="w" style="width:17%"></span><span class="b" style="width:0%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">RBAC &amp; Audit</div><div class="cov-bar"><span class="g" style="width:33%"></span><span class="w" style="width:17%"></span><span class="b" style="width:50%"></span></div></div>
+  <div class="cov-row"><div class="cov-label">Integration &amp; Secondary</div><div class="cov-bar"><span class="g" style="width:36%"></span><span class="w" style="width:45%"></span><span class="b" style="width:19%"></span></div></div>
+</div>
+
+<div class="priority">
+  <h2>The 9 gaps that matter most</h2>
+  <p class="sub">Curated across all 18 modules — the ones that are named, spec'd deliverables and are not just thin, but absent. Six items dropped this session after review confirmed they no longer belong here: two were fixed or found to already exist outright, two were declared explicitly out of scope, one restated a point already covered elsewhere, and the rest of one item's substance (SLA tracking, disposition mapping, the monthly report) had been resolved.</p>
+
+  <div class="pgap"><div class="num">01</div><div class="txt"><span class="tag">Governance</span><b>No tamper-evident audit log.</b> Only scoped, purpose-specific logs exist (workflow transitions, billing) — none capture old value / new value / IP address on a generic entity change, and there's no 7-year retention logic anywhere in the codebase.</div></div>
+  <div class="pgap"><div class="num">02</div><div class="txt"><span class="tag">Partially closed this session</span><b>Design Problem Register is now a visible flag + a live alert — still not a trackable register.</b> <code>equipment_service.py</code>'s <code>is_design_problem_candidate</code> computes the cohort-level flag; it's now a red "DESIGN PROBLEM" pill on the Failure Reliability panel (previously fetched into a Flutter variable and never rendered — confirmed dead via <code>flutter analyze</code>'s own unused-variable warning), and a new daily job (<code>main.py</code>'s <code>_check_design_problem_alerts</code>) calls the previously-dormant <code>notify_design_problem_alert()</code> once per newly-flagged cohort, routed to <code>CEE_TRANSMISSION_ZONE</code>/<code>EE_TLSS</code> (real KPTCL roles, not the template's own generic hardcoded names). Still true, and still the real remaining gap: there's no persistent case entity — nothing an AEE/EE can open, annotate, or mark resolved; it's a live computed signal, not an ownable record.</div></div>
+  <div class="pgap"><div class="num">03</div><div class="txt"><span class="tag">Corrected — more precise, more severe</span><b>The CAR mechanism exists; its escalation notification is dead for the real org.</b> There's a genuine 5-stage workflow (<code>OBSERVATION_REPORTING → ASSIGNMENT → COMPLIANCE_SUBMISSION → COMPLIANCE_REVIEW → CLOSURE</code>), a real per-observation due date (<code>target_compliance_date</code>), and a working overdue-check job with a notification event and email template. But <code>_get_escalation_users()</code> (<code>annual_audit_service.py:310</code>) hardcodes recipient roles as "Reviewing Officer" / "Supervisory Officer" / "Senior Management Approver" — <b>zero of KPTCL's 22 real role names match any of these</b> (verified live against the org). The escalation call is guarded by <code>if escalation_users:</code>, so for KPTCL specifically, this notification never fires at all — not misrouted, just silent. What's genuinely missing: it's not a separate CAR entity with its own number (corrective action is a field/stage on the same observation), and due-date tracking doesn't distinguish Critical severity from Major/Minor/Advisory.</div></div>
+  <div class="pgap"><div class="num">04</div><div class="txt"><span class="tag">AI Analytics 12.1 — one input cheaper to add than thought</span><b>Equipment Health Score is one factor, not five.</b> Computed as the mean of the latest test classification only — trend direction, age vs. service life, maintenance compliance, and failure history are never referenced in the formula. The age-vs-service-life input specifically is no longer "would need new computation logic": <code>ai_graph.py</code>'s <code>_life_bucket()</code>/<code>_life_left()</code> already derive real age-band buckets from <code>commissioned_date</code> + equipment type (built for that page's own "Fleet Life Left" section) — wiring that existing helper into the score formula as a fifth factor is reuse, not new development. Trend, maintenance compliance, and failure history still have no equivalent existing computation to reuse.</div></div>
+  <div class="pgap"><div class="num">05</div><div class="txt"><span class="tag">Corrected — config, not code</span><b>The 10 repair stages are currently the wrong 10 — but relabeling them is a JSON edit.</b> Today's stages (Failure Reporting → Committee Review → Vendor Assignment → Lifting → …, <code>REPAIR_WORKFLOW_STAGES.json</code>) are administrative/logistics, not the spec's workshop-repair sequence (oil draining, core &amp; coil inspection, rewinding, assembly, pre-oil testing, oil filling). But the file is a flat <code>[{name, sequence}]</code> array with zero hardcoded stage-code references anywhere in <code>services/</code> — unlike Annual Audit, which does hardcode its stage codes in Python. Redefining these 10 to match the spec is a data change through the existing Workflow Configuration admin UI, not new development.</div></div>
+  <div class="pgap"><div class="num">06</div><div class="txt"><span class="tag">RBAC</span><b>No Read-Only Viewer role, no user-approval gate.</b> 8 of the 10 spec'd roles exist by close/exact name — Read-Only Viewer is the one genuinely missing. New user accounts also activate immediately; there's no admin-approval step before login is possible.</div></div>
+  <div class="pgap"><div class="num">07</div><div class="txt"><span class="tag">Correction</span><b>Scheduled reports generate but never actually get emailed — the missing piece is narrower than first reported.</b> <code>run_scheduled_reports()</code> (<code>reporting_service.py:1080</code>) really does run daily/weekly/monthly via APScheduler, and on-demand "email me this report" genuinely works over SMTP (<code>routers/reporting.py:337-362</code>). A full "report ready" notification-event catalogue was even seeded per report with sensible default roles (<code>seed.py:10072-10152</code> — <code>overdue_report_ready</code>, <code>pm_report_ready</code>, etc.) — but nothing in <code>run_scheduled_reports()</code> ever calls <code>NotificationService.fire()</code> to trigger them. The plumbing exists on both ends; the one call connecting them was never written.</div></div>
+  <div class="pgap"><div class="num">08</div><div class="txt"><span class="tag">Integration</span><b>SMTP/SMS credentials are <code>.env</code>-only.</b> The spec asks for admin-console-configurable integration settings — changing a mail server or SMS provider today means editing an environment file and restarting the service.</div></div>
+  <div class="pgap"><div class="num">09</div><div class="txt"><span class="tag">AI Analytics 12.3 — one dimension closed this session</span><b>Cohort benchmarking is now missing one of its five dimensions, not three.</b> Within-cohort outlier detection was built this session: a real Z-score comparison of each unit against its cohort peers, org-configurable threshold, with an OUTLIER badge on both the Overall Dashboard and Equipment Registry drill-downs (verified live, e.g. WS Industries CT cohort at Z=4.48). "No ALERT/CRITICAL-rate ranking" was also previously overstated — <code>by_make_model_health</code> (<code>routers/analytics.py:524-573</code>) gives real Critical/High/Medium/Low equipment counts per cohort, a genuine ALERT/CRITICAL-equivalent breakdown, just not sliced by voltage tier or presented as a sorted ranking. What's still genuinely missing: cohorts group by make/model/equipment-class only — <code>equipment_service.py</code>'s cohort key is a hardcoded <code>(equipment_type, manufacturer, model_number)</code> tuple, not config-driven, so there's no voltage-class or age-band grouping dimension. Still structural (the grouping key reshapes the data, unlike the other two which were independent checks layered on top of the existing cohort computation) — but age-band specifically is now confirmed cheaper than "structural" implies: <code>ai_graph.py</code>'s <code>_life_bucket()</code> already computes the exact age-band buckets this would need (see priority gap #4), so extending the cohort key to include it is reusing an existing helper, not deriving a new age dimension from scratch. Voltage-class has no equivalent existing helper and would still need one.</div></div>
+</div>
+
+<!-- ============ PART A ============ -->
+<div class="module">
+  <div class="module-head"><span class="idx">A.1</span><h3>Equipment Register &amp; UEIC Assignment</h3><span class="part">Part I · Part A</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Assets → Equipment Registry → Create/Edit</span><div class="req-body"><b>UEIC format</b><span class="note">Auto-generated, but token order is <code>zone-substation-bay-voltage-type-make-serial</code>, not the spec's <code>ZZ-SSSS-VVV-BB-TT-NN</code>; no format validator. <code>equipment_service.py:210-267</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Assets → Equipment Registry → Create Equipment (nameplate step)</span><div class="req-body"><b>19 nameplate templates, one per class</b><span class="note">19 exist, but coverage diverges — no dedicated Shunt Reactor / Series Reactor / standalone OLTC template. <code>seed.py:123-1125</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Assets → Equipment Registry → Create Equipment (nameplate step)</span><div class="req-body"><b>Full nameplate field set</b><span class="note">Most fields present; no distinct "insulation class" or "model number" field. <code>seed.py:139-244</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Assets → Equipment Registry → Edit</span><div class="req-body"><b>Lifecycle status (6 values)</b><span class="note">Enum only has active/retired/scrapped/under_repair — missing Under Maintenance, Condemned, Decommissioned, Replaced. <code>models.py:156-160</code></span></div></div>
+  <div class="req"><span class="pill missing">Missing</span><span class="req-ui">Assets → Equipment Registry → Detail → <span class="na">History tab (n/a)</span></span><div class="req-body"><b>Immutable lifecycle event log</b><span class="note">No entity tracks classification/ownership/location changes over time — only workflow/repair/billing audit logs exist.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Assets → Equipment Registry → Bulk Import</span><div class="req-body"><b>Bulk Excel/CSV import</b><span class="note"><code>routers/equipment.py:322-460, 680-736, 1056-1121</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Assets → Equipment Registry (list + filter bar)</span><div class="req-body"><b>Searchable, filterable register</b><span class="note"><code>routers/equipment.py:438</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Assets → Equipment Registry → Create/Edit</span><div class="req-body"><b>Duplicate-prevention (serial + class + substation)</b><span class="note">Fixed this session — <code>equipment_service.py</code> create + update, active units only.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Assets → Equipment Registry → Detail (Info/History tabs)</span><div class="req-body"><b>Unified equipment profile screen</b><span class="note">Info/History tabs — no lifecycle-event section, since none exists. <code>equipment_management_page.dart:2018-2205</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Assets → Equipment Registry (dept breadcrumb)</span><div class="req-body"><b>Substation → Zone aggregation</b><span class="note"><code>OrgDepartment</code> hierarchy, reused across dashboards</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Testing Request → Create Request</span><div class="req-body"><b>Every test/alert requires a valid UEIC</b><span class="note"><code>TestingRequest.equipment_id</code> is nullable — not DB-enforced. <code>models.py:3006</code></span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">A.2</span><h3>Failure Registry &amp; Design Problem Tracking</h3><span class="part">Part I · Part A</span></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Preventive Monitoring → Failure Registry → Create/Edit</span><div class="req-body"><b>Failure event capture (date, mode, symptoms, cause, status, location)</b><span class="note"><code>seed.py:7806-7857</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Preventive Monitoring → Failure Registry → Create/Edit</span><div class="req-body"><b>Failure type classification list</b><span class="note">Exact match to spec. <code>seed.py:7826-7829</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → Overall Dashboard → Failure Reliability panel</span><div class="req-body"><b>Design Problem Register</b><span class="note">Built this session — a visible dashboard flag ("DESIGN PROBLEM" pill) and a proactive daily alert (<code>main.py</code>'s <code>_check_design_problem_alerts</code>) to real CEE/EE_TLSS roles. Still no dedicated register entity for AEE/EE to explicitly track or resolve a case — see priority gap #2.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Notification Center (routing)</span><div class="req-body"><b>Auto-notify EE TLSS on every failure</b><span class="note">Corrected — <code>direct_submission_service.py:303-321</code> fires <code>fr_submitted</code> on every Failure Registry submission; <code>EE_TLSS</code> is a default recipient role, fully configurable in the Notification Center. (The spec's paired "auto procurement trigger" is out of scope for this phase.)</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Preventive Monitoring → Failure Registry (cohort stats)</span><div class="req-body"><b>Cumulative count / rate / MTBF, per unit AND per cohort</b><span class="note"><code>equipment_service.py:798-887, 889+</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Failure analysis reports, filterable</b><span class="note"><code>seed.py:5682,5691,6391,6484</code></span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">A.3</span><h3>Relay &amp; ETV Calibration Lifecycle</h3><span class="part">Part I · Part A</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">CB, Relay, Meter Work Flow → CB/Isolator/Relay/Meter Workflow</span><div class="req-body"><b>Dedicated calibration register linked to UEIC</b><span class="note">Implemented via <code>TestingRequest.is_calibration</code> + JSON results, not a standalone register table. <code>models.py:1298-1311</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Preventive Monitoring / Conditional Monitoring → Schedule Template</span><div class="req-body"><b>Auto-schedule per relay-type frequency template</b><span class="note">Only a generic 30-day lead time — no per-relay-type frequency config.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">CB, Relay, Meter Work Flow → test result form</span><div class="req-body"><b>Pick-up / drop-off / operating time / plug setting / TSM capture</b><span class="note">Pick-up and operating time exist; drop-off, plug setting, TSM keys not found.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">CB, Relay, Meter Work Flow → test result form (evaluation banner)</span><div class="req-body"><b>Auto-classify PASS / MARGINAL / FAIL</b><span class="note">Corrected — smaller gap than first reported. <code>recommendation_type</code> is currently a manually-selected Pass/Fail/Conditional/Retest field, but calibration templates (<code>protection_relay_calibration</code>, <code>tri_vector_meter_calibration</code> — <code>test_templates.py:2498-2554</code>) are ordinary JSON templates using the same engine as every other test. The per-field <code>normal_min/max</code>/<code>alert_min/max</code>/<code>critical_below/above</code> evaluation config that already auto-classifies NORMAL/ALERT/CRITICAL elsewhere just isn't populated on these templates' number fields (pickup current, TMS, operating time) yet — a template-config change, not new engine development.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">CB, Relay, Meter Work Flow → auto-creates in Repair Work Flow</span><div class="req-body"><b>FAIL → alert + remedial workflow</b><span class="note"><code>calibration_service.py:640 _handle_fail()</code> creates <code>CalibrationRepairRecommendation</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (EE RT / SEE RT / CEE RT scope)</span><div class="req-body"><b>Compliance rate by section/division/circle/zone</b><span class="note"><code>dashboard_role_kpi.py:483-1222</code>; <code>see_rt_dashboard.dart</code>, <code>cee_rt_dashboard.dart</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Notification Center</span><div class="req-body"><b>T+0 / T+7 / T+15 escalation through RT hierarchy</b><span class="note">Single-stage escalation only, at &gt;7 days.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Assets → Equipment Registry → Detail → History tab</span><div class="req-body"><b>Complete calibration history from equipment profile</b><span class="note"><code>routers/equipment.py:2696-2749</code></span></div></div>
+</div>
+
+<!-- ============ PART B ============ -->
+<div class="module">
+  <div class="module-head"><span class="idx">B</span><h3>Periodic Maintenance Monitoring</h3><span class="part">Part I · Part B</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → CM/PM Master Template</span><div class="req-body"><b>Checklist templates per equipment class AND maintenance type</b><span class="note">Only 2 real types exist (Routine, Major) — no Annual/Post-Fault/Post-Repair variants as a maintenance-type dimension.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Preventive Monitoring → PM Schedules (Cumulative Ops)</span><div class="req-body"><b>CB/OLTC cumulative ops vs. overhaul threshold</b><span class="note"><code>models.py:1226</code> <code>EquipmentOverhaulConfig</code>, auto-triggered recommendation</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Test Session (from a PM testing request)</span><div class="req-body"><b>Multi-session checklist execution</b><span class="note">Reuses <code>TestSession</code> infra</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Test Result Form</span><div class="req-body"><b>Quantitative parameters + pass/fail items together</b><span class="note"><code>test_templates.py:625, 2104, 2121</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Test Result Form</span><div class="req-body"><b>Photo evidence per checklist item</b><span class="note"><code>models.py:3731, 3842</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Preventive Monitoring → PM Schedule Template</span><div class="req-body"><b>Auto-schedule next date from frequency template</b><span class="note"><code>ScheduleFrequency</code> enum covers all required intervals</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Notification Center</span><div class="req-body"><b>Overdue alerts T+0/T+7/T+15, escalating AE→AEE→EE</b><span class="note">Only 2-tier exists (1-6 days / ≥7 days); no T+15 tier; role chain not confirmed wired.</span></div></div>
+  <div class="req"><span class="pill missing">Missing</span><span class="req-ui">Preventive Monitoring → PM Schedules <span class="na">(n/a)</span></span><div class="req-body"><b>Locked/immutable records with amendment workflow</b><span class="note">No lock flag or amendment/revision model — only generic audit-trail rows.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Preventive Monitoring → PM Schedules (Compliance tab)</span><div class="req-body"><b>Compliance matrix, real-time, all jurisdiction levels</b><span class="note"><code>routers/test_schedule_dashboard.py:49-70</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Testing Request</span><div class="req-body"><b>Maintenance events auto-populate test requests</b><span class="note">Pattern exists for post-repair surveillance specifically; not confirmed generic.</span></div></div>
+</div>
+
+<!-- ============ PART C ============ -->
+<div class="module">
+  <div class="module-head"><span class="idx">C.4</span><h3>Test Schedule Creation &amp; Management</h3><span class="part">Part I · Part C</span></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Assets → Equipment Registry (on Create) → CM Schedule Template</span><div class="req-body"><b>Auto-generate schedules at commissioning, per class + test type</b><span class="note"><code>services/equipment_schedule_service.py:9-80</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → CM/PM Master Template</span><div class="req-body"><b>Test type coverage (DGA/BDV/IR/Tan Delta/…/SFRA) + custom types</b><span class="note">46+ types seeded; admin-definable via <code>CategoryDetails</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Schedule Template</span><div class="req-body"><b>Frequency templates by age band / operational condition</b><span class="note">Corrected for "operational condition" — <code>calibration_service.py:135-182</code>'s <code>compute_interval_advisories()</code>, explicitly cited as spec §14.6, recommends extending/shortening a cohort's calibration frequency based on real fail rate, fully admin-tunable via <code>config.py</code>. Advisory-only by design (officer must act on it, per spec's own §12 AI-advisory rule) and calibration-specific, not general test scheduling. "Age band" specifically, and this for non-calibration test types, still genuinely absent — the base matcher (<code>equipment_schedule_service.py:18-33</code>) remains hardcoded to <code>equipment_type_id</code> alone; nameplate templates have no condition/age field either.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Testing Request → Create Request</span><div class="req-body"><b>Manual/ad-hoc creation specifically by EE or CEE</b><span class="note">Originator-based creation flow exists; role gating to EE/CEE by name not confirmed — roles are generic Originator/Approver.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Conditional Monitoring → CM Testing Request → Detail</span><div class="req-body"><b>TRN + UEIC + test type + dates + assignment per request</b><span class="note">Unique request number, e.g. <code>TR-REG-YYYYMMDD-NNNN</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Schedules <span class="na">(n/a — no calendar grid)</span></span><div class="req-body"><b>Calendar view scoped by role jurisdiction</b><span class="note">Status-bucketed data exists; no calendar-grid UI found in Flutter.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Conditional Monitoring → CM Testing Request → Create Request</span><div class="req-body"><b>Prevent duplicate active test requests (same UEIC+type+period)</b><span class="note">Fixed this session — <code>testing_request_service.py::create_request</code>, period-aware via <code>ScheduleFrequency.cooldown()</code>.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Conditional Monitoring → CM Schedules (Compliance Matrix)</span><div class="req-body"><b>Completion rate at every jurisdiction level</b><span class="note">Same compliance matrix as Part B</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">C.5</span><h3>Schedule Alerts &amp; Notifications</h3><span class="part">Part I · Part C</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Notification Center → Rules</span><div class="req-body"><b>Pre-due reminders at T-7 / T-3 to AE + AEE</b><span class="note">Implemented as 15-day/7-day reminders, not T-7/T-3.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Notification Center → Rules</span><div class="req-body"><b>Overdue escalation T+0/T+7/T+15 to AE/AEE→EE→CEE</b><span class="note">Same 2-tier gap as maintenance alerts above.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Notification Center → Rules/Templates</span><div class="req-body"><b>Channels (in-app/email/SMS), configurable per type + role</b><span class="note">Multi-provider SMS (Twilio/MSG91/HTTP) — <code>notification_service.py:1574-1739</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Notification Bell (global header)</span><div class="req-body"><b>Immediate ALERT/CRITICAL notifications</b><span class="note"><code>notification_service.py:2662, 2690</code></span></div></div>
+  <div class="req"><span class="pill missing">Missing</span><span class="req-ui">Organisation → Notification Center <span class="na">(n/a — role-based only)</span></span><div class="req-body"><b>Per-user notification preference centre</b><span class="note">Deliberate architecture, not an oversight — the whole Notification Center is designed role-based (routing rules key off <code>OrgRole</code>, not individual users), consistently throughout. A per-user preference layer would sit on top of that model rather than fit inside it.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Notification Center → Log</span><div class="req-body"><b>Notification log with status + failure flag</b><span class="note"><code>models.py:4428-4482</code>, retry_count + error_message</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui"><span class="na">No admin UI (.env only)</span> — see priority gap #8</span><div class="req-body"><b>SMTP + SMS, admin-configurable credentials</b><span class="note">Configurable via <code>.env</code>, not an admin UI screen — see priority gap #8.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Notification Center → Rules (event picker)</span><div class="req-body"><b>14 distinct alert types + custom</b><span class="note">65 event types seeded, exceeding the spec's minimum; not all 14 named categories map 1:1 (no explicit "data quality flag" or "audit log anomaly" type)</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">C.6</span><h3>Test Execution (Multi-session)</h3><span class="part">Part I · Part C</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">App-wide <span class="na">(single responsive build)</span></span><div class="req-body"><b>Separate mobile app + web portal access</b><span class="note">Flutter has a web build target but likely just the mobile layout stretched, not a distinct portal.</span></div></div>
+  <div class="req"><span class="pill scope">Out of scope</span><span class="req-ui">Test Session / Test Result Form</span><div class="req-body"><b>Offline mode with sync-on-reconnect</b><span class="note">Declared out of scope for this phase — not counted as a gap.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Conditional Monitoring → CM Testing Request → Test Result Form</span><div class="req-body"><b>Structured result forms with ambient conditions + instrument details</b><span class="note"><code>test_templates.py</code>: ambient_temp_c, humidity_pct, instrument_make/model/calib_date</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Conditional Monitoring → CM Testing Request → Test Session</span><div class="req-body"><b>Multi-session start/save/resume</b><span class="note"><code>models.py:3753-3799</code> <code>TestSession</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Test Result Form (instrument fields)</span><div class="req-body"><b>Flag alert if expired-calibration instrument used</b><span class="note">Certificate date fields exist, but no expiry-check/block at test submission.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Test Result Form (IR / Tan Delta / SFRA templates)</span><div class="req-body"><b>Conductor trace capture for IR/Tan Delta/SFRA</b><span class="note">Corrected — the earlier note pointed at the wrong field ("terminal_connections" Tight/Loose/Corroded is a physical-condition check on an unrelated visual-inspection template). All three real templates DO capture which terminal pair/configuration each reading belongs to: IR's <code>ir_readings</code> table has a free-text <code>measurement_point</code> column per row (<code>test_templates.py:333</code>); Tan Delta winding's <code>winding_test_results</code> table has a locked, readonly <code>test_configuration</code> column with fixed rows HV-GND/HV-LV/LV-GND/LV-TV/TV-GND/HV-TV (<code>test_templates.py:6718-6752</code>); SFRA's <code>sfra_measurements</code> table has a "Winding / Connection" column, e.g. HV-N/LV-N/HV-LV (<code>test_templates.py:6286</code>). Still partial because only Tan Delta enforces a controlled vocabulary — IR and SFRA leave it as free text a tester could mistype or skip.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Test Result Form</span><div class="req-body"><b>Attachment support (printouts, photos, scans)</b><span class="note"><code>models.py:3690-3747, 3842</code></span></div></div>
+  <div class="req"><span class="pill scope">Out of scope</span><span class="req-ui">Test Result Form (submit action)</span><div class="req-body"><b>Digital sign-off before submission</b><span class="note">Declared out of scope for this phase — not counted as a gap.</span></div></div>
+  <div class="req"><span class="pill missing">Missing</span><span class="req-ui">Conditional Monitoring → CM Testing Request → Detail <span class="na">(n/a)</span></span><div class="req-body"><b>Locked/immutable results with revision records</b><span class="note">No revision model, no lock flag on <code>TestResult</code>.</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">C.7</span><h3>Automated Evaluation Engine</h3><span class="part">Part I · Part C</span></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Test Result Form (evaluation banner)</span><div class="req-body"><b>NORMAL / ALERT / CRITICAL auto-classification</b><span class="note"><code>evaluation_service.py:154-194, 736-764</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Threshold Config</span><div class="req-body"><b>Thresholds configurable by class, voltage, AND age band</b><span class="note">age_band is not a real threshold dimension.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Test Result Form (DGA template)</span><div class="req-body"><b>Duval Triangle computation + plot</b><span class="note">Fault classification uses 3 of 5 gases (CH4/C2H4/C2H2); no triangle plot widget in Flutter — text/color zone only. <code>duval_triangle.py:100-146</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Analytic Dashboard</span><div class="req-body"><b>Trend-sensitive ALERT vs. previous 3 results</b><span class="note">Compares against one baseline point, not explicitly the previous 3.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Testing Request → Detail</span><div class="req-body"><b>Immutable classification record with rule/threshold/delta</b><span class="note">Values/thresholds/status stored, but on a mutable row — no immutable log, no explicit rule-ID reference.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Notification Center</span><div class="req-body"><b>ALERT→EE TLSS, CRITICAL→EE TLSS+CEE + auto remedial workflow</b><span class="note">Notifications fire to generic "Reviewing/Supervisory Officer" roles, not EE TLSS/CEE by name; no auto-initiated remedial workflow chained off CRITICAL. (Procurement-trigger half of this requirement is out of scope for this phase.)</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Analytic Dashboard (Projected Trend)</span><div class="req-body"><b>Trend charts with threshold bands overlaid</b><span class="note">Corrected — real, reachable from the equipment context menu's "Projected Trend" item (<code>equipment_actions_menu.dart:120-122</code>). Draws a genuine labeled threshold reference line (<code>analytics_dashboard_page.dart:3565-3582</code>, fl_chart <code>HorizontalLine</code> + dashed projection to the breach point) — one relevant boundary line, not all three zones shaded simultaneously.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Assets → Equipment Registry → Detail → History tab</span><div class="req-body"><b>Full evaluation history per equipment unit</b><span class="note">History/trend exists; rule-applied and reviewing-officer per past classification not captured.</span></div></div>
+</div>
+
+<!-- ============ PART D ============ -->
+<div class="module">
+  <div class="module-head"><span class="idx">D.8</span><h3>Result Review, Remedial Action &amp; Approval</h3><span class="part">Part I · Part D</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Test Result Review <span class="na">(scattered)</span></span><div class="req-body"><b>Single review queue with full context</b><span class="note">Pieces scattered across two services — no unified queue.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Test Result Review (Recommendation Wizard)</span><div class="req-body"><b>5-option disposition (Monitor/PM/Repair/Isolation/No Action)</b><span class="note">Corrected — the previous "4 options: monitor/retest/escalate_repair/dismiss" note didn't match any option in the actual codebase and was wrong, not just imprecise. The real disposition field a tester picks after test execution is <code>Recommendation.next_action</code> (<code>models.py:3946</code>, <code>NextActionType</code> enum: none/test/maintenance/inspection/repair_cycle/replacement), surfaced in <code>recommendation_wizard.dart</code>'s <code>_nextActions</code> dropdown as None/Test/Maintenance/Inspection/Repair/Procurement. 3 of the spec's 5 map cleanly today, by relabeling only: No Action→None, Preventive Maintenance→Maintenance, Repair→Repair. Monitor and Isolation have no equivalent at all — those would need new <code>NextActionType</code> enum values plus dispatch handling in <code>workflow_dispatch_service.py</code>, not just a label change. Test and Procurement exist beyond the spec's 5 and would need a decision on whether to keep them.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Test Result Review (dispatch)</span><div class="req-body"><b>Disposition auto-initiates Repair/Maintenance</b><span class="note">Auto-dispatch exists via a different mechanism (<code>Recommendation.next_action</code>), not chained from an ALERT/CRITICAL disposition specifically. (Procurement dispatch is out of scope for this phase.)</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Conditional Monitoring → CM Test Result Review</span><div class="req-body"><b>Disposition + signature, locked and audit-logged</b><span class="note">Approver/timestamp captured; record is directly mutable, not locked. Digital signature is out of scope for this phase — not counted as a gap.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Background job <span class="na">(no direct UI)</span></span><div class="req-body"><b>Auto-close NORMAL results after review period</b><span class="note">Built this session — <code>TrWfStage.auto_close_normal_after_hours</code> (admin-configurable per stage, opt-in) and a new <code>_check_auto_close_normal_results</code> job (<code>main.py</code>, every 30 min) close a Result Review stage once every <code>TestResult</code> on the request evaluated NORMAL. Gates strictly on the computed <code>evaluation_result['overall']</code>, never the tester's own manual Pass/Fail pick, matching the same priority <code>_derive_recommendation_from_results</code> already gives the auto-evaluation over a human label — a result with no computed evaluation blocks auto-close rather than being assumed NORMAL. Reuses the real stage-transition engine (audit log, notification, recommendation dispatch all fire normally, actor recorded as system/NULL) rather than a hand-rolled status update. Verified live: three real requests open in <code>l3_review_result</code> since mid-August with NORMAL results all auto-closed correctly.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → Overall Dashboard (SLA tile)</span><div class="req-body"><b>Compliance view: % reviewed within SLA (24h ALERT / 2h CRITICAL)</b><span class="note">Built this session — <code>TrWfStage.default_duration_hours</code> (hours, takes precedence over the existing day-level field), admin-configured per stage; <code>routers/dashboard_kpi.py</code>'s <code>review_sla_pct</code>/<code>review_sla_breaches</code> gives a real % + drill-down list on the Overall Dashboard, verified against live closed reviews (both compliant and breached cases). Not yet the spec's literal 24h-ALERT/2h-CRITICAL split — one blended SLA per stage, since severity isn't captured as a stable field per review instance (it only lives on fired <code>Notification</code> rows) — and only <code>l3_review_result</code>/<code>pm_execution</code> stages have a duration configured so far.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Notification Center</span><div class="req-body"><b>Overdue review escalation matrix</b><span class="note">Built this session, closing the specific hole the previous note called out — a new 15-minute job (<code>main.py</code>'s <code>_check_review_sla_breaches</code>) fires when an open Result Review stage crosses its configured SLA, notifying that stage's actual assigned roles (not a hardcoded default list) via the existing <code>wf_stage_overdue</code> event, once per breach. Still not severity-gated (fires the same way regardless of ALERT vs. CRITICAL) and still only covers the same two stage types as the compliance-view item above.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Monthly Result Review Compliance Report</b><span class="note">Built this session — reuses the exact same SLA computation as the Overall Dashboard's <code>review_sla_pct</code> tile (<code>TrWfStage.is_result_stage</code> + <code>default_duration_hours</code>/<code>default_duration_days</code> vs. stage-instance <code>started_at</code>/<code>completed_at</code>), packaged as a monthly Excel report grouped by zone/circle/subdivision/substation, matching the existing PM and TA&amp;QC compliance report shape. Zero new report-engine code — one <code>ReportDefinition</code> + one <code>ReportQueryKey.sql_template</code> row, per the "14 query_key values, not 14 code paths" architecture <code>reporting_service.py</code> already documents. Verified live: generated a real <code>.xlsx</code> against real data.</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">D.9</span><h3>Annual Audit &amp; Inspections</h3><span class="part">Part I · Part D</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Annual Inspection &amp; Audit Request</span><div class="req-body"><b>Inspection templates covering all categories incl. housekeeping</b><span class="note">Category-structured; no literal "Housekeeping" category (closest: "General Maintenance").</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Annual Inspection &amp; Audit Request</span><div class="req-body"><b>Severity: Minor / Major / Critical Observation + photos</b><span class="note">Enum is Major/Minor/Advisory, not "Critical" — and photos are generic per-category files, no dedicated observation-photo model.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Annual Inspection &amp; Audit Workflow</span><div class="req-body"><b>Corrective Action Request (CAR) workflow</b><span class="note">Corrected — real 5-stage workflow with a genuine due date exists; its overdue-escalation notification is silently dead for KPTCL specifically (role-name mismatch, verified live). See priority gap #3.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Annual Inspection &amp; Audit Workflow</span><div class="req-body"><b>Resolution tracking with date/action/sign-off</b><span class="note">Corrected — overdue escalation is a real daily cron job (<code>main.py:1055-1069</code>, "design §14H"), not on-demand. Still no dedicated resolution columns beyond workflow-stage advancement + free text, and the escalation notification itself is dead for KPTCL (see priority gap #3).</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Annual audit summary reports with trend + CAR status</b><span class="note">Open/closed/compliance% by department/category exists; no trend-over-time, no CAR status (since CAR doesn't exist).</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">D.10</span><h3>Transformer Repair Lifecycle Management</h3><span class="part">Part I · Part D</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Transformer Repair Work Flow → Create</span><div class="req-body"><b>Repair Job Card with type/agency/dates</b><span class="note">No <code>repair_type</code> field (minor/major/revamping/recoiling) anywhere.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Workflow Configuration (Breakdown Repair)</span><div class="req-body"><b>The specific 10 workshop-repair stages</b><span class="note">Corrected — current content is wrong, but it's a flat JSON array with no hardcoded stage-code logic anywhere, so relabeling is config not code. See priority gap #5.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Transformer Repair Work Flow → Detail</span><div class="req-body"><b>Stage completion date/officer/observations</b><span class="note"><code>RepairStageInstance</code>, <code>models.py:457-527</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Transformer Repair Work Flow → Detail</span><div class="req-body"><b>Delay attribution to the correct party (4-way)</b><span class="note">Fully implemented, but binary only — vendor or KPTCL, not the spec's 4-way split.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Transformer Repair Work Flow (stage QA form)</span><div class="req-body"><b>Structured pre-dispatch workshop tests (TR/IR/SC/DGA) with auto pass/fail</b><span class="note">Corrected — smaller gap than reported. Real TR/IR/SC/DGA templates with threshold-based auto-evaluation already exist (<code>test_templates.py</code>: <code>insulation_resistance_test</code>, <code>short_circuit_test</code>, <code>transformer_dga</code>), and <code>evaluation_service.py</code> is type-agnostic (no gate on template_type). But today's <code>repair_stage_qa</code> JSON only has free-text + file fields, and <code>repair_workflow_service.py:596</code>'s <code>submit_stage()</code> never calls the evaluation engine at all. Closing this needs a JSON field change plus one small wiring call to the existing <code>evaluate_test_data()</code> — reusing the proven engine, not building a new one.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Power Transformer Inspection &amp; Audit → Post Commissioning Workflow</span><div class="req-body"><b>Post-commissioning surveillance at 1/3/6/12/24 months</b><span class="note">24-month default period matches; actual schedule is 4 evenly-spaced quarters, not the front-loaded DGA schedule.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Notification Center</span><div class="req-body"><b>CRITICAL surveillance result escalates to EE + CEE</b><span class="note">Reuses generic CRITICAL pipeline; no surveillance-specific mandatory escalation found.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Repairer performance metrics for vendor ranking</b><span class="note">Corrected — real reports exist for both vendor and repairer ranking (<code>seed.py:7005-7070</code>: on-time-delivery %, avg turnaround days, completion rate), just not the specific stage-adherence/rejection-rate/post-commissioning-failure-rate metrics named in the spec.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Repair status &amp; delay analysis reports</b><span class="note"><code>services/dashboard_service.py:812-838</code></span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">D.11</span><h3>Workflow Configuration</h3><span class="part">Part I · Part D</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Workflow Configuration</span><div class="req-body"><b>Admin-defined stages/roles/SLA/notifications, versioned + audit-logged</b><span class="note">CRUD exists and is genuinely code-free; no version column or definition-change history.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Workflow Configuration (Annual Audit tile)</span><div class="req-body"><b>(a) Annual Audit Workflow</b><span class="note"><code>services/annual_audit_service.py</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Workflow Configuration (Breakdown Repair tile)</span><div class="req-body"><b>(b) Breakdown Repair Workflow</b><span class="note"><code>routers/repair_workflow.py</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Workflow Configuration (Calibration tile)</span><div class="req-body"><b>(c) Calibration Workflow</b><span class="note">Config/status/evaluate/history endpoints exist; PASS/FAIL auto-recalibration trigger not fully confirmed.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Workflow Configuration (Pre-Commissioning tile)</span><div class="req-body"><b>(d) Pre-commissioning QAP gates Active status</b><span class="note">Templates exist; the Active-status flip isn't visibly conditioned on this specific workflow type.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Workflow Configuration (Post-Commission tile)</span><div class="req-body"><b>(e) Post-commissioning Surveillance (30/90/180-day)</b><span class="note">Exists, but quarter-based off a configurable period, not the fixed 30/90/180-day schedule.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Workflow Configuration (DPR tile)</span><div class="req-body"><b>(f) Detailed Project Report (DPR) Workflow</b><span class="note"><code>models_dpr.py</code>, role-gated stages</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Each workflow's own detail screen (override action)</span><div class="req-body"><b>Supervisory override with mandatory justification</b><span class="note">Built this session — <code>RepairWorkflowService.override_stage()</code> force-moves a stuck workflow forward to any later stage (or closes it entirely), gated on a new workflow-wide <code>RepairWorkflowOverrideRole</code> (deliberately not per-stage, so it works from wherever the workflow is stuck) and a mandatory justification, with every bypassed stage marked <code>skipped_by_override</code> rather than falsely "completed." Every workflow type — Annual Audit, Breakdown Repair, Calibration, DPR Approval, Overhaul, Post-Commission Surveillance — delegates to this one implementation. "System Administrator" is granted override by default on every workflow, seeded both by a one-time alter script and by <code>seed.py</code> itself for future installs; verified live that this auto-extends to any newly-provisioned org via the same cross-org role-name matching <code>RepairStageRole</code> already relied on. Verified live end-to-end: permission-denied, forward-skip, terminal-close, and the "can't override a completed workflow" guard.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Workflow Configuration</span><div class="req-body"><b>Admin can add genuinely NEW workflow types without code</b><span class="note">New definitions/stages are creatable, but automated behavior per type (PASS/FAIL evaluation, CAR generation) is hardcoded against stage codes in Python — a new type gets data capture only.</span></div></div>
+</div>
+
+<!-- ============ PART E ============ -->
+<div class="module">
+  <div class="module-head"><span class="idx">12.1</span><h3>Equipment Health Scoring</h3><span class="part">Part I · Part E</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Analytic Dashboard (health score)</span><div class="req-body"><b>Score from 5 inputs (classification, trend, age, maintenance, failure history)</b><span class="note">Only the most recent test classification feeds the formula — see priority gap #4.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Background recompute <span class="na">(no direct UI)</span></span><div class="req-body"><b>Auto-update on every test/maintenance/classification change</b><span class="note">Fires on test/classification events; no distinct "maintenance event" entity to trigger from.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → AI Analytic Dashboard / Equipment Registry list</span><div class="req-body"><b>Health bands, colour-coded</b><span class="note"><code>EquipmentHealthBandThreshold</code>, <code>models.py:5463</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard / Asset Dashboard (zone map)</span><div class="req-body"><b>Network-wide health-band map, all jurisdiction levels</b><span class="note"><code>HierarchyAnalytics</code> rollup</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Threshold Config (Health Bands tab)</span><div class="req-body"><b>Scoring logic + thresholds admin-configurable</b><span class="note">Band thresholds are; the underlying formula is hardcoded (moot, since it only has 1 factor to weight).</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">12.2</span><h3>Trend Analysis &amp; Deterioration Detection</h3><span class="part">Part I · Part E</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Analytic Dashboard (Trend Detail sheet)</span><div class="req-body"><b>Trend analysis with minimum 3 data points</b><span class="note">Config default is 1 point, not 3 — code comments flag 2-3 points as a spuriously perfect fit.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (Deterioration Watch)</span><div class="req-body"><b>Pre-ALERT deterioration flag as advisory</b><span class="note">Deterioration Watch List, real breach forecasting</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Reporting Center (DGA Trend Report)</span><div class="req-body"><b>DGA gas-generation-rate acceleration, per gas, as separate advisory</b><span class="note">Implemented for 3 of 6+ tracked gases (CH4/C2H4/C2H2), only in the ad-hoc DGA Trend Report.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Analytic Dashboard (Projected Trend)</span><div class="req-body"><b>Trend charts with threshold bands overlaid</b><span class="note">Corrected — the "Projected Trend" context-menu chart does draw a labeled threshold reference line (see C.7's matching entry above for detail); one boundary at a time, not full 3-zone shading.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → Overall Dashboard (Deterioration Watch)</span><div class="req-body"><b>Deterioration Watch List, sortable</b><span class="note">Full list returned; not server-side sorted by rate/band/class.</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">12.3</span><h3>Cohort Benchmarking &amp; Make/Model Analytics</h3><span class="part">Part I · Part E</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Graph Dashboard (grouping dimensions)</span><div class="req-body"><b>Cohorts by make, model, class, voltage, AND age band</b><span class="note">Only grouped by (type, manufacturer, model) — voltage and age band are not dimensions. See priority gap #9.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Analytic Dashboard (Make/Model view)</span><div class="req-body"><b>Median value, ALERT rate, CRITICAL rate, MTTE, failure rate</b><span class="note">Corrected — 3 of 5 now confirmed. Failure rate and cohort MTBF already existed; <code>by_make_model_health</code>'s Critical/High counts per cohort (same source as the item above) give real CRITICAL and ALERT-equivalent(High) rates too, as raw counts rather than a pre-computed %. Median test value and MTTE (distinct from MTBF) still not found.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard / Equipment Registry (OUTLIER badge)</span><div class="req-body"><b>Within-cohort outlier detection</b><span class="note">Built this session — <code>equipment_service.py</code>'s <code>compute_failure_cohort_stats()</code> computes a real Z-score for each unit's failure count against its own cohort peers (mean/stdev, guarded against &lt;4 units or zero variance), distinct from the existing per-unit time-series anomaly detection. Threshold is org-configurable (default 3.0, <code>FailureCohortThresholdConfig.outlier_z_score</code>) via the Threshold Config admin screen, and flagged units get an "OUTLIER" badge on both the Overall Dashboard and Equipment Registry cohort drill-downs. Verified live against real data (WS Industries CT cohort, Z=4.48).</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Analytic Dashboard (Make/Model view)</span><div class="req-body"><b>Make/Model Performance Report by ALERT/CRITICAL/failure rate</b><span class="note">Corrected — real per-cohort Critical/High/Medium/Low equipment counts exist (<code>routers/analytics.py:524-573</code> <code>by_make_model_health</code>), surfaced via the AI Analytics dashboard's "Make / Model" view (<code>analytics_dashboard_page.dart:163</code>). This app's risk tiers are Critical/High/Medium/Low rather than NORMAL/ALERT/CRITICAL — "High" is the closest analog to ALERT. Not confirmed sliced by equipment class + voltage tier together, or presented as a sorted ranking rather than a breakdown view.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Threshold Config (Failure Cohorts tab)</span><div class="req-body"><b>Elevated-failure cohort flagged vs. population mean</b><span class="note">Uses a fixed config threshold, not an actual population-mean comparison.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Asset Dashboard (equipment detail sheet)</span><div class="req-body"><b>Cohort data accessible from equipment profile</b><span class="note">Closed this session — the Asset Dashboard's per-unit equipment detail sheet (opened by tapping a specific unit in a drill-down list, <code>asset_dashboard.dart</code>'s <code>_showEquipmentDetail()</code>) now shows a "Cohort Standing" section for that exact unit: peer count, cohort average failure rate, design-problem flag, and this unit's own failure count/MTBF/OUTLIER badge via the shared <code>FailureUnitRow</code> widget. <code>_fetchCohortStandingForUnit()</code> reuses the existing department-scoped <code>GET /equipment/stats/failure-cohorts</code> and matches this unit's own cohort client-side — no new endpoint needed. Verified live: <code>BN-NRSR-20MVA Power TR-3-66-TR-NGEF-2800056329</code>'s detail sheet correctly shows "vs. 6 peer(s) ... cohort averages 10.86 failure(s)/unit (flagged as a design problem)" with its own 11 failures / MTBF ~437d row.</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">12.4</span><h3>Maintenance Effectiveness Analysis</h3><span class="part">Part I · Part E</span></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Pre/post maintenance comparison + Maintenance Effectiveness Index</b><span class="note">Corrected — real on-demand report, cites spec §12.4 directly. <code>seed.py:6590-6698</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center (same report)</span><div class="req-body"><b>Flag maintenance with no measurable improvement</b><span class="note">Improved/Declined/Unchanged classification per ticket, same report</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Maintenance ROI Report</b><span class="note">Deliberately reframed as a health-score index, not a dollar figure — no cost field exists on any maintenance table</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → Overall Dashboard ("Departments, Worst First")</span><div class="req-body"><b>Compliance-rate vs. ALERT/CRITICAL correlation, per section/circle</b><span class="note">Corrected — stronger than a flat Missing. The Overall Dashboard's "Departments, Worst First" table (<code>base_role_dashboard.dart:1808-1936</code>) already renders, per department row: a level badge (CIRCLE/SECTION/ZONE, whatever the hierarchy level is), a compliance-% bar, DQI %, a Critical-count badge, and an Overdue-count badge — all in the same row, sorted worst-compliance-first (<code>routers/dashboard_kpi.py</code>'s <code>_scope_counts</code>, sorted at line 2037). A viewer can already see low-compliance circles/sections next to their critical counts side by side. Still short of the literal spec: it's Critical-only (not ALERT+CRITICAL combined), a raw count rather than a rate (not normalized for department size), and there's no computed correlation statistic — just a visual side-by-side a person has to eyeball.</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">12.5</span><h3>Network-Level Insights &amp; Executive Analytics</h3><span class="part">Part I · Part E</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Reporting Center / Dashboard → AI Analytic Dashboard</span><div class="req-body"><b>Monthly Network Health Summary (bands, MoM trend, top-10, heat map)</b><span class="note">Current-snapshot distribution + top-10 at-risk exist; no month-on-month trend.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (department rollup)</span><div class="req-body"><b>Substation Health Index</b><span class="note">Functionally present via department rollup, not branded "SHI"</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (Condition Risk Matrix)</span><div class="req-body"><b>Condition Risk Matrix, admin-configurable criticality</b><span class="note"><code>routers/analytics.py:1752-1877</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Graph Dashboard (Fleet Health Trend)</span><div class="req-body"><b>Network ALERT/CRITICAL trend by class/voltage/make/age-band</b><span class="note">Correction — the building blocks exist, just not assembled for this specific slice. <code>ai_graph.py</code>'s <code>_trend_bucket()</code> already does adaptive-granularity (day/week/quarter) time-series bucketing, backing the AI Graph Dashboard's existing "Fleet Health Trend" / "Fleet Life Left Trend" line charts, and <code>_life_bucket()</code>/<code>_life_left()</code> already compute real age-band buckets (0–5 / 5–10 / … / 25+ yrs) from <code>commissioned_date</code> + equipment type. But both are aggregate fleet-wide lines today, not sliced by class/voltage/make/age-band, and nothing combines the two into an ALERT/CRITICAL-count-per-period-per-bucket view. Still genuinely missing as a delivered feature — closing it is assembling existing pieces onto a new chart section, not building new infrastructure.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>PDF/Excel export</b><span class="note"><code>reporting_service.py</code></span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Reporting Center → Schedule tab</span><div class="req-body"><b>Configurable scheduled email delivery</b><span class="note">Corrected — scheduling and email both work independently; the trigger connecting them is missing. See priority gap #7.</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">12.6</span><h3>Data Quality &amp; Readiness Dashboard</h3><span class="part">Part I · Part E</span></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Threshold Config (Data Quality tab)</span><div class="req-body"><b>Data Quality Index + remediation task list</b><span class="note"><code>DqiRuleConfig</code>, <code>models.py:5777</code>, admin-configurable</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Test Result Form (evaluation) / Threshold Config</span><div class="req-body"><b>Flag calibration-expired / implausible-ambient / outlier results</b><span class="note">Per-parameter anomaly detection exists but isn't framed as a data-quality flag; no instrument-calibration-at-test-time check or ambient-plausibility check found.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Dashboard → AI Analytic Dashboard</span><div class="req-body"><b>Analytics data coverage % per class/substation</b><span class="note">Refined this session — the two axes aren't equally close. Per-class is nearly free: <code>routers/analytics.py</code>'s <code>_finalise()</code> (line 564) already returns an <code>untested</code> count alongside every tested-risk-band count per class bucket (Equipment Type/Make/Voltage/Make-Model), so <code>coverage_pct = (total - untested) / total</code> is a one-line addition, no new query. Per-substation is a real gap, not just an unexposed number: <code>department_scores</code>' (<code>routers/analytics.py:1307</code>) <code>test_count</code> is a raw count of test *executions* (built via <code>Counter</code> over test rows), not distinct equipment tested — one transformer tested 5 times counts as 5, so it can't be turned into a coverage % as-is. Closing the substation side needs the same tested/untested-per-equipment split <code>_add_health()</code> already does for class dimensions, re-run grouped by department instead — a small-to-medium new query, not a one-liner. Neither dashboard combines class + substation into one view either way.</span></div></div>
+</div>
+
+<!-- ============ PART F ============ -->
+<div class="module">
+  <div class="module-head"><span class="idx">13</span><h3>Alerts, Notifications &amp; Reporting</h3><span class="part">Part I · Part F</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Notification Bell (global header)</span><div class="req-body"><b>7-tier priority-ordered unified alert feed</b><span class="note">Sorted by recency only — no CRITICAL-unreviewed → … → Informational ordering.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Notification Bell (global header)</span><div class="req-body"><b>Per-entry fields (class, substation, alert type, age, action)</b><span class="note">Only UEIC and severity are real columns; the rest would need unstructured JSON.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Notification Bell (global header)</span><div class="req-body"><b>Real-time refresh, mobile + web</b><span class="note">SSE stream, <code>routers/notifications.py:187-230</code></span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>9 of 12 named standard reports</b><span class="note">Test Compliance, Overdue Test, ALERT/CRITICAL Equipment, Equipment Performance, DGA Trend, PM Compliance, Remedial Action, Repair Status, TA&amp;QC Observation Compliance all exist</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Calibration Compliance / Network Health Summary / Equipment Lifecycle Summary reports</b><span class="note">Built this session — all 3 now registered. <code>Equipment Lifecycle Summary</code> already existed (<code>seed.py:5639, 6294</code>). Added <code>calibration_compliance_report</code> (on-time % by zone/circle/subdivision/substation, reusing the EE RT Dashboard's <code>calibration_compliance</code> KPI computation) and <code>network_health_summary_report</code> (Critical/High/Medium/Low/Unknown band distribution + avg health score per substation, worst-first, reusing the same <code>equipment_analytics.risk_level</code> snapshot behind the Overall Dashboard's condition breakdown). Zero new report-engine code — two <code>ReportDefinition</code> + two <code>ReportQueryKey.sql_template</code> rows, same "14 query_key values, not 14 code paths" pattern as the Result Review report. Verified live: both generated real <code>.xlsx</code> files against real data (<code>f794cdf</code>).</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>Filters, PDF/Excel export, scheduling, ad-hoc builder</b><span class="note"><code>routers/reporting.py:168-177</code></span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">14</span><h3>Role-Based Dashboards</h3><span class="part">Part I · Part F</span></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (role-adaptive)</span><div class="req-body"><b>14.1 Field Officer (AE/JE)</b><span class="note">Close match — window is 30 days not 7, no Annual Audit widget</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (role-adaptive)</span><div class="req-body"><b>14.2 AEE / Section Maintenance Officer</b></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (role-adaptive)</span><div class="req-body"><b>14.3 EE TLSS (Division)</b><span class="note">Richest implementation — T+7 buckets, escalation tiers</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (role-adaptive)</span><div class="req-body"><b>14.4 SEE W&amp;M (Circle)</b><span class="note">Corrected — same unified <code>OverviewDashboard</code> as every other role (<code>dashboard.dart:67</code>), not the separate thin backend endpoint originally checked (that endpoint is dead code, unused since the dashboards were consolidated).</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (role-adaptive)</span><div class="req-body"><b>14.5 CEE Transmission Zone</b><span class="note">Corrected — same unified <code>OverviewDashboard</code> (<code>dashboard.dart:68</code>), includes Condition Risk Matrix, calibration compliance, failure/design-risk flagging. "Top 10 by EHS" as a literal ranked list not separately confirmed.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Dashboard → Overall Dashboard (role-adaptive)</span><div class="req-body"><b>14.6 CEE RT &amp; R&amp;D Wing</b><span class="note">Good match — 6-month fail trend vs. spec's 12; 30-day expiring list vs. spec's 30/60</span></div></div>
+</div>
+
+<!-- ============ PART G ============ -->
+<div class="module">
+  <div class="module-head"><span class="idx">15</span><h3>User Management, RBAC &amp; Audit</h3><span class="part">Part I · Part G</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Roles</span><div class="req-body"><b>10 standard roles</b><span class="note">8 of 10 exist by close/exact name; Read-Only Viewer is missing (Annual Audit Officer's closest match is "TA&amp;QC Inspector")</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → User Role (dept scoping)</span><div class="req-body"><b>Jurisdiction scoping, auto-filtered everywhere</b><span class="note">Department-hierarchy dept_ids resolved once, reused throughout</span></div></div>
+  <div class="req"><span class="pill missing">Missing</span><span class="req-ui"><span class="na">No UI (n/a)</span> — see priority gap #1</span><div class="req-body"><b>Generic tamper-evident audit log (old/new value, IP)</b><span class="note">See priority gap #1 — only scoped, purpose-specific logs exist.</span></div></div>
+  <div class="req"><span class="pill missing">Missing</span><span class="req-ui"><span class="na">No UI (n/a)</span></span><div class="req-body"><b>7-year audit log retention</b><span class="note">No retention/archival/purge logic anywhere.</span></div></div>
+  <div class="req"><span class="pill missing">Missing</span><span class="req-ui"><span class="na">No UI (n/a) — would live in Organisation → Threshold Config</span></span><div class="req-body"><b>Configurable session timeout + concurrent-session limits per role</b><span class="note">No such config anywhere.</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Organizations → Users tab</span><div class="req-body"><b>User provisioning with admin approval; deactivated accounts retained</b><span class="note">Soft-delete correctly retains history; new accounts activate immediately with no approval gate.</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">16–17</span><h3>External Integration &amp; Security</h3><span class="part">Part I · Part G</span></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Assets → Data Import / Organisation → Organizations</span><div class="req-body"><b>Bulk import with validation (equipment + users)</b></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui"><span class="na">No admin UI (.env only)</span> — see priority gap #8</span><div class="req-body"><b>SMTP + SMS gateway, admin-configurable</b><span class="note">Functional, but <code>.env</code>-only — see priority gap #8.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui"><span class="na">N/A — backend/infra</span></span><div class="req-body"><b>On-prem data residency (no unexpected cloud dependency)</b><span class="note">No AWS/GCP/Azure/OpenAI/Anthropic calls found in core code</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui"><span class="na">N/A — cross-cutting, all forms</span></span><div class="req-body"><b>Input validation on APIs and forms</b><span class="note">Consistent Pydantic usage — general assessment, not exhaustive</span></div></div>
+</div>
+
+<div class="module">
+  <div class="module-head"><span class="idx">II</span><h3>Secondary Modules — Data Migration, Admin Console, MIS</h3><span class="part">Part II</span></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Assets → Data Import</span><div class="req-body"><b>Data migration with row-level error reporting, no silent skips</b><span class="note">Import flow exists but is framed around new Testing Requests, not a generic historical-records loader.</span></div></div>
+  <div class="req"><span class="pill exists">Exists</span><span class="req-ui">Organisation → Threshold Config / Notification Center</span><div class="req-body"><b>Threshold / escalation / schedule-rule config without code changes</b><span class="note"><code>routers/threshold_config.py</code>; notification routing rules</span></div></div>
+  <div class="req"><span class="pill partial">Partial</span><span class="req-ui">Organisation → Reporting Center</span><div class="req-body"><b>7 named MIS reports</b><span class="note">Several map to real query keys; "AI Advisory Summary" is not registered. ("Procurement Status" report is out of scope for this phase — not counted as a gap.)</span></div></div>
+  <div class="req"><span class="pill missing">Missing</span><span class="req-ui"><span class="na">No UI (n/a)</span></span><div class="req-body"><b>7-year report archive</b><span class="note">Same retention gap as the audit log.</span></div></div>
+</div>
+
+<footer>
+  Compiled from 6 independent codebase audits against <code>C:\Yesu\CustomerAPI\Customer-API</code> and <code>C:\Yesu\coginiwattcustomer</code>. "Partial" means the underlying mechanism exists but doesn't match the spec's exact shape, scope, or dimensions — not a judgment on build quality. File:line citations are as reported by each audit pass and worth spot-checking before treating any single line as final.<br><br>
+  Procurement is out of scope for this phase per current project direction — any spec requirement that pairs another capability with a procurement trigger (auto-escalation, auto-dispatch, the Procurement Status MIS report) is noted inline rather than counted as a real gap; procurement being manual today is by design, not an oversight.
+</footer>
+
+</div>
+
+</body></html>
