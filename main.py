@@ -920,9 +920,11 @@ def _check_schedule_notifications():
                             "request.number": getattr(first_tr, "request_number", "") or "",
                             "equipment.ueic": eq_label,
                             "equipment.department": dept_name,
+                            "dept.name": dept_name,
                             "days_overdue": str(first_days),
                             "deadline": str(first_deadline),
                             "digest_count": str(len(group)),
+                            "digest_table": NotificationService.build_stage_overdue_digest_table(group),
                         },
                         organization_id=org_id,
                         department_id=dept_id,
@@ -1018,13 +1020,17 @@ def _check_review_sla_breaches():
             hours_overdue = (now - deadline).total_seconds() / 3600
             eq_obj = getattr(tr, "equipment", None)
             dept_obj = getattr(tr, "department", None)
+            dept_name = getattr(dept_obj, "name", "") or ""
+            days_overdue = hours_overdue / 24
 
             # Roles resolved from THIS stage's actual configuration, not the
-            # wf_stage_overdue template's own hardcoded role list -- those
-            # names (AEE_MAINTENANCE / Reviewing Officer / ...) don't match
-            # every org's real role names (the same class of bug found
-            # earlier in the CAR escalation path), so an override is the
-            # only way this reliably reaches anyone.
+            # wf_stage_overdue template's own hardcoded role list -- a fixed
+            # role list can't match every org's real role names (the same
+            # class of bug found earlier in the CAR escalation path, and the
+            # reason the template's own fallback roles were themselves wrong
+            # until they were corrected to AEE_MAINTENANCE/EE_TLSS), so an
+            # override is the only way this reliably reaches anyone across
+            # orgs with different role naming.
             stage_roles = (
                 db.query(TrWfStageRole)
                 .filter(TrWfStageRole.stage_id == stage.id)
@@ -1039,10 +1045,14 @@ def _check_review_sla_breaches():
                         "stage.name": stage.name or "",
                         "request.number": getattr(tr, "request_number", "") or "",
                         "equipment.ueic": getattr(eq_obj, "ueic", "") or "",
-                        "equipment.department": getattr(dept_obj, "name", "") or "",
-                        "days_overdue": f"{hours_overdue / 24:.2f}",
+                        "equipment.department": dept_name,
+                        "dept.name": dept_name,
+                        "days_overdue": f"{days_overdue:.2f}",
                         "deadline": deadline.isoformat(),
                         "digest_count": "1",
+                        "digest_table": NotificationService.build_stage_overdue_digest_table(
+                            [(si, stage, tr, days_overdue, deadline)]
+                        ),
                     },
                     organization_id=getattr(tr, "organization_id", None),
                     department_id=getattr(tr, "department_id", None),
