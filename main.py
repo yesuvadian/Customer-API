@@ -845,11 +845,23 @@ def _check_schedule_notifications():
         # ── Pass 4: Workflow stage SLA breach ────────────────────────────────
         #
         # Finds TrWfStageInstance rows that are still in_progress but have been
-        # running longer than their stage's default_duration_days.
+        # running longer than their stage's configured duration -- hours takes
+        # precedence over days when both are set (same rule the Workflow
+        # Configuration UI and the Result Review job use). Previously this
+        # pass only ever read default_duration_days, so a non-Result-Review
+        # stage with only Duration (hours) configured was silently never
+        # checked for overdue at all.
+        #
+        # Still runs once daily (this job's own cron schedule, unchanged) --
+        # an hours-level SLA on one of these stages is now correctly counted,
+        # but a breach can still sit unflagged for up to ~24h before this
+        # pass catches it, unlike the 15-minute Result Review job below.
+        #
         # Fires wf_stage_overdue (alert 1–3 days, critical >3 days).
         try:
             from models import TrWfStageInstance, TrWfStage, TrWfInstance
             from datetime import datetime as _dt4
+            from sqlalchemy import or_ as _or4
 
             stage_instances = (
                 db.query(TrWfStageInstance)
@@ -858,27 +870,36 @@ def _check_schedule_notifications():
                 .filter(
                     TrWfStageInstance.status == "in_progress",
                     TrWfStageInstance.started_at.isnot(None),
-                    TrWfStage.default_duration_days.isnot(None),
+                    _or4(
+                        TrWfStage.default_duration_hours.isnot(None),
+                        TrWfStage.default_duration_days.isnot(None),
+                    ),
                     # Result Review stages are owned by the more frequent
                     # (15-minute) _check_review_sla_breaches job below, which
                     # is hour-precision and understands default_duration_hours
-                    # -- this once-daily, date-truncated pass would otherwise
-                    # double-fire the same breach with a less precise deadline.
+                    # -- this once-daily pass would otherwise double-fire the
+                    # same breach with a less precise deadline.
                     TrWfStage.is_result_stage.is_(False),
                 )
                 .all()
             )
 
+            now4 = _dt4.utcnow()
+
             # Group overdue instances by (org_id, dept_id)
             stage_digest: dict = _ddict(list)
             for si in stage_instances:
                 stage = si.stage
-                if not stage or not stage.default_duration_days:
+                if not stage or (stage.default_duration_hours is None and not stage.default_duration_days):
                     continue
-                deadline = si.started_at.date() + timedelta(days=stage.default_duration_days)
-                if today <= deadline:
+                duration_hours = (
+                    stage.default_duration_hours if stage.default_duration_hours is not None
+                    else stage.default_duration_days * 24
+                )
+                deadline = si.started_at + timedelta(hours=duration_hours)
+                if now4 <= deadline:
                     continue
-                days_overdue = (today - deadline).days
+                days_overdue = round((now4 - deadline).total_seconds() / 86400, 2)
 
                 wf_instance = si.wf_instance
                 tr = getattr(wf_instance, "testing_request", None)
