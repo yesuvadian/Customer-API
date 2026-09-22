@@ -973,8 +973,9 @@ def _check_review_sla_breaches():
     try:
         from models import TrWfStageInstance, TrWfStage, TrWfStageRole
         from services.notification_service import NotificationService
-        from datetime import datetime as _dt5, timezone as _tz5, timedelta
+        from datetime import datetime as _dt5, timezone as _tz5
         from sqlalchemy import or_ as _or5
+        from utils.business_days import add_business_hours
 
         now = _dt5.now(_tz5.utc)
         candidates = (
@@ -1001,10 +1002,15 @@ def _check_review_sla_breaches():
             if started_at.tzinfo is None:
                 started_at = started_at.replace(tzinfo=_tz5.utc)
 
-            if stage.default_duration_hours is not None:
-                deadline = started_at + timedelta(hours=stage.default_duration_hours)
-            else:
-                deadline = started_at + timedelta(days=stage.default_duration_days)
+            duration_hours = (
+                stage.default_duration_hours if stage.default_duration_hours is not None
+                else stage.default_duration_days * 24
+            )
+            # Weekends don't count against the SLA clock -- same
+            # add_business_hours the dashboard's review_sla_pct tile and the
+            # Monthly Result Review Compliance Report now use, so all three
+            # agree on what "overdue" means.
+            deadline = add_business_hours(started_at, duration_hours)
             if now <= deadline:
                 continue
 

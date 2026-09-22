@@ -30,7 +30,7 @@ from database import get_db
 from models import User
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
 from category_labels import TrWfOutcomeColors
-from utils.business_days import business_days_between
+from utils.business_days import business_days_between, add_business_hours
 
 router = APIRouter(
     prefix="/dashboard",
@@ -1335,10 +1335,12 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         review_sla_total = len(review_rows)
         review_sla_compliant = 0
         for started_at, completed_at, dur_hours, dur_days in review_rows:
-            deadline = (
-                started_at + timedelta(hours=dur_hours)
-                if dur_hours is not None
-                else started_at + timedelta(days=dur_days)
+            # Weekends don't count against the SLA clock -- same
+            # add_business_hours the escalation-matrix notification job and
+            # the Monthly Result Review Compliance Report use, so this tile
+            # agrees with what actually got flagged as overdue.
+            deadline = add_business_hours(
+                started_at, dur_hours if dur_hours is not None else dur_days * 24
             )
             if completed_at <= deadline:
                 review_sla_compliant += 1
@@ -1424,10 +1426,12 @@ def _build_department_rollup(db: Session, svc: DashboardService,
 
         breaches = []
         for si, stage, tr in rows:
-            deadline = (
-                si.started_at + timedelta(hours=stage.default_duration_hours)
-                if stage.default_duration_hours is not None
-                else si.started_at + timedelta(days=stage.default_duration_days)
+            # Same add_business_hours as review_sla_pct above and the
+            # escalation-matrix job -- weekends don't count against the SLA.
+            deadline = add_business_hours(
+                si.started_at,
+                stage.default_duration_hours if stage.default_duration_hours is not None
+                else stage.default_duration_days * 24,
             )
             if si.completed_at <= deadline:
                 continue
