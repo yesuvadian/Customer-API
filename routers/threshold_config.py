@@ -667,7 +667,7 @@ def update_failure_cohort_thresholds(
         row = FailureCohortThresholdConfig(
             organization_id=current_user.organization_id,
             min_failure_rate=default_row.min_failure_rate if default_row else 1.0,
-            min_cohort_units=default_row.min_cohort_units if default_row else 3,
+            min_cohort_units=default_row.min_cohort_units if default_row else 4,
             outlier_z_score=default_row.outlier_z_score if default_row else 3.0,
         )
         db.add(row)

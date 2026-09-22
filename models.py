@@ -5573,7 +5573,11 @@ class FailureCohortThresholdConfig(Base):
         index=True,
     )
     min_failure_rate = Column(Numeric(5, 2), nullable=False, default=1.0)
-    min_cohort_units = Column(Integer, nullable=False, default=3)
+    # >=4 so every cohort that clears this floor also clears the >=4-unit
+    # floor equipment_service.py's within-cohort outlier detection needs --
+    # a 3-unit cohort could otherwise get an is_design_problem_candidate
+    # flag with no per-unit is_outlier verdict able to explain it.
+    min_cohort_units = Column(Integer, nullable=False, default=4)
     # Within-cohort outlier detection (KPTCL spec §2/12.3): a unit whose own
     # failure_count Z-score against its cohort's mean/stdev clears this
     # threshold is flagged is_outlier. Same default as the unrelated

@@ -238,7 +238,11 @@ CALIBRATION_INTERVAL_MIN_MONTHS = int(os.getenv("CALIBRATION_INTERVAL_MIN_MONTHS
 # make/model cohort, so this is computed separately.
 # Minimum units a (type, make, model) cohort needs before its failure rate
 # is surfaced — a 1-2 unit "cohort" isn't a real reliability signal yet.
-FAILURE_COHORT_MIN_UNITS = int(os.getenv("FAILURE_COHORT_MIN_UNITS", 3))
+# Matches equipment_service.py's own >=4-unit floor for within-cohort
+# outlier detection, so a cohort small enough to appear here can always
+# also get a per-unit is_outlier/outlier_z_score verdict, never a
+# DESIGN PROBLEM flag with no unit-level explanation behind it.
+FAILURE_COHORT_MIN_UNITS = int(os.getenv("FAILURE_COHORT_MIN_UNITS", 4))
 # How many of the worst cohorts (by failure rate) to surface on the
 # Overall Dashboard panel.
 FAILURE_COHORT_DASHBOARD_LIMIT = int(os.getenv("FAILURE_COHORT_DASHBOARD_LIMIT", 8))
