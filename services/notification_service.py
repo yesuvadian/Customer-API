@@ -3753,6 +3753,42 @@ class NotificationService:
             f"</table>"
         )
 
+    @staticmethod
+    def build_stage_overdue_digest_table(group: list) -> str:
+        """
+        Build the HTML table injected as {{digest_table}} for wf_stage_overdue
+        (both the 15-minute Result Review SLA check and the daily stage-SLA
+        digest pass -- neither previously supplied {{digest_table}}, so it
+        rendered as a literal, unresolved placeholder in every breach email).
+
+        ``group`` -- list of (stage_instance, stage, testing_request,
+        days_overdue, deadline) tuples, the same shape both callers already
+        build for themselves.
+        """
+        TD = "padding:6px 10px;border:1px solid #ddd;font-size:13px"
+        TH = ("padding:6px 10px;border:1px solid #ddd;background:#1E3C72;"
+              "color:#fff;font-size:13px;text-align:left")
+        headers = "".join(
+            f"<th style='{TH}'>{h}</th>"
+            for h in ("Stage", "Request", "Equipment", "Days Overdue", "Deadline")
+        )
+        rows_html = "".join(
+            "<tr>"
+            f"<td style='{TD}'>{(stage.name or '') if stage else ''}</td>"
+            f"<td style='{TD}'>{getattr(tr, 'request_number', '') or ''}</td>"
+            f"<td style='{TD}'>{getattr(getattr(tr, 'equipment', None), 'ueic', '') or ''}</td>"
+            f"<td style='{TD}'>{days_overdue:.1f}</td>"
+            f"<td style='{TD}'>{deadline}</td>"
+            "</tr>"
+            for _si, stage, tr, days_overdue, deadline in group
+        )
+        return (
+            f"<table cellspacing='0' style='border-collapse:collapse;width:100%'>"
+            f"<tr>{headers}</tr>"
+            f"{rows_html}"
+            f"</table>"
+        )
+
     def _fire_schedule_notification(self, request, event_type: str, severity: str) -> None:
         """
         Shared helper for all scheduler-fired notifications.

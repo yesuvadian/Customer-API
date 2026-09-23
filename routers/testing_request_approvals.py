@@ -1189,6 +1189,7 @@ def tr_wf_get_audit_log(
     from datetime import timedelta
     from models import TrWfAuditLog, TrWfStage, TrWfInstance, TrWfStageInstance, User as UserModel
     from services.tr_workflow_routing_service import stage_mapped_roles
+    from utils.business_days import add_business_hours
 
     req = db.query(TestingRequest).filter(TestingRequest.id == request_id).first()
 
@@ -1248,10 +1249,18 @@ def tr_wf_get_audit_log(
                 best = si
         if not best:
             return None, None
+        duration_hours = (
+            stage.default_duration_hours if stage.default_duration_hours is not None
+            else stage.default_duration_days * 24
+        )
+        # Result Review stages skip weekends (same add_business_hours the
+        # escalation-matrix job / dashboard tile / compliance report use);
+        # every other stage keeps plain calendar-time SLA math, matching the
+        # once-daily Pass-4 stage-overdue job's own scope for non-result stages.
         deadline = (
-            best.started_at + timedelta(hours=stage.default_duration_hours)
-            if stage.default_duration_hours is not None
-            else best.started_at + timedelta(days=stage.default_duration_days)
+            add_business_hours(best.started_at, duration_hours)
+            if stage.is_result_stage
+            else best.started_at + timedelta(hours=duration_hours)
         )
         if best.completed_at <= deadline:
             return False, 0.0

@@ -239,11 +239,12 @@ class DprProjectService:
     # ========================================
 
     def _get_project(self, project_id: UUID, user: User) -> DprProject:
-        project = self.db.query(DprProject).filter(DprProject.id == project_id).first()
+        project = self.db.query(DprProject).filter(
+            DprProject.id == project_id,
+            DprProject.organization_id == user.organization_id,
+        ).first()
         if not project:
             raise ValueError("DPR project not found.")
-        if user.organization_id and project.organization_id != user.organization_id:
-            raise ValueError("Unauthorized DPR project access.")
         return project
 
     def get_project(self, project_id: UUID, user: User) -> dict:
@@ -267,9 +268,7 @@ class DprProjectService:
         skip: int = 0,
         limit: int = 100,
     ) -> list[dict]:
-        q = self.db.query(DprProject)
-        if user.organization_id:
-            q = q.filter(DprProject.organization_id == user.organization_id)
+        q = self.db.query(DprProject).filter(DprProject.organization_id == user.organization_id)
         if status and status != "all":
             q = q.filter(DprProject.status == status)
         if stage_code:
@@ -351,6 +350,21 @@ class DprProjectService:
         workflow_id = project.workflow_id or project.intake_workflow_id
         if not workflow_id:
             raise ValueError("No workflow found for this project.")
+
+        if in_intake:
+            intake = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+            if intake and intake.status == "completed":
+                # Recovery: a previous call already advanced the intake to
+                # 'completed' (advance_stage commits that internally) but
+                # runtime workflow creation never finished -- e.g. it
+                # raised before the commit below ran. advance_stage would
+                # now just fail ("Workflow is not active") if called
+                # again, so finish the interrupted step directly instead.
+                runtime_wf = self._create_runtime_workflow(project, user)
+                project.workflow_id = runtime_wf.id
+                self._sync_stage(project)
+                self.db.commit()
+                return {"message": "Workflow completed", "status": "completed", "progress": 100}
 
         result = self.workflow.advance_stage(workflow_id, remarks, user.id, action_label="approve")
 

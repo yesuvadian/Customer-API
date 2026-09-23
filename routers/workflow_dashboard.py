@@ -291,6 +291,7 @@ def get_workflow_dashboard(
         db.query(
             RepairWorkflow.id,
             RepairWorkflow.workflow_code,
+            RepairWorkflow.workflow_number,
             Equipment.ueic,
             RepairStageDefinition.name.label("stage_name"),
             RepairStageInstance.started_at,
@@ -314,7 +315,9 @@ def get_workflow_dashboard(
         .all()
     )
 
-    for wf_id, wf_code, ueic, stage_name, started_at, duration_days in overdue_workflows:
+    for (
+        wf_id, wf_code, wf_number, ueic, stage_name, started_at, duration_days,
+    ) in overdue_workflows:
         # Ensure started_at is timezone-aware (assume UTC if naive)
         if started_at.tzinfo is None:
             started_at = started_at.replace(tzinfo=timezone.utc)
@@ -328,6 +331,7 @@ def get_workflow_dashboard(
                 "severity": "high",
                 "workflow_id": str(wf_id),
                 "workflow_code": wf_code,
+                "workflow_number": wf_number,
                 "equipment": ueic,
                 "stage_name": stage_name,
                 "message": f"{stage_name} overdue by {days_overdue} day(s)",
@@ -336,6 +340,15 @@ def get_workflow_dashboard(
 
     # Sort alerts by days_overdue (most overdue first)
     alerts.sort(key=lambda x: x.get("days_overdue", 0), reverse=True)
+
+    overdue_by_code: dict[str, int] = {}
+    for a in alerts:
+        code = a.get("workflow_code") or ""
+        overdue_by_code[code] = overdue_by_code.get(code, 0) + 1
+
+    for wt in workflow_types:
+        wt["overdue"] = overdue_by_code.get(wt["code"], 0)
+    totals["overdue"] = len(alerts)
 
     # ── 7. Per-department breakdown ───────────────────────────────────────────
     # Get workflow counts grouped by equipment's department + workflow_code + status
@@ -454,6 +467,6 @@ def get_workflow_dashboard(
         "stage_breakdown":   stage_breakdown,
         "equipment_at_risk": equipment_at_risk,
         "recent_activity":   recent_activity,
-        "alerts":            alerts[:10],
+        "alerts":            alerts,
         "by_department":     by_department,
     }

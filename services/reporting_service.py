@@ -1094,13 +1094,58 @@ def run_scheduled_reports(db_factory) -> int:
                 svc = ReportingService(db, defn.organization_id)
                 fmt = defn.output_format if defn.output_format in ("excel", "pdf") \
                       else "excel"
-                svc.generate(defn.id, {}, fmt)
+                _raw, filename, _content_type = svc.generate(defn.id, {}, fmt)
                 count += 1
+                if defn.notification_event:
+                    _fire_report_ready(db, defn, filename, fmt)
             except Exception as exc:
                 print(f"[Reports] Scheduled '{defn.name}' failed: {exc}")
     finally:
         db.close()
     return count
+
+
+def _fire_report_ready(db: Session, defn: ReportDefinition, filename: str, fmt: str) -> None:
+    """
+    Notify defn.notification_event's recipients that a scheduled report finished.
+
+    The 14 SRS report definitions are seeded once globally (organization_id
+    IS NULL) rather than one row per org -- but NotificationService recipient
+    resolution requires an organization_id to look up OrgRole/OrgUserRole
+    rows, so firing with org_id=None silently resolves to zero recipients.
+    Fire once per active organization in that case; definitions that already
+    carry their own organization_id (ad-hoc/per-org reports) fire once, as
+    normal.
+    """
+    from services.notification_service import NotificationService
+    from models import Organization
+
+    context = {
+        "report_name":   defn.name,
+        "report_period": datetime.now(timezone.utc).strftime("%B %Y"),
+        "download_url":  f"/reports/download/{filename}",
+        "format":        fmt,
+    }
+
+    if defn.organization_id:
+        org_ids = [defn.organization_id]
+    else:
+        org_ids = [
+            o.id for o in
+            db.query(Organization).filter(Organization.is_active.is_(True)).all()
+        ]
+
+    nsvc = NotificationService(db)
+    for org_id in org_ids:
+        try:
+            nsvc.fire(
+                event_type=defn.notification_event,
+                context=context,
+                organization_id=org_id,
+            )
+        except Exception as exc:
+            print(f"[Reports] notification_event '{defn.notification_event}' fire "
+                  f"failed for '{defn.name}' org={org_id}: {exc}")
 
 
 def _is_due(defn: ReportDefinition, now: datetime) -> bool:
