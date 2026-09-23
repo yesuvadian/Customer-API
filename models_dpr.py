@@ -92,6 +92,19 @@ class DprProject(Base):
         nullable=True,
         index=True,
     )
+
+    # Intake approval chain (RepairWorkflowDefinition workflow_code=
+    # DPR_INTAKE, 2 stages by default, admin-configurable) — created at
+    # project creation time, gates BEFORE the real 5-stage DPR_APPROVAL
+    # workflow above even starts. Mirrors PreCommissionRequest.
+    # intake_workflow_id — see that model/alter_precommission_intake_
+    # workflow.py for the same idiom at larger scale.
+    intake_workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repair_workflows.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     # Denormalized from RepairWorkflow.current_stage -> RepairStageDefinition
     # .code after every stage transition (DprProjectService._sync_stage,
     # mirroring AnnualAuditService._sync_stage) — lets list views filter by

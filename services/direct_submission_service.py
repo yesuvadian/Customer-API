@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from config import MAX_DOCUMENT_UPLOAD_MB
 from utils.upload_limits import read_and_validate_upload
+from utils.sequence_locks import TESTING_REQUEST_NUMBER_LOCK
 
 from category_labels import RequestCategoryFullLabels
 from models import (
@@ -186,107 +187,113 @@ class DirectSubmissionService:
         else:
             request_type = category.value  # e.g. "taqc_inspection"
 
-        req = TestingRequest(
-            request_number=self._generate_request_number(category, org_id=org_id),
-            title=data.get("title") or f"{RequestCategoryFullLabels.get(category.value)} Report",
-            description=data.get("description"),
-            request_category=category,
-            request_type=request_type,
-            equipment_id=data.get("equipment_id"),
-            organization_id=org_id,
-            department_id=dept_id,
-            priority=data.get("priority", "normal"),
-            notes=data.get("notes"),
-            due_date=_due_date,
-            status=TestingRequestStatus.submitted,
-            is_direct_submission=True,
-            originator_id=submitter.id,
-            created_by=submitter.id,
-            requested_date=now,
-        )
-        self.db.add(req)
-        self.db.flush()
-        WorkflowRoutingService(self.db).instantiate_workflow(req, performed_by_id=submitter.id)
-
-        # ── Recommendation ────────────────────────────────────────────────────
-        if category == RequestCategory.failure_registry:
-            rec_type    = _WIZARD_REC_TYPE.get(_td.get("recommendation_type", ""), RecommendationType.fail)
-            next_action = _WIZARD_ACTION.get(_td.get("next_action", ""))
-            sched_freq  = _WIZARD_FREQ.get(_td.get("outcome_frequency", ""))
-            repl_prods  = data.get("replacement_products") or []
-            summary     = _td.get("outcome_summary") or f"[FR] {req.request_number}"
-            detailed    = _td.get("outcome_notes") or data.get("remarks")
-        else:
-            _result_map = {
-                "pass": RecommendationType.pass_test, "conditional_pass": RecommendationType.conditional,
-                "fail": RecommendationType.fail, "advisory": RecommendationType.conditional,
-                "retest": RecommendationType.retest,
-            }
-            rec_type    = _result_map.get((data.get("overall_result") or "advisory").lower(), RecommendationType.conditional)
-            next_action = None
-            # TAQC: capture inspection frequency — top-level preferred, test_data as fallback
-            _raw_freq = data.get("schedule_frequency") or _td.get("schedule_frequency") or "yearly"
-            # Normalize display labels to enum keys (e.g. "Semi-Annual (every 6 months)" → "semi_annual")
-            _norm_freq = _raw_freq.lower().replace("-", "_").replace(" ", "_").split("_every_")[0].split("_(")[0].strip("_")
-            sched_freq = _WIZARD_FREQ.get(_norm_freq) or _WIZARD_FREQ.get(_raw_freq.lower()) or ScheduleFrequency.yearly
-            repl_prods  = []
-            summary     = f"[Direct Submission] {RequestCategoryFullLabels.get(category.value)} — {req.request_number}"
-            detailed    = data.get("remarks")
-
-        rec = Recommendation(
-            testing_request_id=req.id,
-            organization_id=org_id,
-            recommendation_type=rec_type,
-            next_action=next_action,
-            schedule_frequency=sched_freq,
-            test_types=_td.get("test_types") or None,
-            replacement_products=repl_prods,
-            summary=summary,
-            detailed_notes=detailed,
-            approval_status="pending",
-            submitted_by=submitter.id,
-            submitted_at=now,
-            created_by=submitter.id,
-        )
-        self.db.add(rec)
-        self.db.flush()  # get rec.id
-
-        # ── FR: store template fields + recommendation snapshot in form_data ──
-        if category == RequestCategory.failure_registry:
-            req.form_data = {
-                **_td,
-                "recommendation": {
-                    "id":                  str(rec.id),
-                    "recommendation_type": _td.get("recommendation_type"),
-                    "next_action":         _td.get("next_action"),
-                    "test_types":          _td.get("test_types", []),
-                    "schedule_frequency":  _td.get("outcome_frequency"),
-                    "summary":             summary,
-                    "notes":               detailed,
-                    "replacement_products": repl_prods,
-                },
-            }
-            flag_modified(req, "form_data")
-
-        # ── TestResult — created for both TAQC and Failure Registry ─────────────
-        # Failure Registry needs a TestResult row so that attach_file() has
-        # somewhere to store the supporting document uploaded at submission time.
-        result = None
-        if category in (RequestCategory.taqc_inspection, RequestCategory.failure_registry):
-            result = TestResult(
-                testing_request_id=req.id,
-                template_key=data.get("template_key", category.value),
-                test_name=data.get("title") or RequestCategoryFullLabels.get(category.value),
-                test_category=category.value,
-                test_data=_td,
-                overall_result=data.get("overall_result") or "advisory",
-                remarks=data.get("remarks"),
-                tested_by=submitter.id,
-                tested_at=now,
+        # request_number is generated from a read-count-then-insert query
+        # (see utils/sequence_locks.py) shared with every other service that
+        # also writes TestingRequest.request_number - serialize generate
+        # through commit so no two threads anywhere can read the same count
+        # before one has committed.
+        with TESTING_REQUEST_NUMBER_LOCK:
+            req = TestingRequest(
+                request_number=self._generate_request_number(category, org_id=org_id),
+                title=data.get("title") or f"{RequestCategoryFullLabels.get(category.value)} Report",
+                description=data.get("description"),
+                request_category=category,
+                request_type=request_type,
+                equipment_id=data.get("equipment_id"),
+                organization_id=org_id,
+                department_id=dept_id,
+                priority=data.get("priority", "normal"),
+                notes=data.get("notes"),
+                due_date=_due_date,
+                status=TestingRequestStatus.submitted,
+                is_direct_submission=True,
+                originator_id=submitter.id,
+                created_by=submitter.id,
+                requested_date=now,
             )
-            self.db.add(result)
+            self.db.add(req)
+            self.db.flush()
+            WorkflowRoutingService(self.db).instantiate_workflow(req, performed_by_id=submitter.id)
 
-        self.db.commit()
+            # ── Recommendation ────────────────────────────────────────────────────
+            if category == RequestCategory.failure_registry:
+                rec_type    = _WIZARD_REC_TYPE.get(_td.get("recommendation_type", ""), RecommendationType.fail)
+                next_action = _WIZARD_ACTION.get(_td.get("next_action", ""))
+                sched_freq  = _WIZARD_FREQ.get(_td.get("outcome_frequency", ""))
+                repl_prods  = data.get("replacement_products") or []
+                summary     = _td.get("outcome_summary") or f"[FR] {req.request_number}"
+                detailed    = _td.get("outcome_notes") or data.get("remarks")
+            else:
+                _result_map = {
+                    "pass": RecommendationType.pass_test, "conditional_pass": RecommendationType.conditional,
+                    "fail": RecommendationType.fail, "advisory": RecommendationType.conditional,
+                    "retest": RecommendationType.retest,
+                }
+                rec_type    = _result_map.get((data.get("overall_result") or "advisory").lower(), RecommendationType.conditional)
+                next_action = None
+                # TAQC: capture inspection frequency — top-level preferred, test_data as fallback
+                _raw_freq = data.get("schedule_frequency") or _td.get("schedule_frequency") or "yearly"
+                # Normalize display labels to enum keys (e.g. "Semi-Annual (every 6 months)" → "semi_annual")
+                _norm_freq = _raw_freq.lower().replace("-", "_").replace(" ", "_").split("_every_")[0].split("_(")[0].strip("_")
+                sched_freq = _WIZARD_FREQ.get(_norm_freq) or _WIZARD_FREQ.get(_raw_freq.lower()) or ScheduleFrequency.yearly
+                repl_prods  = []
+                summary     = f"[Direct Submission] {RequestCategoryFullLabels.get(category.value)} — {req.request_number}"
+                detailed    = data.get("remarks")
+
+            rec = Recommendation(
+                testing_request_id=req.id,
+                organization_id=org_id,
+                recommendation_type=rec_type,
+                next_action=next_action,
+                schedule_frequency=sched_freq,
+                test_types=_td.get("test_types") or None,
+                replacement_products=repl_prods,
+                summary=summary,
+                detailed_notes=detailed,
+                approval_status="pending",
+                submitted_by=submitter.id,
+                submitted_at=now,
+                created_by=submitter.id,
+            )
+            self.db.add(rec)
+            self.db.flush()  # get rec.id
+
+            # ── FR: store template fields + recommendation snapshot in form_data ──
+            if category == RequestCategory.failure_registry:
+                req.form_data = {
+                    **_td,
+                    "recommendation": {
+                        "id":                  str(rec.id),
+                        "recommendation_type": _td.get("recommendation_type"),
+                        "next_action":         _td.get("next_action"),
+                        "test_types":          _td.get("test_types", []),
+                        "schedule_frequency":  _td.get("outcome_frequency"),
+                        "summary":             summary,
+                        "notes":               detailed,
+                        "replacement_products": repl_prods,
+                    },
+                }
+                flag_modified(req, "form_data")
+
+            # ── TestResult — created for both TAQC and Failure Registry ─────────────
+            # Failure Registry needs a TestResult row so that attach_file() has
+            # somewhere to store the supporting document uploaded at submission time.
+            result = None
+            if category in (RequestCategory.taqc_inspection, RequestCategory.failure_registry):
+                result = TestResult(
+                    testing_request_id=req.id,
+                    template_key=data.get("template_key", category.value),
+                    test_name=data.get("title") or RequestCategoryFullLabels.get(category.value),
+                    test_category=category.value,
+                    test_data=_td,
+                    overall_result=data.get("overall_result") or "advisory",
+                    remarks=data.get("remarks"),
+                    tested_by=submitter.id,
+                    tested_at=now,
+                )
+                self.db.add(result)
+
+            self.db.commit()
         self.db.refresh(req)
 
         try:

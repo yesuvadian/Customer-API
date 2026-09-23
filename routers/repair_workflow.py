@@ -16,6 +16,7 @@ from schemas import (
     RepairAdvanceRequest,
     RepairAssignRequest,
     RepairCancelRequest,
+    RepairOverrideRequest,
     RepairSaveDataRequest,
     RepairSubmitRequest,
     RepairStageCreate,
@@ -447,6 +448,29 @@ def available_transitions(
         return RepairWorkflowService(db).get_available_transitions(workflow_id, user.id)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@router.post("/{workflow_id}/override")
+def override_workflow(
+    workflow_id: UUID,
+    payload: RepairOverrideRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Supervisory override: force-move a stuck workflow to target_stage_id
+    (or close it entirely when target_stage_id is omitted), bypassing the
+    normal RepairStageTransition graph. Requires RepairWorkflowOverrideRole
+    for this workflow's type and a non-blank justification -- see
+    RepairWorkflowService.override_stage's own docstring for the full
+    mechanics (forward-only, skipped stages marked skipped_by_override).
+    """
+    try:
+        return RepairWorkflowService(db).override_stage(
+            workflow_id, payload.target_stage_id, payload.justification, user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.post("/{workflow_id}/cancel")

@@ -1063,6 +1063,16 @@ class TestingRequestCreate(BaseModel):
     total_sessions_planned: Optional[int] = None
     session_interval_days: Optional[int] = None
 
+    # Calibration flag — optional. The caller (the frontend, which already
+    # has the exact template it rendered for this test_type_id, including
+    # its enable_calibration/DATE_ADD rule flags) can tell the backend
+    # directly instead of the backend re-deriving "which template applies"
+    # itself from test_type_id + org_id. Left unset (None), the backend
+    # falls back to TestingRequestService._resolve_is_calibration() for
+    # backward compatibility with callers that don't set this yet (e.g.
+    # data imports).
+    is_calibration: Optional[bool] = None
+
 class TestingRequestUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
@@ -2706,6 +2716,13 @@ class RepairSubmitRequest(BaseModel):
 
 class RepairCancelRequest(BaseModel):
     reason: Optional[str] = None
+
+
+class RepairOverrideRequest(BaseModel):
+    # None target_stage_id = close the workflow entirely rather than
+    # jumping to a specific stage.
+    target_stage_id: Optional[UUID] = None
+    justification: str
 
 
 class RepairStageDefResponse(BaseModel):

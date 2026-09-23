@@ -95,8 +95,10 @@ def _stage_out(s: TrWfStage, db: Session = None) -> dict:
         "is_mandatory": s.is_mandatory,
         "is_active": s.is_active,
         "default_duration_days": s.default_duration_days,
+        "default_duration_hours": s.default_duration_hours,
         "show_recommendation": s.show_recommendation,
         "is_result_stage": s.is_result_stage,
+        "auto_close_normal_after_hours": s.auto_close_normal_after_hours,
         "use_l2_route": s.use_l2_route,
         "is_role_scoped": s.is_role_scoped,
         "status": {
@@ -502,6 +504,13 @@ def create_stage(
     current_user: User = Depends(get_current_user),
 ):
     _assert_no_active_instances(db, def_id)
+    duration_days = body.get("default_duration_days")
+    duration_hours = body.get("default_duration_hours")
+    if duration_days is None and duration_hours is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide a stage duration in days or hours.",
+        )
     stage = TrWfStage(
         wf_definition_id=def_id,
         status_id=body.get("status_id"),
@@ -511,7 +520,8 @@ def create_stage(
         weight=body.get("weight", 10),
         is_mandatory=body.get("is_mandatory", True),
         is_active=body.get("is_active", True),
-        default_duration_days=body.get("default_duration_days"),
+        default_duration_days=duration_days,
+        default_duration_hours=duration_hours,
     )
     db.add(stage)
     db.commit()
@@ -532,9 +542,30 @@ def patch_stage(
         raise HTTPException(status_code=404, detail="Stage not found")
     for k in ("name", "code", "sequence", "weight", "status_id",
               "is_mandatory", "is_active", "default_duration_days",
+              "default_duration_hours", "auto_close_normal_after_hours",
               "show_recommendation", "is_result_stage", "use_l2_route", "is_role_scoped"):
         if k in body:
             setattr(stage, k, body[k])
+    # Only re-check "at least one duration required" when this update
+    # actually touches one of the two duration fields — otherwise an
+    # unrelated edit (e.g. rename) on a pre-existing stage that predates
+    # SLA support (both fields still NULL) would be blocked for no reason.
+    if ("default_duration_days" in body or "default_duration_hours" in body) \
+            and stage.default_duration_days is None and stage.default_duration_hours is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide a stage duration in days or hours.",
+        )
+    # auto_close_normal_after_hours only means anything on a result stage
+    # (that's the only place TestResult.evaluation_result is available to
+    # check) — reject rather than silently store a value the auto-close
+    # job would never read.
+    if stage.auto_close_normal_after_hours is not None and not stage.is_result_stage:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Auto-close only applies to a Result Review stage — enable "
+                   "'Result Review Stage' first.",
+        )
     db.commit()
     return _stage_out(_load_stage(db, stage.id), db)
 
@@ -1135,6 +1166,35 @@ def get_post_actions(
     ]
 
 
+@router.get("/options/request-types")
+def get_request_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin-editable picklist for TrWfDefinition.request_type / TestingRequest.
+    request_type -- the columns themselves stay plain strings (compared as
+    such throughout the routing engine); this only supplies the dropdown's
+    options via CategoryDetails, same "Annual Audit Categories" idiom, so
+    adding a new type is a Category Management admin action, not a
+    frontend code change. Seeded by alter_seed_workflow_request_types.py.
+    """
+    rows = (
+        db.query(CategoryDetails.id, CategoryDetails.name, CategoryDetails.description)
+        .join(CategoryMaster, CategoryDetails.category_master_id == CategoryMaster.id)
+        .filter(
+            CategoryDetails.category_type == "workflow_request_type",
+            CategoryDetails.is_active.is_(True),
+        )
+        .order_by(CategoryDetails.name)
+        .all()
+    )
+    return [
+        {"value": r.name, "label": r.name, "description": r.description}
+        for r in rows
+    ]
+
+
 @router.get("/picker-options")
 def get_picker_options(
     db: Session = Depends(get_db),
@@ -1147,6 +1207,7 @@ def get_picker_options(
         "equipment_types": get_equipment_types(db, current_user),
         "test_types": get_test_types(db, current_user),
         "org_roles": get_org_roles(db, current_user),
+        "request_types": get_request_types(db, current_user),
         "action_codes": [
             {"code": code, "label": label}
             for code, label in ACTION_CODE_LABELS.items()

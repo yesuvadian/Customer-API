@@ -10,6 +10,7 @@ from database import get_db
 from models import User, RequestCategory
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
 from models import TestingRequestStatus
+from utils.business_days import business_days_between
 
 OPEN_STATUSES = (
     TestingRequestStatus.submitted,
@@ -151,7 +152,7 @@ def get_ae_dashboard(
 
     upcoming_list = []
     for req in upcoming_db:
-        days_until = (req.due_date.date() - now.date()).days if req.due_date else 0
+        days_until = business_days_between(now.date(), req.due_date.date()) if req.due_date else 0
         upcoming_list.append({
             'id': str(req.id),
             'ueic': req.equipment.ueic if req.equipment else '',
@@ -621,7 +622,7 @@ def get_ee_rt_dashboard(
 
     overdue_cal_escalations = []
     for r in overdue_cal_reqs:
-        days_ov = (now.date() - r.due_date.date()).days if r.due_date else 0
+        days_ov = business_days_between(r.due_date.date(), now.date()) if r.due_date else 0
         priority = 'high' if days_ov >= 30 else ('medium' if days_ov >= 7 else 'low')
         overdue_cal_escalations.append({
             'id': str(r.id),
@@ -644,7 +645,7 @@ def get_ee_rt_dashboard(
     ).order_by(TestingRequest.due_date.asc()).limit(10).all()
 
     for r in expiring_reqs:
-        days_left = (r.due_date.date() - now.date()).days if r.due_date else 0
+        days_left = business_days_between(now.date(), r.due_date.date()) if r.due_date else 0
         expiring_cal_list.append({
             'id': str(r.id),
             'ueic': r.equipment.ueic if r.equipment else '',
@@ -908,7 +909,7 @@ def get_see_rt_dashboard(
 
     overdue_cal_list_see = []
     for req in overdue_cal_see_rt:
-        days_ov = (now.date() - req.due_date.date()).days if req.due_date else 0
+        days_ov = business_days_between(req.due_date.date(), now.date()) if req.due_date else 0
         overdue_cal_list_see.append({
             'id': str(req.id),
             'request_number': req.request_number or '',
@@ -932,7 +933,7 @@ def get_see_rt_dashboard(
 
     expiring_cal_list_see = []
     for req in expiring_cal_see:
-        days_until = (req.due_date.date() - now.date()).days if req.due_date else 0
+        days_until = business_days_between(now.date(), req.due_date.date()) if req.due_date else 0
         expiring_cal_list_see.append({
             'id': str(req.id),
             'request_number': req.request_number or '',
@@ -1145,7 +1146,7 @@ def get_cee_rt_rd_dashboard(
 
     overdue_cal_escalations = []
     for req in overdue_cal_db:
-        days_overdue = (now.date() - req.due_date.date()).days if req.due_date else 0
+        days_overdue = business_days_between(req.due_date.date(), now.date()) if req.due_date else 0
         overdue_cal_escalations.append({
             'id': str(req.id),
             'request_number': req.request_number or '',
@@ -1168,7 +1169,7 @@ def get_cee_rt_rd_dashboard(
 
     expiring_cal_list = []
     for req in expiring_cal_db:
-        days_until = (req.due_date.date() - now.date()).days if req.due_date else 0
+        days_until = business_days_between(now.date(), req.due_date.date()) if req.due_date else 0
         expiring_cal_list.append({
             'id': str(req.id),
             'request_number': req.request_number or '',
@@ -1268,10 +1269,21 @@ def get_test_coordinator_dashboard(
     # 1. KPI Cards (6 cards as per SRS Sec 8.3.2)
     # =========================================================================
     
-    # Total active equipment
+    # Total equipment — excludes retired equipment and Testing Kits (not
+    # real substation assets), matching the AI Analytics Dashboard's
+    # total_equipment definition (routers/analytics.py's real_total_equipment)
+    # so the two dashboards' headline equipment counts stop disagreeing.
+    # dept_cond intentionally not applied here: alert_eq_kpi/critical_eq_kpi
+    # below (this endpoint's other equipment-derived KPIs) are org-wide only
+    # too, so scoping just this one count would make it internally inconsistent
+    # with its own sibling cards.
+    from models import CategoryMaster
+    _testkit_type_ids = [c.id for c in db.query(CategoryMaster.id).filter(
+        CategoryMaster.name.ilike("%testing kit%")).all()]
     total_equipment = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.status == 'active'
+        Equipment.status != 'retired',
+        ~Equipment.equipment_type_id.in_(_testkit_type_ids) if _testkit_type_ids else True,
     ).scalar() or 0
     
     # Test Compliance Rate (%)

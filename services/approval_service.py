@@ -20,6 +20,7 @@ from models import (
     User,
 )
 from utils.common_service import UTCDateTimeMixin
+from utils.sequence_locks import TESTING_REQUEST_NUMBER_LOCK
 
 
 class ApprovalService:
@@ -473,37 +474,43 @@ class ApprovalService:
         and trigger the 10-stage RepairWorkflow for the equipment.
         """
         now = datetime.now(timezone.utc)
-        rn = self._generate_tr_number("RL")
-
         failure_category = td.get("failure_category", "")
         failure_date = td.get("failure_date", "")
         fr_title = source_request.title or source_request.request_number
 
-        # ── RL- ticket (traceability / audit record) ──────────────────────────
-        repair_tr = TestingRequest(
-            request_number=rn,
-            title=f"[Repair] {fr_title}",
-            description=(
-                f"Auto-created from Failure Registry approval.\n"
-                f"Source FR: {source_request.request_number}\n"
-                f"Failure Category: {failure_category}\n"
-                f"Failure Date: {failure_date}"
-            ),
-            request_category=RequestCategory.repair_lifecycle,
-            equipment_id=source_request.equipment_id,
-            organization_id=source_request.organization_id,
-            department_id=source_request.department_id,
-            priority=source_request.priority or "normal",
-            status=TestingRequestStatus.submitted,
-            is_direct_submission=False,
-            source_failure_id=source_request.id,     # traceability FK
-            originator_id=source_request.originator_id,
-            created_by=approver_id,
-            requested_date=now,
-        )
-        self.db.add(repair_tr)
-        self.db.commit()
-        self.db.refresh(repair_tr)
+        # request_number is generated from a read-count-then-insert query
+        # (see utils/sequence_locks.py) shared with every other service that
+        # also writes TestingRequest.request_number - serialize generate
+        # through commit so no two threads anywhere can read the same count
+        # before one has committed.
+        with TESTING_REQUEST_NUMBER_LOCK:
+            rn = self._generate_tr_number("RL")
+
+            # ── RL- ticket (traceability / audit record) ──────────────────
+            repair_tr = TestingRequest(
+                request_number=rn,
+                title=f"[Repair] {fr_title}",
+                description=(
+                    f"Auto-created from Failure Registry approval.\n"
+                    f"Source FR: {source_request.request_number}\n"
+                    f"Failure Category: {failure_category}\n"
+                    f"Failure Date: {failure_date}"
+                ),
+                request_category=RequestCategory.repair_lifecycle,
+                equipment_id=source_request.equipment_id,
+                organization_id=source_request.organization_id,
+                department_id=source_request.department_id,
+                priority=source_request.priority or "normal",
+                status=TestingRequestStatus.submitted,
+                is_direct_submission=False,
+                source_failure_id=source_request.id,     # traceability FK
+                originator_id=source_request.originator_id,
+                created_by=approver_id,
+                requested_date=now,
+            )
+            self.db.add(repair_tr)
+            self.db.commit()
+            self.db.refresh(repair_tr)
 
         # ── Trigger the 10-stage repair workflow ──────────────────────────────
         if source_request.equipment_id:

@@ -28,6 +28,7 @@ from models import (
     RepairStageRole,
     RepairWorkflow,
 )
+from utils.business_days import business_days_between
 
 
 class RepairTimelinessService:
@@ -124,7 +125,11 @@ class RepairTimelinessService:
 
         actual = stage_instance.completed_at.date()
         contracted = stage_instance.contracted_date
-        delay = (actual - contracted).days
+        # Business days (Mon-Fri) — a stage due Friday and completed Monday
+        # is 1 day late, not 3; shared by every workflow type that uses this
+        # stage-engine (Overhaul, Calibration, Annual Audit, Pre-Commission,
+        # Surveillance, Repair itself).
+        delay = business_days_between(contracted, actual)
         stage_instance.delay_days = delay
 
         # On-time or early: clear any stale attribution

@@ -41,6 +41,7 @@ from models import (
     RepairStageTransition,
     RepairWorkflow,
     RepairWorkflowDefinition,
+    RepairWorkflowOverrideRole,
     OrgTestTemplate,
     RequestCategory,
     TAQCObservation,
@@ -49,6 +50,7 @@ from models import (
     TrWfInstance,
     User,
 )
+from utils.sequence_locks import REPAIR_WORKFLOW_NUMBER_LOCK
 
 UPLOAD_DIR = os.path.join("uploads", "repair")
 
@@ -115,6 +117,42 @@ class RepairWorkflowService:
         )
         if not allowed:
             raise ValueError("You do not have approval permission for this stage.")
+
+    def _workflow_definition_id_for(self, stage_id: Optional[UUID]) -> Optional[UUID]:
+        if not stage_id:
+            return None
+        stage = self.db.query(RepairStageDefinition).filter(
+            RepairStageDefinition.id == stage_id
+        ).first()
+        return stage.workflow_definition_id if stage else None
+
+    def _can_override(self, workflow_definition_id: Optional[UUID], user_id: UUID) -> bool:
+        """Workflow-wide override authorization (RepairWorkflowOverrideRole) --
+        deliberately independent of the current stage's can_approve/can_edit/
+        can_assign roles (RepairStageRole). See that model's own docstring.
+
+        A caller holding zero org roles at all is treated as a bypass (same
+        "global admin" convention _check_can_approve/_can_assign_stage
+        already use elsewhere in this service) -- not a special case
+        invented for override.
+        """
+        if not workflow_definition_id:
+            return False
+        role_ids = self._user_org_role_ids(user_id)
+        if not role_ids:
+            return True
+        return (
+            self.db.query(RepairWorkflowOverrideRole)
+            .filter(
+                RepairWorkflowOverrideRole.workflow_definition_id == workflow_definition_id,
+                RepairWorkflowOverrideRole.role_id.in_(role_ids),
+            )
+            .first()
+        ) is not None
+
+    def _check_can_override(self, workflow_definition_id: Optional[UUID], user_id: UUID) -> None:
+        if not self._can_override(workflow_definition_id, user_id):
+            raise ValueError("You do not have override permission for this workflow.")
 
     def _check_is_org_admin(self, user_id: UUID) -> None:
         # Delegates to the single shared org-admin check (auth_utils.
@@ -426,70 +464,75 @@ class RepairWorkflowService:
 
         first_stage = stages[0]
 
-        # GENERATE WORKFLOW NUMBER
-        workflow_number = self.generate_workflow_number()
+        # generate_workflow_number() reads the last workflow_number for
+        # today's prefix then increments it - not atomic on its own (see
+        # utils/sequence_locks.py) - serialize generate through commit so
+        # two concurrent starts can't read the same last sequence.
+        with REPAIR_WORKFLOW_NUMBER_LOCK:
+            # GENERATE WORKFLOW NUMBER
+            workflow_number = self.generate_workflow_number()
 
-        # CREATE WORKFLOW
-        workflow = RepairWorkflow(
-            workflow_number=workflow_number,
-            workflow_code="BREAKDOWN",
-            equipment_id=equipment_id,
-            organization_id=equipment.organization_id,
-            source_failure_id=source_failure_id,
-            current_stage_id=first_stage.id,
-            status="active",
-            assignment_pending=True,
-            progress=0,
-            priority="normal",
-            created_by=user_id,
-        )
-
-        self.db.add(workflow)
-        self.db.flush()
-
-        first_stage_instance = None
-
-        # CREATE STAGE INSTANCES
-        for s in stages:
-
-            is_first = s.id == first_stage.id
-
-            instance = RepairStageInstance(
-                workflow_id=workflow.id,
-                stage_id=s.id,
-                status="pending" if is_first else "not_started",
-                assignment_pending=is_first,
-                started_at=self._utc_now() if is_first else None,
+            # CREATE WORKFLOW
+            workflow = RepairWorkflow(
+                workflow_number=workflow_number,
+                workflow_code="BREAKDOWN",
+                equipment_id=equipment_id,
+                organization_id=equipment.organization_id,
+                source_failure_id=source_failure_id,
+                current_stage_id=first_stage.id,
+                status="active",
+                assignment_pending=True,
+                progress=0,
+                priority="normal",
                 created_by=user_id,
             )
 
-            self.db.add(instance)
+            self.db.add(workflow)
             self.db.flush()
 
-            if is_first:
-                first_stage_instance = instance
+            first_stage_instance = None
 
-        # SET CURRENT STAGE INSTANCE
-        workflow.current_stage_instance_id = (
-            first_stage_instance.id
-            if first_stage_instance
-            else None
-        )
+            # CREATE STAGE INSTANCES
+            for s in stages:
 
-        # CREATE ASSIGNMENT QUEUE
-        self.db.add(
-            RepairAssignmentQueue(
-                workflow_id=workflow.id,
-                stage_id=first_stage.id,
-                status="pending",
+                is_first = s.id == first_stage.id
+
+                instance = RepairStageInstance(
+                    workflow_id=workflow.id,
+                    stage_id=s.id,
+                    status="pending" if is_first else "not_started",
+                    assignment_pending=is_first,
+                    started_at=self._utc_now() if is_first else None,
+                    created_by=user_id,
+                )
+
+                self.db.add(instance)
+                self.db.flush()
+
+                if is_first:
+                    first_stage_instance = instance
+
+            # SET CURRENT STAGE INSTANCE
+            workflow.current_stage_instance_id = (
+                first_stage_instance.id
+                if first_stage_instance
+                else None
             )
-        )
 
-        # UPDATE EQUIPMENT STATUS
-        equipment.status = EquipmentStatus.under_repair
+            # CREATE ASSIGNMENT QUEUE
+            self.db.add(
+                RepairAssignmentQueue(
+                    workflow_id=workflow.id,
+                    stage_id=first_stage.id,
+                    status="pending",
+                )
+            )
 
-        self.db.commit()
-        self.db.refresh(workflow)
+            # UPDATE EQUIPMENT STATUS
+            equipment.status = EquipmentStatus.under_repair
+
+            self.db.commit()
+            self.db.refresh(workflow)
 
         # LOG AUDIT
         self._log_audit(
@@ -824,6 +867,149 @@ class RepairWorkflowService:
         return {
             "message": "Stage approved and advanced",
             "current_stage": next_stage.name if next_stage else None,
+            "progress": workflow.progress,
+        }
+
+    def override_stage(
+        self,
+        workflow_id: UUID,
+        target_stage_id: Optional[UUID],
+        justification: str,
+        user_id: UUID,
+    ) -> dict:
+        """
+        Supervisory override: force-move a stuck workflow forward to
+        target_stage_id (or close it entirely when target_stage_id is None),
+        bypassing whatever RepairStageTransition would otherwise require.
+
+        Deliberately forward-only (target's sequence must be strictly
+        greater than the current stage's, or None to close) -- moving
+        backward already has a real path (reject_stage), and allowing an
+        override to also jump backward would raise ambiguous questions
+        about what happens to stages between the two that were already
+        properly completed. Every stage from the current one up to (but
+        not including) the target is marked 'skipped_by_override' rather
+        than left at whatever status it had, or falsely marked
+        'completed' -- it was never actually done, just bypassed.
+
+        Authorization is RepairWorkflowOverrideRole (workflow-wide, not
+        RepairStageRole) -- see that model's docstring for why. This does
+        NOT also grant can_edit/can_approve/can_assign; it is exactly one
+        action, always logged as its own audit entry with the mandatory
+        justification attached.
+        """
+        if not justification or not justification.strip():
+            raise ValueError("A justification is required to override.")
+
+        workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+        if not workflow:
+            raise ValueError("Workflow not found.")
+        if workflow.status != "active":
+            raise ValueError("Workflow is not active.")
+
+        current_stage_id = workflow.current_stage_id
+        if not current_stage_id:
+            raise ValueError("Workflow has no current stage to override from.")
+
+        wf_def_id = self._workflow_definition_id_for(current_stage_id)
+        self._check_can_override(wf_def_id, user_id)
+
+        current_stage_def = self.db.query(RepairStageDefinition).filter(
+            RepairStageDefinition.id == current_stage_id
+        ).first()
+
+        target_stage_def = None
+        if target_stage_id:
+            target_stage_def = self.db.query(RepairStageDefinition).filter(
+                RepairStageDefinition.id == target_stage_id
+            ).first()
+            if not target_stage_def or target_stage_def.workflow_definition_id != wf_def_id:
+                raise ValueError("Target stage does not belong to this workflow.")
+            if target_stage_def.sequence <= current_stage_def.sequence:
+                raise ValueError("Override can only move a workflow forward, or close it.")
+
+        # Mark every stage from the current one up to (not including) the
+        # target as skipped -- includes the current stage itself, since
+        # forward-only means it's always being bypassed too.
+        skip_query = self.db.query(RepairStageInstance).join(
+            RepairStageDefinition, RepairStageInstance.stage_id == RepairStageDefinition.id
+        ).filter(
+            RepairStageInstance.workflow_id == workflow_id,
+            RepairStageDefinition.workflow_definition_id == wf_def_id,
+            RepairStageDefinition.sequence >= current_stage_def.sequence,
+        )
+        if target_stage_def:
+            skip_query = skip_query.filter(RepairStageDefinition.sequence < target_stage_def.sequence)
+        for inst in skip_query.all():
+            if inst.status != "completed":
+                inst.status = "skipped_by_override"
+
+        old_status = self._get_instance(workflow_id, current_stage_id)
+        old_status = old_status.status if old_status else None
+
+        self._log_audit(workflow_id, current_stage_id, "override", user_id, justification)
+        self._complete_queue_entry(workflow_id, current_stage_id)
+
+        if not target_stage_id:
+            # Close entirely -- same terminal-completion side effects as
+            # advance_stage's own "no next stage" branch.
+            workflow.status = "completed"
+            workflow.current_stage_id = None
+            workflow.current_stage_instance_id = None
+            workflow.assignment_pending = False
+            workflow.progress = 100
+
+            equipment = self.db.query(Equipment).filter(Equipment.id == workflow.equipment_id).first()
+            if equipment:
+                equipment.status = EquipmentStatus.active
+
+            if workflow.workflow_type == "OVERHAUL":
+                rec = self.db.query(OverhaulRecommendation).filter(
+                    OverhaulRecommendation.workflow_id == workflow_id,
+                    OverhaulRecommendation.status == "OPEN"
+                ).first()
+                if rec:
+                    rec.status = "CLOSED"
+                    rec.closed_at = self._utc_now()
+
+            self.db.commit()
+            self._fire_notification_safe(
+                "repair_stage_changed", workflow, current_stage_def, user_id,
+                status_from=old_status, status_to="overridden_closed",
+                reason=justification,
+            )
+            from workflow_hooks import fire
+            fire(workflow.workflow_code or "", "completed", self.db, workflow, user_id)
+            return {"message": "Workflow closed by override", "status": "completed", "progress": 100}
+
+        target_inst = self._get_instance(workflow_id, target_stage_id)
+        if target_inst:
+            target_inst.status = "pending"
+            target_inst.assignment_pending = True
+            target_inst.started_at = self._utc_now()
+            target_inst.assigned_user_id = None
+            target_inst.current_role = None
+            workflow.current_stage_instance_id = target_inst.id
+
+        workflow.current_stage_id = target_stage_id
+        workflow.assignment_pending = True
+        self.db.add(RepairAssignmentQueue(workflow_id=workflow_id, stage_id=target_stage_id, status="pending"))
+        self._recalculate_progress(workflow)
+        self.db.commit()
+
+        self._fire_notification_safe(
+            "repair_stage_changed", workflow, target_stage_def, user_id,
+            status_from=old_status, status_to="overridden",
+            reason=justification,
+        )
+        from workflow_hooks import fire
+        fire(
+            workflow.workflow_code or "", "stage_approved", self.db, workflow, user_id,
+            stage_code=current_stage_def.code if current_stage_def else None,
+        )
+        return {
+            "message": "Workflow overridden to next stage",
+            "current_stage": target_stage_def.name if target_stage_def else None,
             "progress": workflow.progress,
         }
 
@@ -1403,6 +1589,7 @@ class RepairWorkflowService:
             "can_approve": False,
             "can_reject": False,
             "can_cancel": False,
+            "can_override": False,
         }
 
         if workflow.status != "active":
@@ -1451,6 +1638,12 @@ class RepairWorkflowService:
                 result["can_cancel"] = True
             except ValueError:
                 pass
+
+        # can_override: workflow-wide RepairWorkflowOverrideRole, independent
+        # of the current stage's status or the caller's normal stage roles --
+        # the whole point is it works from wherever the workflow is stuck.
+        wf_def_id = self._workflow_definition_id_for(current_stage_id)
+        result["can_override"] = self._can_override(wf_def_id, user_id)
 
         return result
 

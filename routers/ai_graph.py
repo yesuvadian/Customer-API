@@ -148,13 +148,20 @@ def _dept_ids(department_id: uuid.UUID | None, db: Session) -> set | None:
     return visited
 
 
-def _scoped_ea(department_id: uuid.UUID | None, db: Session, organization_id=None) -> list[EquipmentAnalytics]:
+def _scoped_ea(
+    department_id: uuid.UUID | None,
+    db: Session,
+    organization_id=None,
+    equipment_id: uuid.UUID | None = None,
+) -> list[EquipmentAnalytics]:
     ids = _dept_ids(department_id, db)
     q = db.query(EquipmentAnalytics)
     if organization_id:
         q = q.filter(EquipmentAnalytics.organization_id == organization_id)
     if ids:
         q = q.filter(EquipmentAnalytics.department_id.in_(ids))
+    if equipment_id:
+        q = q.filter(EquipmentAnalytics.equipment_id == equipment_id)
     return q.all()
 
 
@@ -343,6 +350,7 @@ def _param_risk_score(condition: str | None) -> float:
 @router.get("/overview", summary="Fleet KPIs + health condition distribution + quarterly trend")
 def get_overview(
     department_id: Optional[uuid.UUID] = Query(None),
+    equipment_id: Optional[uuid.UUID] = Query(None),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
@@ -362,7 +370,8 @@ def get_overview(
     ids = _dept_ids(department_id, db)
 
     # ── Equipment analytics in scope ─────────────────────────────────────────
-    ea_list: list[EquipmentAnalytics] = _scoped_ea(department_id, db, organization_id=user.organization_id)
+    ea_list: list[EquipmentAnalytics] = _scoped_ea(
+        department_id, db, organization_id=user.organization_id, equipment_id=equipment_id)
     ea_map = {ea.equipment_id: ea for ea in ea_list}
     eq_ids = list(ea_map.keys())
     eq_ids, ea_list, ea_map = _apply_test_date_scope(
@@ -667,6 +676,7 @@ _DP_KEYS = ["dp", "degree_of_polymerization", "polymerisation", "cellulose"]
 @router.get("/ageing", summary="Ageing risk radar axes + DP degree of polymerisation trend")
 def get_ageing(
     department_id: Optional[uuid.UUID] = Query(None),
+    equipment_id: Optional[uuid.UUID] = Query(None),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
@@ -680,7 +690,8 @@ def get_ageing(
       asset_scores: [{ueic, ageing_index}]  -- per-asset ageing risk 0-100
       dp_trend: [{ueic, tested_at, value, unit, condition}]  -- DP history across fleet
     """
-    ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
+    ea_list = _scoped_ea(
+        department_id, db, organization_id=user.organization_id, equipment_id=equipment_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
     ea_map = {ea.equipment_id: ea for ea in ea_list}
     eq_ids, ea_list, ea_map = _apply_test_date_scope(
@@ -827,6 +838,7 @@ _TREND_GROUPS = {
 @router.get("/dielectric", summary="Dielectric risk radar + DGA / Tan Delta / BDV parameter trends")
 def get_dielectric(
     department_id: Optional[uuid.UUID] = Query(None),
+    equipment_id: Optional[uuid.UUID] = Query(None),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     db:   Session = Depends(get_vendor_db),
@@ -842,7 +854,8 @@ def get_dielectric(
         dga:       [{equipment_id, ueic, parameter_label, tested_at, value, unit, condition}]
         bdv:       [{equipment_id, ueic, tested_at, value, unit, condition}]
     """
-    ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
+    ea_list = _scoped_ea(
+        department_id, db, organization_id=user.organization_id, equipment_id=equipment_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
     eq_ids, ea_list, _ = _apply_test_date_scope(
         eq_ids, ea_list, None, db, date_from, date_to)
@@ -947,6 +960,7 @@ def _capacity_bucket(mva_val) -> str:
 @router.get("/grouped", summary="Health distribution grouped by a VIEW BY dimension")
 def get_grouped(
     department_id: Optional[uuid.UUID] = Query(None),
+    equipment_id: Optional[uuid.UUID] = Query(None),
     group_by: str = Query("equipment_type", description=(
         "Dimension to group by: equipment_type | make | capacity | "
         "make_model | year_commissioned | year_failure | year_replaced"
@@ -965,7 +979,8 @@ def get_grouped(
     if group_by not in _VALID_GROUP_BY:
         group_by = "equipment_type"
 
-    ea_list = _scoped_ea(department_id, db, organization_id=user.organization_id)
+    ea_list = _scoped_ea(
+        department_id, db, organization_id=user.organization_id, equipment_id=equipment_id)
     eq_ids  = [ea.equipment_id for ea in ea_list]
     ea_map  = {ea.equipment_id: ea for ea in ea_list}
     eq_ids, ea_list, ea_map = _apply_test_date_scope(

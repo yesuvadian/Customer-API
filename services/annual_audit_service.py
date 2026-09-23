@@ -306,6 +306,24 @@ class AnnualAuditService:
         self.db.commit()
         return result
 
+    def override_stage(
+        self, observation_id: UUID, target_stage_id: Optional[UUID],
+        justification: str, user: User,
+    ) -> dict:
+        """Thin delegate to RepairWorkflowService.override_stage -- see its
+        own docstring for the mechanics. Kept here (rather than calling the
+        generic engine directly from the frontend) only so this stays
+        consistent with approve_stage/reject_stage's own delegate pattern
+        and _sync_stage runs afterward, same as those two."""
+        observation = self._get_observation(observation_id, user)
+        result = self.workflow.override_stage(
+            observation.workflow_id, target_stage_id, justification, user.id,
+        )
+        observation.reviewer_id = user.id
+        self._sync_stage(observation)
+        self.db.commit()
+        return result
+
     # Escalation roles (design §14F) — updated to new functional role names
     _ESCALATION_ROLES = ["Reviewing Officer", "Supervisory Officer", "Senior Management Approver"]
 

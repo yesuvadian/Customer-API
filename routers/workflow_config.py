@@ -23,11 +23,14 @@ from models import (
     RepairStageTransition,
     RepairStageInstance,
     RepairWorkflowDefinition,
+    RepairWorkflowOverrideRole,
     RepairWorkflow,
     User,
 )
 
 from schemas_workflow_config import (
+    OverrideRoleOut,
+    OverrideRolesReplace,
     ReorderRequest,
     RoleOption,
     StagePatch,
@@ -269,6 +272,61 @@ def delete_workflow(
 
     db.delete(wf)
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Workflow-wide override roles (supervisory override, not per-stage --
+# see RepairWorkflowOverrideRole's own docstring for why)
+# ---------------------------------------------------------------------------
+
+@router.get("/workflows/{workflow_id}/override-roles", response_model=List[OverrideRoleOut])
+def get_override_roles(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    rows = db.query(RepairWorkflowOverrideRole).filter_by(workflow_definition_id=workflow_id).all()
+    role_ids = [r.role_id for r in rows]
+    org_roles = {r.id: r for r in db.query(OrgRole).filter(OrgRole.id.in_(role_ids)).all()}
+    return [
+        OverrideRoleOut(
+            role_id=r.role_id,
+            role_name=org_roles[r.role_id].name if r.role_id in org_roles else "Unknown",
+        )
+        for r in rows
+    ]
+
+
+@router.put("/workflows/{workflow_id}/override-roles", response_model=List[OverrideRoleOut])
+def replace_override_roles(
+    workflow_id: UUID,
+    body: OverrideRolesReplace,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    wf = db.query(RepairWorkflowDefinition).filter_by(id=workflow_id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found.")
+
+    # Same "replace all" pattern as /stages/{stage_id}/roles -- not locked
+    # by active-instance count, since it only changes who's AUTHORIZED to
+    # override, not the workflow's shape.
+    db.query(RepairWorkflowOverrideRole).filter_by(workflow_definition_id=workflow_id).delete()
+
+    org_roles = {r.id: r for r in db.query(OrgRole).filter(OrgRole.id.in_(body.role_ids)).all()}
+    result = []
+    for role_id in body.role_ids:
+        db.add(RepairWorkflowOverrideRole(
+            id=uuid4(),
+            workflow_definition_id=workflow_id,
+            role_id=role_id,
+        ))
+        result.append(OverrideRoleOut(
+            role_id=role_id,
+            role_name=org_roles[role_id].name if role_id in org_roles else "Unknown",
+        ))
+    db.commit()
+    return result
 
 
 # ---------------------------------------------------------------------------
