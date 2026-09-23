@@ -11281,6 +11281,49 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    # ── Report-Ready events (fired by services.reporting_service.run_scheduled_reports
+    # via ReportDefinition.notification_event) — all 15 share the same context_vars
+    # (report_name/report_period/download_url/format) per their
+    # notification_event_catalogue entries, so one shared template shape covers all
+    # of them; default_roles below are copied from that same catalogue.
+    _REPORT_READY_EVENTS = [
+        ("overdue_report_ready",        "Overdue Test Report",                       ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"]),
+        ("alert_report_ready",          "ALERT/CRITICAL Equipment Report",           ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"]),
+        ("compliance_report_ready",     "Test Compliance Status Report",             ["EE_TLSS", "SEE_WM"]),
+        ("repair_report_ready",         "Transformer Repair Status Report",          ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+        ("annual_failure_report_ready", "Equipment Failure Report",                  ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+        ("pm_report_ready",             "PM Compliance Report",                      ["AEE_MAINTENANCE", "EE_TLSS"]),
+        ("remedial_report_ready",       "Remedial Action Pending Report",            ["AEE_MAINTENANCE", "EE_TLSS"]),
+        ("taqc_report_ready",           "TA&QC Observation Compliance Report",       ["EE_TLSS", "SEE_WM"]),
+        ("result_review_report_ready",  "Monthly Result Review Compliance Report",   ["AEE R&T", "AEE-R&D", "EE_TLSS"]),
+        ("calibration_report_ready",    "Calibration Compliance Report",             ["EE_RT", "SEE_RT"]),
+        ("network_health_report_ready", "Network Health Summary Report",             ["EE_TLSS", "CEE_TRANSMISSION_ZONE"]),
+        ("vendor_report_ready",         "Vendor Performance Ranking Report",         ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+        ("repairer_report_ready",       "Repairer Performance Ranking Report",       ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+        ("oltc_report_ready",           "OLTC/CB Operations Count Report",           ["AEE_MAINTENANCE"]),
+        ("post_repair_report_ready",    "Post-Repair Transformer Evaluation Report", ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+    ]
+    for _event_type, _label, _roles in _REPORT_READY_EVENTS:
+        _tmpl(_event_type,
+            _e(
+                f"[REPORT READY] {_label} — " "{{report_period}}",
+                f"<h3 style='color:#1E3C72'>{_label} Ready</h3>"
+                "<p>{{report_name}} for {{report_period}} has been generated.</p>"
+                "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+                "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Report</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_name}}</td></tr>"
+                "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Period</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_period}}</td></tr>"
+                "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Format</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{format}}</td></tr>"
+                "</table>"
+                "<p><a href='{{download_url}}'>Download the report</a> from SEACMS (login required).</p>",
+                _roles,
+            ),
+            _i(
+                f"{_label} ready — " "{{report_period}}",
+                "{{report_name}} for {{report_period}} is ready to download.",
+                _roles,
+            ),
+        )
+
     # ── Failure Registry ──────────────────────────────────────────────────────
     _tmpl("fr_submitted",
         _e(

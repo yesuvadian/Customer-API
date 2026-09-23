@@ -265,6 +265,22 @@ class PreCommissionService:
         if not self._can_approve(user):
             raise ValueError("You do not have permission to approve pre-commission requests.")
 
+        intake = self.db.query(RepairWorkflow).filter(
+            RepairWorkflow.id == pcr.intake_workflow_id
+        ).first()
+
+        if intake and intake.status == "completed" and not pcr.workflow_id:
+            # Recovery: a previous call already advanced the intake to
+            # 'completed' (advance_stage commits that internally) but QAP
+            # workflow creation never finished -- e.g. it raised before
+            # the commit at the end of this method ran. advance_stage
+            # would now just fail ("Workflow is not active") if called
+            # again, so finish the interrupted step directly instead.
+            self._finalize_intake_approval(pcr, notes, user)
+            self.db.commit()
+            self.db.refresh(pcr)
+            return self._pcr_to_dict(pcr)
+
         self.workflow.advance_stage(
             pcr.intake_workflow_id, notes, user.id, action_label="approve",
         )
@@ -276,12 +292,7 @@ class PreCommissionService:
 
         if intake and intake.status == "completed":
             # Final level approved -- intake done, start the real QAP workflow.
-            pcr.approval_status = "approved"
-            pcr.approved_by     = user.id
-            pcr.approved_at     = self._utc_now()
-            pcr.approval_notes  = notes
-            qap_workflow = self._create_qap_workflow(pcr, user)
-            pcr.workflow_id = qap_workflow.id
+            self._finalize_intake_approval(pcr, notes, user)
         elif intake and intake.current_stage_instance_id:
             # Moved to the next level -- auto-submit it too. Same reasoning
             # as the first stage in _create_intake_workflow: nothing new to
@@ -295,6 +306,22 @@ class PreCommissionService:
         self.db.commit()
         self.db.refresh(pcr)
         return self._pcr_to_dict(pcr)
+
+    def _finalize_intake_approval(self, pcr: PreCommissionRequest, notes: Optional[str], user: User) -> None:
+        """
+        Marks the request approved and starts the real QAP workflow. Split
+        out of approve_request so the recovery branch there can re-run
+        just this step (idempotent from the caller's perspective) if a
+        prior attempt got the intake to 'completed' but raised before
+        this part committed.
+        """
+        pcr.approval_status = "approved"
+        pcr.approved_by     = user.id
+        pcr.approved_at     = self._utc_now()
+        pcr.approval_notes  = notes
+        pcr.modified_by     = user.id
+        qap_workflow = self._create_qap_workflow(pcr, user)
+        pcr.workflow_id = qap_workflow.id
 
     def reject_request(self, request_id: UUID, notes: Optional[str], user: User) -> dict:
         """

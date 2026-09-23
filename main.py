@@ -845,11 +845,23 @@ def _check_schedule_notifications():
         # ── Pass 4: Workflow stage SLA breach ────────────────────────────────
         #
         # Finds TrWfStageInstance rows that are still in_progress but have been
-        # running longer than their stage's default_duration_days.
+        # running longer than their stage's configured duration -- hours takes
+        # precedence over days when both are set (same rule the Workflow
+        # Configuration UI and the Result Review job use). Previously this
+        # pass only ever read default_duration_days, so a non-Result-Review
+        # stage with only Duration (hours) configured was silently never
+        # checked for overdue at all.
+        #
+        # Still runs once daily (this job's own cron schedule, unchanged) --
+        # an hours-level SLA on one of these stages is now correctly counted,
+        # but a breach can still sit unflagged for up to ~24h before this
+        # pass catches it, unlike the 15-minute Result Review job below.
+        #
         # Fires wf_stage_overdue (alert 1–3 days, critical >3 days).
         try:
             from models import TrWfStageInstance, TrWfStage, TrWfInstance
             from datetime import datetime as _dt4
+            from sqlalchemy import or_ as _or4
 
             stage_instances = (
                 db.query(TrWfStageInstance)
@@ -858,27 +870,36 @@ def _check_schedule_notifications():
                 .filter(
                     TrWfStageInstance.status == "in_progress",
                     TrWfStageInstance.started_at.isnot(None),
-                    TrWfStage.default_duration_days.isnot(None),
+                    _or4(
+                        TrWfStage.default_duration_hours.isnot(None),
+                        TrWfStage.default_duration_days.isnot(None),
+                    ),
                     # Result Review stages are owned by the more frequent
                     # (15-minute) _check_review_sla_breaches job below, which
                     # is hour-precision and understands default_duration_hours
-                    # -- this once-daily, date-truncated pass would otherwise
-                    # double-fire the same breach with a less precise deadline.
+                    # -- this once-daily pass would otherwise double-fire the
+                    # same breach with a less precise deadline.
                     TrWfStage.is_result_stage.is_(False),
                 )
                 .all()
             )
 
+            now4 = _dt4.utcnow()
+
             # Group overdue instances by (org_id, dept_id)
             stage_digest: dict = _ddict(list)
             for si in stage_instances:
                 stage = si.stage
-                if not stage or not stage.default_duration_days:
+                if not stage or (stage.default_duration_hours is None and not stage.default_duration_days):
                     continue
-                deadline = si.started_at.date() + timedelta(days=stage.default_duration_days)
-                if today <= deadline:
+                duration_hours = (
+                    stage.default_duration_hours if stage.default_duration_hours is not None
+                    else stage.default_duration_days * 24
+                )
+                deadline = si.started_at + timedelta(hours=duration_hours)
+                if now4 <= deadline:
                     continue
-                days_overdue = (today - deadline).days
+                days_overdue = round((now4 - deadline).total_seconds() / 86400, 2)
 
                 wf_instance = si.wf_instance
                 tr = getattr(wf_instance, "testing_request", None)
@@ -920,9 +941,11 @@ def _check_schedule_notifications():
                             "request.number": getattr(first_tr, "request_number", "") or "",
                             "equipment.ueic": eq_label,
                             "equipment.department": dept_name,
+                            "dept.name": dept_name,
                             "days_overdue": str(first_days),
                             "deadline": str(first_deadline),
                             "digest_count": str(len(group)),
+                            "digest_table": NotificationService.build_stage_overdue_digest_table(group),
                         },
                         organization_id=org_id,
                         department_id=dept_id,
@@ -971,8 +994,9 @@ def _check_review_sla_breaches():
     try:
         from models import TrWfStageInstance, TrWfStage, TrWfStageRole
         from services.notification_service import NotificationService
-        from datetime import datetime as _dt5, timezone as _tz5, timedelta
+        from datetime import datetime as _dt5, timezone as _tz5
         from sqlalchemy import or_ as _or5
+        from utils.business_days import add_business_hours
 
         now = _dt5.now(_tz5.utc)
         candidates = (
@@ -999,10 +1023,15 @@ def _check_review_sla_breaches():
             if started_at.tzinfo is None:
                 started_at = started_at.replace(tzinfo=_tz5.utc)
 
-            if stage.default_duration_hours is not None:
-                deadline = started_at + timedelta(hours=stage.default_duration_hours)
-            else:
-                deadline = started_at + timedelta(days=stage.default_duration_days)
+            duration_hours = (
+                stage.default_duration_hours if stage.default_duration_hours is not None
+                else stage.default_duration_days * 24
+            )
+            # Weekends don't count against the SLA clock -- same
+            # add_business_hours the dashboard's review_sla_pct tile and the
+            # Monthly Result Review Compliance Report now use, so all three
+            # agree on what "overdue" means.
+            deadline = add_business_hours(started_at, duration_hours)
             if now <= deadline:
                 continue
 
@@ -1018,13 +1047,17 @@ def _check_review_sla_breaches():
             hours_overdue = (now - deadline).total_seconds() / 3600
             eq_obj = getattr(tr, "equipment", None)
             dept_obj = getattr(tr, "department", None)
+            dept_name = getattr(dept_obj, "name", "") or ""
+            days_overdue = hours_overdue / 24
 
             # Roles resolved from THIS stage's actual configuration, not the
-            # wf_stage_overdue template's own hardcoded role list -- those
-            # names (AEE_MAINTENANCE / Reviewing Officer / ...) don't match
-            # every org's real role names (the same class of bug found
-            # earlier in the CAR escalation path), so an override is the
-            # only way this reliably reaches anyone.
+            # wf_stage_overdue template's own hardcoded role list -- a fixed
+            # role list can't match every org's real role names (the same
+            # class of bug found earlier in the CAR escalation path, and the
+            # reason the template's own fallback roles were themselves wrong
+            # until they were corrected to AEE_MAINTENANCE/EE_TLSS), so an
+            # override is the only way this reliably reaches anyone across
+            # orgs with different role naming.
             stage_roles = (
                 db.query(TrWfStageRole)
                 .filter(TrWfStageRole.stage_id == stage.id)
@@ -1039,10 +1072,14 @@ def _check_review_sla_breaches():
                         "stage.name": stage.name or "",
                         "request.number": getattr(tr, "request_number", "") or "",
                         "equipment.ueic": getattr(eq_obj, "ueic", "") or "",
-                        "equipment.department": getattr(dept_obj, "name", "") or "",
-                        "days_overdue": f"{hours_overdue / 24:.2f}",
+                        "equipment.department": dept_name,
+                        "dept.name": dept_name,
+                        "days_overdue": f"{days_overdue:.2f}",
                         "deadline": deadline.isoformat(),
                         "digest_count": "1",
+                        "digest_table": NotificationService.build_stage_overdue_digest_table(
+                            [(si, stage, tr, days_overdue, deadline)]
+                        ),
                     },
                     organization_id=getattr(tr, "organization_id", None),
                     department_id=getattr(tr, "department_id", None),
