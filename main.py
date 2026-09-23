@@ -99,6 +99,7 @@ from routers import equipment
 from routers import equipment_type_kit_mappings
 from routers import condition_monitoring_recommendations
 from routers import threshold_config
+from routers import integration_settings
 
 # Notification & Alert Engine
 from routers import notifications as notifications_router
@@ -1939,6 +1940,7 @@ app.include_router(equipment.router)
 app.include_router(equipment_type_kit_mappings.router)
 app.include_router(condition_monitoring_recommendations.router)
 app.include_router(threshold_config.router)
+app.include_router(integration_settings.router)
 
 # Notification & Alert Engine
 app.include_router(notifications_router.router)

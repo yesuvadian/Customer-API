@@ -97,6 +97,21 @@ def _enrich_context_from_source(
     if not source_type or not source_id:
         return
     try:
+        if source_type == "report_log":
+            from models import ReportLog
+            log = db.query(ReportLog).filter(ReportLog.id == source_id).first()
+            if not log:
+                return
+            defn = log.definition
+            ctx.setdefault("report.name",         defn.name if defn else "")
+            ctx.setdefault("report.description",  (defn.description or "") if defn else "")
+            ctx.setdefault("report.frequency",    defn.frequency if defn else "")
+            ctx.setdefault("report.format",       log.output_format or "")
+            ctx.setdefault("report.row_count",    str(log.row_count or 0))
+            ctx.setdefault("report.file_name",    log.file_name or "")
+            ctx.setdefault("report.generated_at", str(log.completed_at)[:19] if log.completed_at else "")
+            return
+
         if source_type == "testing_request":
             from models import TestingRequest, OrgDepartment, CategoryDetails, CategoryMaster
             tr = db.query(TestingRequest).filter(TestingRequest.id == source_id).first()
@@ -547,12 +562,32 @@ def _generate_attachment_bytes(
                 return bio.getvalue() if bio else None
 
         elif att_type in ("excel", "xlsx"):
-            # Excel generation requires a ReportDefinition — not yet wired for
-            # on-demand notification attachments. Return None so the email is sent
-            # without the Excel file rather than blocking delivery.
+            if source_type == "report_log":
+                # Read the already-generated file straight off disk rather than
+                # re-running the report query a second time — guarantees the
+                # emailed file is byte-identical to what ReportingService.generate()
+                # actually produced and logged, and avoids a redundant query.
+                import os
+                from models import ReportLog
+                from services.reporting_service import REPORTS_DIR
+
+                log = db.query(ReportLog).filter(ReportLog.id == source_id).first()
+                if not log or not log.file_name:
+                    logger.warning(f"[Notif] ReportLog {source_id} not found or has no file_name")
+                    return None
+                path = os.path.join(REPORTS_DIR, log.file_name)
+                if not os.path.exists(path):
+                    logger.warning(f"[Notif] Report file missing on disk: {path}")
+                    return None
+                with open(path, "rb") as f:
+                    return f.read()
+
+            # Any other source: Excel generation requires a ReportDefinition —
+            # not wired for non-report notification attachments. Return None so
+            # the email is sent without the Excel file rather than blocking delivery.
             logger.info(
                 f"[Notif] Excel attachment for {source_type}/{source_id} skipped "
-                f"(no on-demand Excel service configured)"
+                f"(no on-demand Excel service configured for this source type)"
             )
             return None
 
@@ -1290,6 +1325,13 @@ class EmailDispatcher(ChannelDispatcher):
 
     channel = "email"
 
+    @staticmethod
+    def _svc(db: Session, org_id: Optional[UUID]) -> EmailService:
+        """EmailService built from this org's admin-configured SMTP settings
+        (integration_settings_service), falling back to .env if unset."""
+        from services.integration_settings_service import get_effective_smtp_config
+        return EmailService(get_effective_smtp_config(db, org_id))
+
     # ── Explicit type → MIME map ──────────────────────────────────────────────
     _MIME_MAP: Dict[str, str] = {
         "pdf":   "application/pdf",
@@ -1397,7 +1439,7 @@ class EmailDispatcher(ChannelDispatcher):
                     f"[Notif] No role recipients for log={log.id} event={log.event_type!r} — "
                     f"falling back to {len(fallback)} CC/BCC address(es) as primary To"
                 )
-                svc = EmailService()
+                svc = self._svc(db, log.organization_id)
                 attachments: List[Dict] = self._build_attachments(db, log)
                 try:
                     if attachments:
@@ -1431,7 +1473,7 @@ class EmailDispatcher(ChannelDispatcher):
         rendered_subjects = [r.rendered_subject or subject for r in pending]
         use_bcc = (len(set(rendered_bodies)) == 1 and len(set(rendered_subjects)) == 1)
 
-        svc = EmailService()
+        svc = self._svc(db, log.organization_id)
         try:
             if use_bcc:
                 emails    = [r.email for r in pending]
@@ -1508,7 +1550,7 @@ class EmailDispatcher(ChannelDispatcher):
             return []
 
         result: List[Dict] = []
-        svc = EmailService()
+        svc = self._svc(db, log.organization_id)
         for entry in attachment_entries:
             url      = entry.get("url", "")
             var_key  = entry.get("var_key", "")
@@ -1600,29 +1642,23 @@ class SmsDispatcher(ChannelDispatcher):
 
     channel = "sms"
 
-    # ── Config — read once at class load time ────────────────────────────────
-    _provider   = _os.getenv("SMS_PROVIDER",          "none").lower().strip()
-    _from       = _os.getenv("SMS_FROM_NUMBER",       "")
-    # Twilio (via plain HTTP — no twilio SDK needed)
-    _twilio_sid = _os.getenv("TWILIO_ACCOUNT_SID",   "")
-    _twilio_tok = _os.getenv("TWILIO_AUTH_TOKEN",     "")
-    # MSG91 (India — transactional / DLT route)
-    _msg91_key  = _os.getenv("MSG91_AUTH_KEY",        "")
-    _msg91_tmpl = _os.getenv("MSG91_TEMPLATE_ID",     "")   # DLT template ID (mandatory in IN)
-    _msg91_sndr = _os.getenv("MSG91_SENDER_ID",       "SEACMS")  # 6-char DLT sender ID
-    # Generic HTTP gateway
-    _http_url   = _os.getenv("SMS_HTTP_URL",          "")
-    _http_hdr   = _os.getenv("SMS_HTTP_AUTH_HEADER",  "Authorization")
-    _http_val   = _os.getenv("SMS_HTTP_AUTH_VALUE",   "")
-
     # ── Public entry point ───────────────────────────────────────────────────
 
     def send(self, db: Session, log: "NotificationLog", subject: str, body: str) -> None:
         """
         Iterate all 'pending' NotificationLogRecipient rows for this log and
         dispatch an SMS to each phone number.
+
+        Provider + credentials are resolved per-send from this org's
+        admin-configured settings (integration_settings_service), falling
+        back to .env if unset — not fixed class attributes read once at
+        import time, so an org can change providers without a restart.
         """
+        from services.integration_settings_service import get_effective_sms_config
+
         now = datetime.now(timezone.utc)
+        cfg = get_effective_sms_config(db, log.organization_id)
+        provider = cfg["provider"]
 
         pending = [
             r for r in (log.recipients or [])
@@ -1635,88 +1671,85 @@ class SmsDispatcher(ChannelDispatcher):
             log.sent_at     = now
             return
 
-        if self._provider in ("none", ""):
+        if provider in ("none", ""):
             log.status      = "skipped"
-            log.error_message = "SMS_PROVIDER not configured (set SMS_PROVIDER in .env)"
+            log.error_message = "SMS provider not configured (Organisation → Integration Settings)"
             for r in pending:
                 r.delivery_status = "skipped"
-                r.error_message   = "SMS_PROVIDER not configured"
+                r.error_message   = "SMS provider not configured"
             return
 
         for r in pending:
             phone    = self._normalise_phone(r.phone)
             sms_body = self._truncate(r.rendered_body or body)
             try:
-                if self._provider == "twilio":
-                    self._send_twilio(phone, sms_body)
-                elif self._provider == "msg91":
-                    self._send_msg91(phone, sms_body)
-                elif self._provider == "http":
-                    self._send_http(phone, sms_body)
+                if provider == "twilio":
+                    self._send_twilio(phone, sms_body, cfg)
+                elif provider == "msg91":
+                    self._send_msg91(phone, sms_body, cfg)
+                elif provider == "http":
+                    self._send_http(phone, sms_body, cfg)
                 else:
                     r.delivery_status = "skipped"
-                    r.error_message   = f"Unknown SMS_PROVIDER={self._provider!r}"
-                    logger.warning(f"[Notif] Unknown SMS_PROVIDER={self._provider!r}")
+                    r.error_message   = f"Unknown SMS provider={provider!r}"
+                    logger.warning(f"[Notif] Unknown SMS provider={provider!r}")
                     continue
                 r.delivery_status = "sent"
                 r.sent_at         = now
-                logger.info(f"[Notif] SMS sent to {phone} via {self._provider}")
+                logger.info(f"[Notif] SMS sent to {phone} via {provider}")
             except Exception as exc:
                 r.delivery_status = "failed"
                 r.error_message   = str(exc)[:500]
                 log.retry_count   = (log.retry_count or 0) + 1
                 if log.retry_count < (log.max_retries or 3):
                     log.next_retry_at = now + timedelta(minutes=RETRY_DELAY_MINUTES)
-                logger.warning(f"[Notif] SMS to {phone} failed ({self._provider}): {exc}")
+                logger.warning(f"[Notif] SMS to {phone} failed ({provider}): {exc}")
 
         EmailDispatcher._update_log_status_from_recipients(log, now)
 
     # ── Gateway implementations ──────────────────────────────────────────────
     # Each method raises on failure; the caller (send) handles status updates.
+    # `cfg` is the dict from get_effective_sms_config().
 
-    def _send_twilio(self, phone: str, body: str) -> None:
+    def _send_twilio(self, phone: str, body: str, cfg: Dict[str, str]) -> None:
         """Twilio REST API — no SDK, pure HTTP POST with Basic auth."""
         import requests as _req, base64 as _b64
-        if not self._twilio_sid or not self._twilio_tok:
-            raise RuntimeError("TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN missing in .env")
-        auth = _b64.b64encode(
-            f"{self._twilio_sid}:{self._twilio_tok}".encode()
-        ).decode()
-        url  = (
-            f"https://api.twilio.com/2010-04-01/Accounts"
-            f"/{self._twilio_sid}/Messages.json"
-        )
+        sid, tok = cfg["twilio_sid"], cfg["twilio_token"]
+        if not sid or not tok:
+            raise RuntimeError("Twilio Account SID or Auth Token not configured")
+        auth = _b64.b64encode(f"{sid}:{tok}".encode()).decode()
+        url  = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
         resp = _req.post(
             url,
             headers={"Authorization": f"Basic {auth}"},
-            data={"From": self._from, "To": phone, "Body": body},
+            data={"From": cfg["from_number"], "To": phone, "Body": body},
             timeout=15,
         )
         if resp.status_code not in (200, 201):
             raise RuntimeError(f"Twilio HTTP {resp.status_code}: {resp.text[:200]}")
 
-    def _send_msg91(self, phone: str, body: str) -> None:
+    def _send_msg91(self, phone: str, body: str, cfg: Dict[str, str]) -> None:
         """
         MSG91 transactional SMS — DLT-compliant (mandatory for Indian numbers).
         Route 4 = Transactional (OTP / alerts); Route 1 = Promotional (blocked on DND).
         """
         import requests as _req
-        if not self._msg91_key:
-            raise RuntimeError("MSG91_AUTH_KEY missing in .env")
+        if not cfg["msg91_key"]:
+            raise RuntimeError("MSG91 Auth Key not configured")
         # MSG91 expects digits only (no leading +)
         to = phone.lstrip("+")
         sms_entry: Dict[str, Any] = {"message": body, "to": [to]}
-        if self._msg91_tmpl:
-            sms_entry["DLT_TE_ID"] = self._msg91_tmpl  # mandatory for Indian DLT
+        if cfg["msg91_template"]:
+            sms_entry["DLT_TE_ID"] = cfg["msg91_template"]  # mandatory for Indian DLT
         payload = {
-            "sender":  self._msg91_sndr,
+            "sender":  cfg["msg91_sender"],
             "route":   "4",     # Transactional
             "country": "91",
             "sms":     [sms_entry],
         }
         resp = _req.post(
             "https://api.msg91.com/api/v5/flow/",
-            headers={"authkey": self._msg91_key, "Content-Type": "application/json"},
+            headers={"authkey": cfg["msg91_key"], "Content-Type": "application/json"},
             json=payload,
             timeout=15,
         )
@@ -1728,22 +1761,21 @@ class SmsDispatcher(ChannelDispatcher):
         if not (resp.status_code == 200 and data.get("type") != "error"):
             raise RuntimeError(f"MSG91 {resp.status_code}: {resp.text[:200]}")
 
-    def _send_http(self, phone: str, body: str) -> None:
+    def _send_http(self, phone: str, body: str, cfg: Dict[str, str]) -> None:
         """
         Generic HTTP POST gateway.
-        Posts JSON: {"to": "<phone>", "from": "<SMS_FROM_NUMBER>", "body": "<text>"}
-        Configure SMS_HTTP_URL + optional auth header via SMS_HTTP_AUTH_HEADER / VALUE.
+        Posts JSON: {"to": "<phone>", "from": "<SMS from number>", "body": "<text>"}
         """
         import requests as _req
-        if not self._http_url:
-            raise RuntimeError("SMS_HTTP_URL missing in .env")
+        if not cfg["http_url"]:
+            raise RuntimeError("SMS HTTP gateway URL not configured")
         headers: Dict[str, str] = {"Content-Type": "application/json"}
-        if self._http_hdr and self._http_val:
-            headers[self._http_hdr] = self._http_val
+        if cfg["http_header"] and cfg["http_value"]:
+            headers[cfg["http_header"]] = cfg["http_value"]
         resp = _req.post(
-            self._http_url,
+            cfg["http_url"],
             headers=headers,
-            json={"to": phone, "from": self._from, "body": body},
+            json={"to": phone, "from": cfg["from_number"], "body": body},
             timeout=15,
         )
         if resp.status_code not in (200, 201, 202):
@@ -1909,7 +1941,7 @@ def _collapse_digest(db: Session, event_type: str, organization_id: Optional[UUI
         )
         digest_subject = f"[Digest] {len(logs)} × {event_label}"
         try:
-            EmailService().send_email_starttls(email, digest_subject, digest_body)
+            EmailDispatcher._svc(db, organization_id).send_email_starttls(email, digest_subject, digest_body)
         except Exception as exc:
             logger.warning(f"[Notif] Digest email to {email} failed: {exc}")
 

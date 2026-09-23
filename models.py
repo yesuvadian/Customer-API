@@ -4466,6 +4466,60 @@ class NotificationTemplate(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class IntegrationSettings(Base):
+    """
+    SMTP + SMS gateway credentials, admin-configurable per org rather than
+    .env-only (SRS priority gap: "SMTP/SMS credentials are .env-only").
+
+    Same override shape as NotificationTemplate: organization_id NULL =
+    the one platform-default row (seeded once from the existing .env
+    values so behavior is unchanged until an org overrides it); a
+    non-null org row wins over the NULL row when both exist.
+
+    Secret fields (*_encrypted) are Fernet-encrypted at rest via
+    utils/crypto.py — never stored or returned as plaintext. The API
+    layer returns a masked placeholder for any secret field that has a
+    value, and only re-encrypts a field when the caller sends a real
+    (non-placeholder) new value — see services/integration_settings_service.py.
+    """
+    __tablename__ = "integration_settings"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_integration_settings_org"),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,  # NULL = platform default
+    )
+
+    # ── SMTP ───────────────────────────────────────────────────────────────
+    smtp_server = Column(String(255), nullable=True)
+    smtp_port = Column(Integer, nullable=True)
+    smtp_username = Column(String(255), nullable=True)
+    smtp_password_encrypted = Column(Text, nullable=True)
+    smtp_from_email = Column(String(255), nullable=True)
+
+    # ── SMS ────────────────────────────────────────────────────────────────
+    sms_provider = Column(String(20), nullable=True)  # twilio | msg91 | http | none
+    sms_from_number = Column(String(50), nullable=True)
+    twilio_account_sid = Column(String(255), nullable=True)
+    twilio_auth_token_encrypted = Column(Text, nullable=True)
+    msg91_auth_key_encrypted = Column(Text, nullable=True)
+    msg91_template_id = Column(String(100), nullable=True)
+    msg91_sender_id = Column(String(50), nullable=True)
+    sms_http_url = Column(String(500), nullable=True)
+    sms_http_auth_header = Column(String(100), nullable=True)
+    sms_http_auth_value_encrypted = Column(Text, nullable=True)
+
+    is_active = Column(Boolean, nullable=False, server_default='true')
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class NotificationLog(Base):
     """
     Audit log of every notification attempt.  status lifecycle:
