@@ -210,6 +210,31 @@ ANALYTICS_MIN_WATCH_HISTORY = int(os.getenv("ANALYTICS_MIN_WATCH_HISTORY", 4))
 ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS", 7))
 ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS", 15))
 
+# Result Review SLA, split by severity (KPTCL spec: 24h for ALERT, 2h for
+# CRITICAL) — routers/dashboard_kpi.py's review_sla_pct_alert/
+# review_sla_pct_critical. Separate from TrWfStage.default_duration_hours
+# (the existing single blended per-stage duration behind review_sla_pct):
+# that field is an admin-configured, per-org/per-stage value with no
+# severity dimension; these two are the spec's fixed, org-wide severity
+# thresholds, applied using the worst evaluation_result['overall']
+# (CRITICAL > ALERT) among a closed review's TestResults. A review with
+# only NORMAL results isn't scored against either — the spec's SLA is
+# about how fast an ALERT/CRITICAL finding gets reviewed, not every result.
+REVIEW_SLA_HOURS_ALERT = int(os.getenv("REVIEW_SLA_HOURS_ALERT", 24))
+REVIEW_SLA_HOURS_CRITICAL = int(os.getenv("REVIEW_SLA_HOURS_CRITICAL", 2))
+
+# Dashboard drill-down panel page size — shared by every "+"-expandable
+# KPI tile on the Overall Dashboard (Overdue Tickets, Open Requests,
+# Closed This Week, Rejected/Cancelled, Critical Equipment, Awaiting
+# Approval, Data Quality, Result Review SLA breaches/severity-split
+# reviews): how many rows GET /dashboard/overview's own rollup returns for
+# a branch scope (a leaf scope returns its full, typically-small list
+# uncapped), and the default page size each panel's own "Load More"
+# pagination endpoint fetches per request. Admin-tunable the same way
+# routers/testing_requests.py's TR_PAGE_SIZE already is, rather than a
+# number hardcoded into the router.
+DASHBOARD_PANEL_PAGE_SIZE = int(os.getenv("DASHBOARD_PANEL_PAGE_SIZE", 15))
+
 # AI calibration-interval optimisation advisories (KPTCL spec §14.6,
 # services/calibration_service.py's compute_interval_advisories) — an
 # AI Advisory only, per the spec's own blanket rule that every AI output

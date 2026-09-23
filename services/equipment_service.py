@@ -580,7 +580,11 @@ class EquipmentService:
         new_serial = kwargs.get("factory_serial_number")
         if new_serial is not None:
             new_serial = new_serial.strip()
-            if new_serial and new_serial != (equipment.factory_serial_number or ""):
+            # Checked on every save (not just when the serial is being
+            # changed) so a pre-existing duplicate — e.g. from data
+            # imported before this check existed — is caught and must be
+            # resolved before the record can be saved again.
+            if new_serial:
                 dup = (
                     db.query(Equipment)
                     .filter(

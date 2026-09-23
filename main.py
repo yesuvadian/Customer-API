@@ -1117,7 +1117,19 @@ def _check_auto_close_normal_results():
             stage = si.stage
             started_at = si.started_at
             if started_at.tzinfo is None:
-                started_at = started_at.replace(tzinfo=_tz6.utc)
+                # started_at is a naive DateTime column, but it isn't naive
+                # UTC - the app writes it as datetime.now(timezone.utc), and
+                # since the Postgres session timezone is Asia/Calcutta
+                # (fixed UTC+5:30, no DST), psycopg2 converts that aware
+                # value down to session-local wall-clock time before
+                # stripping tzinfo on insert into a naive column. Labeling
+                # it UTC directly (as before) made every deadline 5.5h later
+                # than the real UTC deadline, so a genuinely overdue NORMAL
+                # result still looked "not yet due" - confirmed live against
+                # Postgres NOW() vs this column for TR-KP-2026-0757.
+                started_at = started_at.replace(
+                    tzinfo=_tz6(timedelta(hours=5, minutes=30))
+                ).astimezone(_tz6.utc)
             deadline = started_at + timedelta(hours=stage.auto_close_normal_after_hours)
             if now <= deadline:
                 continue

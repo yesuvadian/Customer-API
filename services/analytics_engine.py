@@ -874,6 +874,34 @@ class AnalyticsEngine:
             condition_labels=condition_labels, scores=condition_scores,
         )
 
+        # An explicit tester recommendation of "Fail" overrides both the
+        # score above and the days-remaining fallback below.
+        # recommendation_type (Pass/Fail/Conditional/Retest) comes from the
+        # recommendation wizard, a widget bolted onto the last session of
+        # the form — it is NOT one of this template's own
+        # sections[].fields[], so EvaluationService.evaluate_test_data()
+        # never sees it and silently produces {"overall": "NORMAL",
+        # "fields": []} regardless of what the tester actually picked.
+        # Confirmed live: 5 relays explicitly marked "Fail" all scored
+        # 95-99% / risk_level 'Low' on the Critical Equipment tile and AI
+        # Analytics Dashboard, because nothing downstream ever looked at
+        # the recommendation at all. Gated on the exact same
+        # enable_calibration/DATE_ADD signal _resolve_is_calibration()
+        # uses to set TestingRequest.is_calibration=True, so this can only
+        # ever fire for a calibration template — no other form has a
+        # recommendation_type key in the first place, and a non-calibration
+        # template is never considered even if one somehow did.
+        _is_cal_template = bool(template_data.get("enable_calibration")) or any(
+            (r.get("type") or "").upper() == "DATE_ADD"
+            for r in template_data.get("rules", [])
+        )
+        if _is_cal_template and (test_data.get("recommendation_type") or "").strip().lower() == "fail":
+            health_score = 0.0
+            critical_findings = [{
+                "key": "recommendation_type", "label": "Calibration Recommendation",
+                "status": "Fail", "message": "Tester marked this calibration as Fail",
+            }]
+
         # Fallback for calibration templates (DATE_ADD rule) where evaluation_result
         # may be empty. Score based on days remaining vs validity period.
         if health_score is None and template_data.get("enable_calibration"):

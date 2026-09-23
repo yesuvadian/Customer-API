@@ -25,6 +25,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+import config
 from auth_utils import get_current_user
 from database import get_db
 from models import User
@@ -806,6 +807,251 @@ def _dqi_closed_expr_for_org(db: Session, org_id):
     )
 
 
+def _overdue_tickets_list(db: Session, org_id, dept_ids_for_scope, limit=None, offset=0):
+    """Every currently-open, non-calibration TestingRequest past its
+    due_date — the actionable full list behind _scope_counts'
+    overdue_count (same "not closed AND due_date < now" filter, via the
+    shared _dqi_closed_expr_for_org so both agree on what "closed" means
+    for this org). NOT the same set as _build_department_rollup's old
+    `this_week` source for this panel: that list is a 7-day due-date
+    WINDOW (today through +7 days) which happens to flag some of its
+    rows `overdue: true`, capped at its own limit=10 default — confirmed
+    live, overdue_count said 23 but the drill-down only ever showed up
+    to 10, and only the ones due within a week of each other, not the
+    true full overdue set. Standalone module-level function (not nested
+    in _build_department_rollup) the same way _dqi_closed_expr_for_org
+    is, so GET /dashboard/overdue-tickets (the "Load More" pagination
+    endpoint) can call it without needing the whole rollup around it.
+
+    is_calibration excluded: calibration requests get their own Overdue
+    T+0/T+7/T+15 buckets in the Calibration section (validity-expiry
+    based, not this ticket due_date) — counting them here too would
+    double them into both places on the same dashboard.
+    """
+    from models import TestingRequest
+    from services.dashboard_service import _now
+    closed_expr = _dqi_closed_expr_for_org(db, org_id)
+    tr_filters = [TestingRequest.organization_id == org_id]
+    if dept_ids_for_scope:
+        tr_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+
+    rows = (
+        db.query(TestingRequest)
+        .filter(
+            *tr_filters,
+            ~closed_expr,
+            TestingRequest.is_calibration.is_(False),
+            TestingRequest.due_date.isnot(None),
+            TestingRequest.due_date < _now(),
+        )
+        .order_by(TestingRequest.due_date.asc())
+        .all()
+    )
+    out = []
+    for r in rows:
+        ueic = r.equipment.ueic if r.equipment else (
+            r.equipment_type.name if r.equipment_type else "Unknown equipment")
+        out.append({
+            "equipment_label": ueic,
+            "equipment_id": str(r.equipment_id) if r.equipment_id else None,
+            "request_id": str(r.id),
+            "request_number": r.request_number,
+            "test_type": r.test_type.name if r.test_type else None,
+            "due_date": r.due_date.isoformat() if r.due_date else None,
+            "overdue": True,
+        })
+    total = len(out)
+    page = out[offset:offset + limit] if limit is not None else out[offset:]
+    return page, total
+
+
+def _rejected_cancelled_ids(db: Session, org_id):
+    """(rejected_request_ids, cancelled_request_ids) for this org —
+    standalone version of the computation _build_department_rollup does
+    inline, for the panel "Load More" endpoints below to call without
+    needing the whole rollup around them. Deliberately NOT read off
+    current_status_code (see _build_department_rollup's own comment on
+    this — a terminal transition's own terminal_status_id can fail to
+    resolve and fall back to "last TrWfStatus by sequence", silently
+    mislabeling a rejection as a cancellation there). The LAST
+    is_terminal=True TrWfAuditLog row for a request's workflow instance is
+    the actual button that closed it, so its action_code is ground truth.
+    """
+    from models import TrWfAuditLog as _TrWfAuditLog, TestingRequest
+    terminal_audit_rows = (
+        db.query(_TrWfAuditLog.testing_request_id, _TrWfAuditLog.action_code)
+        .join(TestingRequest, TestingRequest.id == _TrWfAuditLog.testing_request_id)
+        .filter(
+            TestingRequest.organization_id == org_id,
+            _TrWfAuditLog.is_terminal.is_(True),
+        ).all()
+    )
+    rejected_request_ids = {
+        rid for rid, code in terminal_audit_rows if 'reject' in (code or '').lower()
+    }
+    cancelled_request_ids = {
+        rid for rid, code in terminal_audit_rows if 'cancel' in (code or '').lower()
+    }
+    return rejected_request_ids, cancelled_request_ids
+
+
+def _open_tickets_list(db: Session, org_id, dept_ids_for_scope, limit=None, offset=0):
+    """Every currently-open TestingRequest — the actionable full list
+    behind _scope_counts' open_count, not capped at _ticket_lists' old
+    fixed 10-row limit (confirmed live: open_count said 26, the drill-down
+    only ever showed 10). Standalone module-level function (like
+    _overdue_tickets_list above) so GET /dashboard/open-tickets' "Load
+    More" pagination can call it without the whole rollup around it.
+    """
+    from models import TestingRequest
+    closed_expr = _dqi_closed_expr_for_org(db, org_id)
+    tr_filters = [TestingRequest.organization_id == org_id]
+    if dept_ids_for_scope:
+        tr_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+    rows = (
+        db.query(TestingRequest)
+        .filter(*tr_filters, ~closed_expr)
+        .order_by(TestingRequest.mts.desc())
+        .all()
+    )
+    out = []
+    for r in rows:
+        ueic = r.equipment.ueic if r.equipment else (
+            r.equipment_type.name if r.equipment_type else "Unknown equipment")
+        out.append({
+            "equipment_label": ueic,
+            "equipment_id": str(r.equipment_id) if r.equipment_id else None,
+            "request_id": str(r.id),
+            "request_number": r.request_number,
+            "test_type": r.test_type.name if r.test_type else None,
+            "due_date": r.due_date.isoformat() if r.due_date else None,
+        })
+    total = len(out)
+    page = out[offset:offset + limit] if limit is not None else out[offset:]
+    return page, total
+
+
+def _closed_this_week_tickets_list(db: Session, org_id, dept_ids_for_scope, limit=None, offset=0):
+    """Every TestingRequest closed in the last 7 days, excluding rejected/
+    cancelled (those get their own list below — this one is meant to read
+    as genuine completions, same as _scope_counts' closed_this_week_count
+    it's the actionable list behind). Standalone module-level function for
+    GET /dashboard/closed-tickets' "Load More" pagination.
+    """
+    from datetime import timedelta
+    from models import TestingRequest
+    from services.dashboard_service import _now
+    closed_expr = _dqi_closed_expr_for_org(db, org_id)
+    rejected_ids, cancelled_ids = _rejected_cancelled_ids(db, org_id)
+    rejected_cancelled_expr = TestingRequest.id.in_(rejected_ids | cancelled_ids)
+    tr_filters = [TestingRequest.organization_id == org_id]
+    if dept_ids_for_scope:
+        tr_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+    rows = (
+        db.query(TestingRequest)
+        .filter(
+            *tr_filters,
+            closed_expr,
+            ~rejected_cancelled_expr,
+            TestingRequest.mts >= _now() - timedelta(days=7),
+        )
+        .order_by(TestingRequest.mts.desc())
+        .all()
+    )
+    out = []
+    for r in rows:
+        ueic = r.equipment.ueic if r.equipment else (
+            r.equipment_type.name if r.equipment_type else "Unknown equipment")
+        out.append({
+            "equipment_label": ueic,
+            "equipment_id": str(r.equipment_id) if r.equipment_id else None,
+            "request_id": str(r.id),
+            "request_number": r.request_number,
+            "test_type": r.test_type.name if r.test_type else None,
+            "due_date": r.due_date.isoformat() if r.due_date else None,
+        })
+    total = len(out)
+    page = out[offset:offset + limit] if limit is not None else out[offset:]
+    return page, total
+
+
+def _rejected_cancelled_tickets_list(db: Session, org_id, dept_ids_for_scope, limit=None, offset=0):
+    """Every rejected or cancelled TestingRequest — the actionable full
+    list behind _scope_counts' rejected_cancelled_count. Standalone
+    module-level function for GET /dashboard/rejected-cancelled-tickets'
+    "Load More" pagination.
+    """
+    from models import TestingRequest
+    from category_labels import TrWfOutcomeColors
+    rejected_ids, cancelled_ids = _rejected_cancelled_ids(db, org_id)
+    rejected_cancelled_expr = TestingRequest.id.in_(rejected_ids | cancelled_ids)
+    tr_filters = [TestingRequest.organization_id == org_id]
+    if dept_ids_for_scope:
+        tr_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+    rows = (
+        db.query(TestingRequest)
+        .filter(*tr_filters, rejected_cancelled_expr)
+        .order_by(TestingRequest.mts.desc())
+        .all()
+    )
+    out = []
+    for r in rows:
+        ueic = r.equipment.ueic if r.equipment else (
+            r.equipment_type.name if r.equipment_type else "Unknown equipment")
+        outcome = None
+        outcome_color = None
+        if r.id in rejected_ids:
+            outcome = "REJECTED"
+            outcome_color = TrWfOutcomeColors.get("rejected")
+        elif r.id in cancelled_ids:
+            outcome = "CANCELLED"
+            outcome_color = TrWfOutcomeColors.get("cancelled")
+        out.append({
+            "equipment_label": ueic,
+            "equipment_id": str(r.equipment_id) if r.equipment_id else None,
+            "request_id": str(r.id),
+            "request_number": r.request_number,
+            "test_type": r.test_type.name if r.test_type else None,
+            "due_date": r.due_date.isoformat() if r.due_date else None,
+            "outcome": outcome,
+            "outcome_color": outcome_color,
+        })
+    total = len(out)
+    page = out[offset:offset + limit] if limit is not None else out[offset:]
+    return page, total
+
+
+def _critical_equipment_list(db: Session, org_id, dept_ids_for_scope, limit=None, offset=0):
+    """Every equipment unit whose EquipmentAnalytics.risk_level is
+    'Critical' — the actionable full list behind _scope_counts'
+    critical_count (same definition the AI Analytics Dashboard uses).
+    Standalone module-level function for
+    GET /dashboard/critical-equipment' "Load More" pagination.
+    """
+    from models import EquipmentAnalytics as _CritEA
+    crit_filters = [_CritEA.organization_id == org_id, _CritEA.risk_level == 'Critical']
+    if dept_ids_for_scope:
+        crit_filters.append(_CritEA.department_id.in_(dept_ids_for_scope))
+    rows = (
+        db.query(_CritEA)
+        .filter(*crit_filters)
+        .order_by(_CritEA.health_score.asc().nulls_last())
+        .all()
+    )
+    out = []
+    for row in rows:
+        eq = row.equipment
+        out.append({
+            "equipment_id": str(row.equipment_id),
+            "equipment_label": eq.ueic if eq else "Unknown equipment",
+            "health_score": float(row.health_score) if row.health_score is not None else None,
+            "condition_summary": row.condition_summary,
+        })
+    total = len(out)
+    page = out[offset:offset + limit] if limit is not None else out[offset:]
+    return page, total
+
+
 def _build_department_rollup(db: Session, svc: DashboardService,
                               current_user: Optional[User] = None) -> dict:
     from models import OrgDepartment, TestingRequest, OrgRole, OrgUserRole, User, HierarchyAnalytics, EquipmentAnalytics, TrWfStageRole
@@ -1192,9 +1438,20 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # active states like 'pending_assignment' (confirmed live:
         # TR-KP-2026-0650, due 2026-08-20 and still sitting at L3 Tester
         # Assignment, was excluded from this tile while genuinely overdue).
+        # Excludes calibration requests — those get their own Overdue
+        # T+0/T+7/T+15 buckets in the Calibration section, now based on
+        # actual validity expiry (calibration_date + validity_months) via
+        # _calibration_summary/_calibration_overdue_equipment, not this
+        # generic ticket due_date. Counting them here too would double
+        # them into both places, and worse, this generic due_date is often
+        # just a short task SLA on a follow-up ticket — unrelated to
+        # whether the equipment's calibration has actually expired
+        # (confirmed live: 4 relays flagged "3-11 days overdue" here whose
+        # real calibration validity doesn't expire until mid/late 2027).
         overdue_count = db.query(func.count(TestingRequest.id)).filter(
             *tr_filters,
             ~_closed_expr,
+            TestingRequest.is_calibration.is_(False),
             TestingRequest.due_date < _now(),
         ).scalar() or 0
         # Open = not closed, no age limit (unlike total_requests/completed_requests
@@ -1347,6 +1604,82 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             if review_sla_total > 0 else None
         )
 
+        # Severity-split SLA (the spec's actual 24h-ALERT/2h-CRITICAL
+        # requirement) — additive to review_sla_pct above, not a
+        # replacement: that one stays exactly as it was for any existing
+        # caller. Severity is resolved per closed review from the worst
+        # (CRITICAL beats ALERT) evaluation_result['overall'] among that
+        # review's TestingRequest's TestResults — a review with only
+        # NORMAL results has nothing to hold to an ALERT/CRITICAL SLA and
+        # is excluded, not counted as compliant. Unlike review_sla_pct,
+        # this does NOT require TrWfStage.default_duration_hours/days to
+        # be set — the deadline comes from the fixed severity thresholds
+        # below, not a per-stage admin config, so a result stage nobody
+        # has configured a duration for yet still gets scored here.
+        from models import TestResult as _TestResult
+        _severity_rows = (
+            db.query(
+                TrWfStageInstance.started_at,
+                TrWfStageInstance.completed_at,
+                TestingRequest.id,
+            )
+            .join(TrWfStage, TrWfStage.id == TrWfStageInstance.stage_id)
+            .join(TrWfInstance, TrWfInstance.id == TrWfStageInstance.wf_instance_id)
+            .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+            .filter(
+                *tr_filters,
+                TrWfStage.is_result_stage.is_(True),
+                TrWfStageInstance.status.in_(("completed", "rejected")),
+                TrWfStageInstance.started_at.isnot(None),
+                TrWfStageInstance.completed_at.isnot(None),
+            )
+            .all()
+        )
+        _req_ids = {req_id for _, _, req_id in _severity_rows}
+        _worst_severity_by_req: dict = {}
+        if _req_ids:
+            _sev_rank = {"CRITICAL": 2, "ALERT": 1}
+            for req_id, overall in (
+                db.query(_TestResult.testing_request_id, _TestResult.evaluation_result["overall"].astext)
+                .filter(_TestResult.testing_request_id.in_(_req_ids))
+                .all()
+            ):
+                rank = _sev_rank.get(overall)
+                if rank is None:
+                    continue
+                cur_rank = _sev_rank.get(_worst_severity_by_req.get(req_id))
+                if cur_rank is None or rank > cur_rank:
+                    _worst_severity_by_req[req_id] = overall
+
+        _sla_hours = {
+            "ALERT": config.REVIEW_SLA_HOURS_ALERT,
+            "CRITICAL": config.REVIEW_SLA_HOURS_CRITICAL,
+        }
+        _sla_counts = {
+            "ALERT": {"total": 0, "compliant": 0},
+            "CRITICAL": {"total": 0, "compliant": 0},
+        }
+        for started_at, completed_at, req_id in _severity_rows:
+            severity = _worst_severity_by_req.get(req_id)
+            if severity not in _sla_hours:
+                continue
+            bucket = _sla_counts[severity]
+            bucket["total"] += 1
+            deadline = started_at + timedelta(hours=_sla_hours[severity])
+            if completed_at <= deadline:
+                bucket["compliant"] += 1
+
+        def _pct(bucket):
+            return (
+                int((bucket["compliant"] / bucket["total"]) * 100)
+                if bucket["total"] > 0 else None
+            )
+
+        review_sla_pct_alert = _pct(_sla_counts["ALERT"])
+        review_sla_total_alert = _sla_counts["ALERT"]["total"]
+        review_sla_pct_critical = _pct(_sla_counts["CRITICAL"])
+        review_sla_total_critical = _sla_counts["CRITICAL"]["total"]
+
         return {
             "total_tests": total_requests,
             "overdue_count": overdue_count,
@@ -1360,6 +1693,10 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "compliance_pct": compliance_pct,
             "review_sla_pct": review_sla_pct,
             "review_sla_total": review_sla_total,
+            "review_sla_pct_alert": review_sla_pct_alert,
+            "review_sla_total_alert": review_sla_total_alert,
+            "review_sla_pct_critical": review_sla_pct_critical,
+            "review_sla_total_critical": review_sla_total_critical,
             "dqi_pct": dqi_pct,
             "dqi_ready_count": dqi_ready,
             "dqi_total_count": dqi_total,
@@ -1454,6 +1791,94 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         page = breaches[:limit] if limit is not None else breaches
         return page, total
 
+    def _review_sla_reviews_list_by_severity(dept_ids_for_scope, severity, limit=None):
+        """Every closed Result Review stage instance counted in this
+        severity's SLA bucket — routers/dashboard_kpi.py's own
+        review_sla_pct_alert/review_sla_pct_critical -- not breaches only.
+        A pure breach list (see _review_sla_breaches_list above, which the
+        blended card behind it uses) would leave this drill-down with
+        nothing to show whenever the severity is currently at 100%
+        compliance, and then the ALERT/CRITICAL tiles could never be
+        opened at all even though real judged reviews exist behind that
+        percentage — so each row carries its own `breached` flag instead,
+        letting the frontend badge "on time" reviews too. Same
+        severity-resolution rule as _scope_counts' severity-split block
+        (worst of CRITICAL/ALERT among the review's TestResults; a review
+        with only NORMAL results isn't judged under either SLA and is
+        excluded here too).
+        """
+        from models import TrWfStageInstance as _TrWfStageInstance, TestResult as _TestResult
+        _tr_filters = [TestingRequest.organization_id == svc.org_id]
+        if dept_ids_for_scope:
+            _tr_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
+
+        rows = (
+            db.query(_TrWfStageInstance, TestingRequest)
+            .join(TrWfStage, TrWfStage.id == _TrWfStageInstance.stage_id)
+            .join(TrWfInstance, TrWfInstance.id == _TrWfStageInstance.wf_instance_id)
+            .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+            .filter(
+                *_tr_filters,
+                TrWfStage.is_result_stage.is_(True),
+                _TrWfStageInstance.status.in_(("completed", "rejected")),
+                _TrWfStageInstance.started_at.isnot(None),
+                _TrWfStageInstance.completed_at.isnot(None),
+            )
+            .all()
+        )
+
+        req_ids = {tr.id for _, tr in rows}
+        worst_severity_by_req = {}
+        if req_ids:
+            sev_rank = {"CRITICAL": 2, "ALERT": 1}
+            for req_id, overall in (
+                db.query(_TestResult.testing_request_id, _TestResult.evaluation_result["overall"].astext)
+                .filter(_TestResult.testing_request_id.in_(req_ids))
+                .all()
+            ):
+                rank = sev_rank.get(overall)
+                if rank is None:
+                    continue
+                cur_rank = sev_rank.get(worst_severity_by_req.get(req_id))
+                if cur_rank is None or rank > cur_rank:
+                    worst_severity_by_req[req_id] = overall
+
+        sla_hours = {
+            "ALERT": config.REVIEW_SLA_HOURS_ALERT,
+            "CRITICAL": config.REVIEW_SLA_HOURS_CRITICAL,
+        }[severity]
+
+        reviewed = []
+        for si, tr in rows:
+            if worst_severity_by_req.get(tr.id) != severity:
+                continue
+            deadline = si.started_at + timedelta(hours=sla_hours)
+            breached = si.completed_at > deadline
+            eq = getattr(tr, "equipment", None)
+            reviewed.append({
+                "stage_instance_id": str(si.id),
+                "request_id": str(tr.id),
+                "request_number": tr.request_number,
+                "stage_name": f"{severity.title()} Review",
+                "test_type": f"{severity.title()} Review",
+                "equipment_id": str(eq.id) if eq else None,
+                "equipment_label": eq.ueic if eq else (
+                    tr.equipment_type.name if tr.equipment_type else "Equipment"),
+                "started_at": si.started_at.isoformat(),
+                "completed_at": si.completed_at.isoformat(),
+                "deadline": deadline.isoformat(),
+                "breached": breached,
+                "hours_over": round((si.completed_at - deadline).total_seconds() / 3600, 1)
+                              if breached else 0,
+            })
+
+        # Breaches first (worst overrun first), then on-time reviews —
+        # whatever needs attention should surface above what doesn't.
+        reviewed.sort(key=lambda r: (not r["breached"], -r["hours_over"]))
+        total = len(reviewed)
+        page = reviewed[:limit] if limit is not None else reviewed
+        return page, total
+
     def _calibration_summary(dept_ids_for_scope):
         """Zone-wide relay/ETV calibration KPIs (KPTCL spec §14.6's CEE
         RT & R&D Wing Dashboard) — compliance, T+0/T+7/T+15
@@ -1482,32 +1907,128 @@ def _build_department_rollup(db: Session, svc: DashboardService,
 
         now = _now()
         ninety_days = now - timedelta(days=90)
-        cal_due_90 = db.query(func.count(TestingRequest.id)).filter(
-            *cal_filters, TestingRequest.due_date.between(ninety_days, now),
-        ).scalar() or 0
-        cal_on_time_90 = db.query(func.count(TestingRequest.id)).filter(
-            *cal_filters, TestingRequest.due_date.between(ninety_days, now), cal_closed_expr,
-        ).scalar() or 0
+        # Fetched as rows (not just count) so the Cal. Compliance tile has
+        # an actual drill-down list, same as every other KPI tile on this
+        # dashboard — each row says whether it was closed, and on time.
+        due_90_rows = (
+            db.query(TestingRequest)
+            .filter(*cal_filters, TestingRequest.due_date.between(ninety_days, now))
+            .order_by(TestingRequest.due_date.desc())
+            .all()
+        )
+        cal_due_90 = len(due_90_rows)
+        # mts is the best available proxy for "when it closed" (no dedicated
+        # closed_at column — same convention closed_this_week_count already
+        # uses). Requiring mts <= due_date is the actual "on time" check —
+        # previously this only checked cal_closed_expr (closed at all), so a
+        # calibration finished months after its due date would still count
+        # as on-time here as long as it was eventually closed.
+        cal_due_90_list = []
+        cal_on_time_90 = 0
+        for r in due_90_rows:
+            # r.status is a TestingRequestStatus enum instance here (not a
+            # plain string) — .value is what actually compares equal to
+            # the literal 'closed' the SQL-level cal_closed_expr checks.
+            is_closed = (
+                (r.status.value if r.status else None) == 'closed'
+                or r.current_status_code in terminal_status_codes
+            )
+            on_time = is_closed and r.mts is not None and r.due_date is not None and r.mts <= r.due_date
+            if on_time:
+                cal_on_time_90 += 1
+            ueic = r.equipment.ueic if r.equipment else (
+                r.equipment_type.name if r.equipment_type else "Unknown equipment")
+            cal_due_90_list.append({
+                "equipment_id": str(r.equipment_id) if r.equipment_id else None,
+                "equipment_label": ueic,
+                "request_id": str(r.id),
+                "request_number": r.request_number,
+                "due_date": r.due_date.isoformat() if r.due_date else None,
+                "closed": is_closed,
+                "on_time": on_time,
+            })
         cal_compliance_pct = int((cal_on_time_90 / cal_due_90) * 100) if cal_due_90 > 0 else 100
 
-        # T+0 / T+7 / T+15 — currently-open calibration requests bucketed by
-        # how many days overdue they are, matching the spec's own
-        # escalation-tier naming (an org's real escalation cadence — e.g.
-        # notify at 0 days, escalate to next authority at 7, again at 15 —
-        # isn't itself stored anywhere; this buckets by elapsed time, the
-        # same information those escalation rules would act on).
-        overdue_cal_rows = db.query(TestingRequest.due_date).filter(
-            *cal_filters, ~cal_closed_expr, TestingRequest.due_date < now,
-        ).all()
+        # T+0 / T+7 / T+15 — EQUIPMENT whose calibration validity has
+        # actually expired (calibration_date + validity_months from its
+        # latest genuine reading), bucketed by how many business days past
+        # that expiry — matching the spec's own escalation-tier naming (an
+        # org's real escalation cadence isn't itself stored anywhere; this
+        # buckets by elapsed time, the same information those escalation
+        # rules would act on). Deliberately NOT open tickets past their own
+        # due_date (the previous version of this code) — that due_date is
+        # frequently just a short task SLA on a follow-up ticket, unrelated
+        # to whether the equipment's calibration has actually expired
+        # (confirmed live: relays flagged "3-11 days overdue" this way
+        # whose real calibration validity doesn't expire until mid/late
+        # 2027), and it double-counted the same tickets that already count
+        # toward the org-wide "Overdue Tests" tile above (which now
+        # excludes is_calibration requests specifically because this
+        # section is the intended home for them).
+        from models import Equipment as _CalEquipment
+        from services.calibration_service import CalibrationService as _CalSvcForOverdue, date_add as _cal_date_add
+        cal_equipment_ids = {
+            r[0] for r in db.query(TestingRequest.equipment_id).filter(
+                *cal_filters, TestingRequest.equipment_id.isnot(None),
+            ).distinct().all()
+        }
+        _cal_svc_overdue = _CalSvcForOverdue(db)
         cal_t0 = cal_t7 = cal_t15 = 0
-        for (due_date,) in overdue_cal_rows:
-            days_over = business_days_between(due_date.date(), now.date())
+        cal_expiring_30 = cal_expiring_60 = 0
+        # Each bucket also collects the actual equipment behind it — same
+        # "aggregate number alone isn't actionable" reasoning as every other
+        # KPI tile's own drill-down list on this dashboard.
+        cal_t0_equipment: list = []
+        cal_t7_equipment: list = []
+        cal_t15_equipment: list = []
+        cal_expiring_30_equipment: list = []
+        cal_expiring_60_equipment: list = []
+        for eq_id in cal_equipment_ids:
+            latest = _cal_svc_overdue._get_latest_reading(eq_id)
+            if not latest:
+                continue
+            next_due = _cal_date_add(latest["calibration_date"], latest["validity_months"])
+            eq = db.query(_CalEquipment).filter(_CalEquipment.id == eq_id).first()
+            ueic = eq.ueic if eq else str(eq_id)
+            if next_due >= now.date():
+                # Same equipment-level validity-expiry basis as the overdue
+                # buckets above — Expiring Soon previously counted open
+                # calibration TICKETS due within 30/60 days (the same task
+                # due_date the overdue buckets used to before that got
+                # fixed), not equipment actually approaching its real
+                # calibration expiry. Kept in this same loop rather than a
+                # separate query since it needs the identical per-equipment
+                # next_due this loop already computes.
+                days_until = (next_due - now.date()).days
+                row = {
+                    "equipment_id": str(eq_id),
+                    "equipment_label": ueic,
+                    "next_due_date": next_due.isoformat(),
+                    "days_until": days_until,
+                }
+                if days_until <= 60:
+                    cal_expiring_60 += 1
+                    cal_expiring_60_equipment.append(row)
+                if days_until <= 30:
+                    cal_expiring_30 += 1
+                    cal_expiring_30_equipment.append(row)
+                continue
+            days_over = business_days_between(next_due, now.date())
+            row = {
+                "equipment_id": str(eq_id),
+                "equipment_label": ueic,
+                "next_due_date": next_due.isoformat(),
+                "days_over": days_over,
+            }
             if days_over >= 15:
                 cal_t15 += 1
+                cal_t15_equipment.append(row)
             elif days_over >= 7:
                 cal_t7 += 1
+                cal_t7_equipment.append(row)
             else:
                 cal_t0 += 1
+                cal_t0_equipment.append(row)
 
         # The real pass/fail signal lives on the certificate's own TestResult
         # (test_data.recommendation_type, or test_data.overall_result as a
@@ -1528,18 +2049,41 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             TestResult.test_data["recommendation_type"].astext,
             TestResult.test_data["overall_result"].astext,
         ))
-        cal_fail_count = db.query(func.count(func.distinct(TestingRequest.id))).join(
-            TestResult, TestResult.testing_request_id == TestingRequest.id,
-        ).filter(*cal_filters, _cal_result == 'fail').scalar() or 0
-
-        cal_expiring_30 = db.query(func.count(TestingRequest.id)).filter(
-            *cal_filters, ~cal_closed_expr,
-            TestingRequest.due_date.between(now, now + timedelta(days=30)),
-        ).scalar() or 0
-        cal_expiring_60 = db.query(func.count(TestingRequest.id)).filter(
-            *cal_filters, ~cal_closed_expr,
-            TestingRequest.due_date.between(now, now + timedelta(days=60)),
-        ).scalar() or 0
+        # created_by IS NOT NULL excludes TestResults that never went
+        # through the real result form (calibration_hooks.py's certificate
+        # recording, and the test result wizard, both always set it to the
+        # submitting user) — confirmed live: a batch of synthetic/seeded
+        # TestResults with nothing but a bare {"overall_result": "fail",
+        # "validity_months": ...} and no calibration_date/calibrated_by/
+        # certificate_number at all, all created_by=NULL, was inflating
+        # this count with failures nobody ever actually observed.
+        _cal_has_real_submission = TestingRequest.created_by.isnot(None)
+        _cal_fail_rows = (
+            db.query(TestingRequest, TestResult.tested_at)
+            .join(TestResult, TestResult.testing_request_id == TestingRequest.id)
+            .filter(*cal_filters, _cal_has_real_submission, _cal_result == 'fail')
+            .order_by(TestResult.tested_at.desc())
+            .all()
+        )
+        # De-duped by request id in Python (not a SQL DISTINCT) now that the
+        # query also needs to return each request's own detail for the
+        # drill-down list below, not just a count.
+        _seen_fail_request_ids: set = set()
+        cal_fail_equipment: list = []
+        for tr_row, tested_at in _cal_fail_rows:
+            if tr_row.id in _seen_fail_request_ids:
+                continue
+            _seen_fail_request_ids.add(tr_row.id)
+            ueic = tr_row.equipment.ueic if tr_row.equipment else (
+                tr_row.equipment_type.name if tr_row.equipment_type else "Unknown equipment")
+            cal_fail_equipment.append({
+                "equipment_id": str(tr_row.equipment_id) if tr_row.equipment_id else None,
+                "equipment_label": ueic,
+                "request_id": str(tr_row.id),
+                "request_number": tr_row.request_number,
+                "tested_at": tested_at.isoformat() if tested_at else None,
+            })
+        cal_fail_count = len(_seen_fail_request_ids)
 
         # 12-month FAIL-rate trend — "Calibration failure trend" (§14.6),
         # previously only ever a current-snapshot count with no history.
@@ -1553,7 +2097,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         ).join(
             TestResult, TestResult.testing_request_id == TestingRequest.id,
         ).filter(
-            *cal_filters, TestingRequest.mts >= trend_cutoff,
+            *cal_filters, _cal_has_real_submission, TestingRequest.mts >= trend_cutoff,
             TestingRequest.status.in_(['closed', 'rejected']),
         ).group_by('month', _cal_result).all()
         by_month: dict = {}
@@ -1597,12 +2141,19 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             # at 100, only one of them is worth showing a tile for.
             "due_90d": cal_due_90,
             "compliance_pct": cal_compliance_pct,
+            "compliance_list": cal_due_90_list,
             "fail_count": cal_fail_count,
+            "fail_equipment": cal_fail_equipment,
             "overdue_t0": cal_t0,
+            "overdue_t0_equipment": cal_t0_equipment,
             "overdue_t7": cal_t7,
+            "overdue_t7_equipment": cal_t7_equipment,
             "overdue_t15": cal_t15,
+            "overdue_t15_equipment": cal_t15_equipment,
             "expiring_30d": cal_expiring_30,
+            "expiring_30d_equipment": cal_expiring_30_equipment,
             "expiring_60d": cal_expiring_60,
+            "expiring_60d_equipment": cal_expiring_60_equipment,
             "fail_rate_trend": fail_rate_trend,
             "interval_advisories": interval_advisories,
         }
@@ -1703,7 +2254,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
 
     from sqlalchemy import or_ as _or_tl
 
-    def _ticket_lists(dept_ids_for_scope, limit=10):
+    def _ticket_lists(dept_ids_for_scope, limit=config.DASHBOARD_PANEL_PAGE_SIZE):
         """This-week / open / closed-this-week / rejected-cancelled ticket
         rows, scoped exactly like _scope_counts' matching counts above —
         shared by both the leaf and branch shapes so a branch-scope KPI
@@ -1724,7 +2275,6 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             TestingRequest.status == 'closed',
             TestingRequest.current_status_code.in_(terminal_status_codes),
         )
-        tl_rejected_cancelled_expr = TestingRequest.id.in_(rejected_cancelled_request_ids)
 
         this_week_cutoff = _now() + timedelta(days=7)
         this_week_rows = (
@@ -1754,92 +2304,23 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                 "overdue": _make_tz(r.due_date) < _now() if r.due_date else False,
             })
 
-        def _rows(query_rows):
-            out = []
-            for r in query_rows:
-                ueic = r.equipment.ueic if r.equipment else (
-                    r.equipment_type.name if r.equipment_type else "Unknown equipment")
-                # Which of the two outcomes THIS specific request actually
-                # hit — rejected_cancelled_rows mixes both, so the badge
-                # shown per-row must say which one, not a blanket combined
-                # label. None for every other ticket list (open/closed),
-                # where the distinction doesn't apply.
-                outcome = None
-                outcome_color = None
-                if r.id in rejected_request_ids:
-                    outcome = "REJECTED"
-                    outcome_color = TrWfOutcomeColors.get("rejected")
-                elif r.id in cancelled_request_ids:
-                    outcome = "CANCELLED"
-                    outcome_color = TrWfOutcomeColors.get("cancelled")
-                out.append({
-                    "equipment_label": ueic,
-                    "equipment_id": str(r.equipment_id) if r.equipment_id else None,
-                    "request_id": str(r.id),
-                    "request_number": r.request_number,
-                    "test_type": r.test_type.name if r.test_type else None,
-                    "due_date": r.due_date.isoformat() if r.due_date else None,
-                    "outcome": outcome,
-                    # Canonical color for that outcome (category_labels.py's
-                    # TrWfOutcomeColors), served here so the frontend badge
-                    # doesn't hardcode it separately.
-                    "outcome_color": outcome_color,
-                })
-            return out
-
-        open_rows = (
-            db.query(TestingRequest)
-            .filter(tl_filter, ~tl_closed_expr)
-            .order_by(TestingRequest.mts.desc())
-            .limit(limit)
-            .all()
-        )
-        # Excludes rejected/cancelled — those get their own card/list
-        # (rejected_cancelled_tickets below) rather than counting toward
-        # "Closed This Week", which is meant to read as genuine completions.
-        closed_this_week_rows = (
-            db.query(TestingRequest)
-            .filter(tl_filter, tl_closed_expr, ~tl_rejected_cancelled_expr,
-                    TestingRequest.mts >= _now() - timedelta(days=7))
-            .order_by(TestingRequest.mts.desc())
-            .limit(limit)
-            .all()
-        )
-        rejected_cancelled_rows = (
-            db.query(TestingRequest)
-            .filter(tl_filter, tl_rejected_cancelled_expr)
-            .order_by(TestingRequest.mts.desc())
-            .limit(limit)
-            .all()
-        )
-
-        # Per-equipment breakdown behind _scope_counts' critical_count —
-        # same EquipmentAnalytics.risk_level == 'Critical' definition (see
-        # that function's comment on why this must match the AI Analytics
-        # Dashboard's own definition), just returning the actual rows
-        # instead of a bare count so the "Critical Equipment" tile can
-        # expand into a list the same way Open/Closed/Rejected already do.
-        from models import EquipmentAnalytics as _CritEA
-        crit_filters = [_CritEA.organization_id == svc.org_id,
-                        _CritEA.risk_level == 'Critical']
-        if dept_ids_for_scope:
-            crit_filters.append(_CritEA.department_id.in_(dept_ids_for_scope))
-        critical_rows = (
-            db.query(_CritEA)
-            .filter(*crit_filters)
-            .order_by(_CritEA.health_score.asc().nulls_last())
-            .limit(limit)
-            .all()
-        )
-        critical_equipment = []
-        for row in critical_rows:
-            eq = row.equipment
-            critical_equipment.append({
-                "equipment_id": str(row.equipment_id),
-                "equipment_label": eq.ueic if eq else "Unknown equipment",
-                "health_score": float(row.health_score) if row.health_score is not None else None,
-                "condition_summary": row.condition_summary,
-            })
+        # Open/Closed/Rejected-Cancelled/Critical Equipment each moved to
+        # their own standalone module-level function (same shape as
+        # _overdue_tickets_list above) so their own "Load More" endpoints
+        # can page through the REAL full list — this local `limit` now
+        # only bounds the page returned here, with the true total alongside
+        # so the UI can say "showing N of TOTAL" instead of silently
+        # truncating (confirmed live: open_count said 26, critical_count
+        # said 19, both drill-downs only ever showed up to 10 — the same
+        # class of bug _overdue_tickets_list already fixed for Overdue).
+        open_tickets, open_tickets_total = _open_tickets_list(
+            db, svc.org_id, dept_ids_for_scope, limit=limit)
+        closed_this_week_tickets, closed_this_week_tickets_total = \
+            _closed_this_week_tickets_list(db, svc.org_id, dept_ids_for_scope, limit=limit)
+        rejected_cancelled_tickets, rejected_cancelled_tickets_total = \
+            _rejected_cancelled_tickets_list(db, svc.org_id, dept_ids_for_scope, limit=limit)
+        critical_equipment, critical_equipment_total = _critical_equipment_list(
+            db, svc.org_id, dept_ids_for_scope, limit=limit)
 
         # Per-ticket breakdown behind _scope_counts' "Awaiting Approval" tile
         # (pending_approval_count + pending_review_count — deliberately NOT
@@ -1879,11 +2360,15 @@ def _build_department_rollup(db: Session, svc: DashboardService,
 
         return {
             "this_week": this_week,
-            "open_tickets": _rows(open_rows),
-            "closed_this_week_tickets": _rows(closed_this_week_rows),
+            "open_tickets": open_tickets,
+            "open_tickets_total_count": open_tickets_total,
+            "closed_this_week_tickets": closed_this_week_tickets,
+            "closed_this_week_tickets_total_count": closed_this_week_tickets_total,
             "awaiting_approval": awaiting_approval,
-            "rejected_cancelled_tickets": _rows(rejected_cancelled_rows),
+            "rejected_cancelled_tickets": rejected_cancelled_tickets,
+            "rejected_cancelled_tickets_total_count": rejected_cancelled_tickets_total,
             "critical_equipment": critical_equipment,
+            "critical_equipment_total_count": critical_equipment_total,
         }
 
     def _failure_cohort_summary():
@@ -1974,7 +2459,12 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # equipment count is small enough to return in full (unlike the
         # branch shape below, which caps it).
         dqi_issues, _dqi_issues_total = _dqi_issues_list(svc.dept_ids)
+        overdue_tickets, _overdue_tickets_total = _overdue_tickets_list(db, svc.org_id, svc.dept_ids)
         review_sla_breaches, _review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids)
+        review_sla_reviews_alert, _review_sla_reviews_alert_total = \
+            _review_sla_reviews_list_by_severity(svc.dept_ids, "ALERT")
+        review_sla_reviews_critical, _review_sla_reviews_critical_total = \
+            _review_sla_reviews_list_by_severity(svc.dept_ids, "CRITICAL")
 
         return {
             "shape": "leaf",
@@ -1984,8 +2474,14 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "equipment_count": equipment_count,
             "dqi_issues": dqi_issues,
             "dqi_issues_total_count": _dqi_issues_total,
+            "overdue_tickets": overdue_tickets,
+            "overdue_tickets_total_count": _overdue_tickets_total,
             "review_sla_breaches": review_sla_breaches,
             "review_sla_breaches_total_count": _review_sla_breaches_total,
+            "review_sla_reviews_alert": review_sla_reviews_alert,
+            "review_sla_reviews_alert_total_count": _review_sla_reviews_alert_total,
+            "review_sla_reviews_critical": review_sla_reviews_critical,
+            "review_sla_reviews_critical_total_count": _review_sla_reviews_critical_total,
             "can_test": can_test,
             "assigned_test_count": assigned_test_count,
             "can_approve_requests": can_approve_requests,
@@ -2040,8 +2536,14 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     # response bounded at a zone/org scope (potentially hundreds of
     # substations' worth of equipment), with the true total alongside so the
     # UI can say "showing N of TOTAL" rather than imply the list is complete.
-    _branch_dqi_issues, _branch_dqi_issues_total = _dqi_issues_list(svc.dept_ids, limit=50)
-    _branch_review_sla_breaches, _branch_review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids, limit=50)
+    _branch_dqi_issues, _branch_dqi_issues_total = _dqi_issues_list(svc.dept_ids, limit=config.DASHBOARD_PANEL_PAGE_SIZE)
+    _branch_overdue_tickets, _branch_overdue_tickets_total = _overdue_tickets_list(
+        db, svc.org_id, svc.dept_ids, limit=config.DASHBOARD_PANEL_PAGE_SIZE)
+    _branch_review_sla_breaches, _branch_review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids, limit=config.DASHBOARD_PANEL_PAGE_SIZE)
+    _branch_review_sla_reviews_alert, _branch_review_sla_reviews_alert_total = \
+        _review_sla_reviews_list_by_severity(svc.dept_ids, "ALERT", limit=config.DASHBOARD_PANEL_PAGE_SIZE)
+    _branch_review_sla_reviews_critical, _branch_review_sla_reviews_critical_total = \
+        _review_sla_reviews_list_by_severity(svc.dept_ids, "CRITICAL", limit=config.DASHBOARD_PANEL_PAGE_SIZE)
     return {
         "shape": "branch",
         "scope_name": scope_name,
@@ -2052,8 +2554,14 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         "summary": _scope_counts(svc.dept_ids),
         "dqi_issues": _branch_dqi_issues,
         "dqi_issues_total_count": _branch_dqi_issues_total,
+        "overdue_tickets": _branch_overdue_tickets,
+        "overdue_tickets_total_count": _branch_overdue_tickets_total,
         "review_sla_breaches": _branch_review_sla_breaches,
         "review_sla_breaches_total_count": _branch_review_sla_breaches_total,
+        "review_sla_reviews_alert": _branch_review_sla_reviews_alert,
+        "review_sla_reviews_alert_total_count": _branch_review_sla_reviews_alert_total,
+        "review_sla_reviews_critical": _branch_review_sla_reviews_critical,
+        "review_sla_reviews_critical_total_count": _branch_review_sla_reviews_critical_total,
         "approvals": _approval_queue(svc.dept_ids),
         "can_approve_requests": can_approve_requests,
         "can_review": can_review,
@@ -2111,7 +2619,7 @@ def get_dqi_issues_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2134,6 +2642,296 @@ def get_dqi_issues_page(
     page = issues[offset:offset + limit]
     return {
         "issues": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
+
+
+@router.get("/overdue-tickets")
+def get_overdue_tickets_page(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the Overdue Tickets list embedded in
+    GET /dashboard/overview (whose own `overdue_tickets` is capped at
+    config.DASHBOARD_PANEL_PAGE_SIZE for a branch scope) —
+    powers the Overall Dashboard's "Load More" button the same way
+    GET /dashboard/dqi-issues does for the DQI panel, without re-running
+    the whole rollup.
+    """
+    svc = _svc(db, current_user, org_id, dept_id)
+    tickets, total = _overdue_tickets_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
+    return {
+        "tickets": tickets,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
+
+
+@router.get("/open-tickets")
+def get_open_tickets_page(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the Open Requests list — same "Load
+    More" shape as GET /dashboard/overdue-tickets, for the Open Requests
+    KPI tile's own drill-down.
+    """
+    svc = _svc(db, current_user, org_id, dept_id)
+    tickets, total = _open_tickets_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
+    return {
+        "tickets": tickets,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
+
+
+@router.get("/closed-tickets")
+def get_closed_tickets_page(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the Closed This Week list — same "Load
+    More" shape as GET /dashboard/overdue-tickets, for the Closed This
+    Week KPI tile's own drill-down.
+    """
+    svc = _svc(db, current_user, org_id, dept_id)
+    tickets, total = _closed_this_week_tickets_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
+    return {
+        "tickets": tickets,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
+
+
+@router.get("/rejected-cancelled-tickets")
+def get_rejected_cancelled_tickets_page(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the Rejected/Cancelled list — same "Load
+    More" shape as GET /dashboard/overdue-tickets, for the Rejected /
+    Cancelled KPI tile's own drill-down.
+    """
+    svc = _svc(db, current_user, org_id, dept_id)
+    tickets, total = _rejected_cancelled_tickets_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
+    return {
+        "tickets": tickets,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
+
+
+@router.get("/critical-equipment")
+def get_critical_equipment_page(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the Critical Equipment list — same "Load
+    More" shape as GET /dashboard/overdue-tickets, for the Critical
+    Equipment KPI tile's own drill-down.
+    """
+    svc = _svc(db, current_user, org_id, dept_id)
+    tickets, total = _critical_equipment_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
+    return {
+        "tickets": tickets,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
+
+
+@router.get("/review-sla-breaches")
+def get_review_sla_breaches_page(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the blended Result Review SLA Breaches
+    list behind the "Result Review SLA" tile. The rollup's own
+    _review_sla_breaches_list is nested inside _build_department_rollup
+    (a closure over several rollup-local values not worth threading
+    through a standalone signature just for this), so this reimplements
+    the same query directly instead — it only needs org/dept scope plus
+    TrWfStage.is_result_stage + default_duration_hours/days, none of
+    which has any viewer/session dependency, so re-deriving it here is
+    safe and gives an identical result set.
+    """
+    from sqlalchemy import or_
+    from models import TrWfStageInstance as _TrWfStageInstance, TrWfStage, TrWfInstance, TestingRequest
+    svc = _svc(db, current_user, org_id, dept_id)
+    _tr_filters = [TestingRequest.organization_id == svc.org_id]
+    if svc.dept_ids:
+        _tr_filters.append(TestingRequest.department_id.in_(svc.dept_ids))
+    rows = (
+        db.query(_TrWfStageInstance, TrWfStage, TestingRequest)
+        .join(TrWfStage, TrWfStage.id == _TrWfStageInstance.stage_id)
+        .join(TrWfInstance, TrWfInstance.id == _TrWfStageInstance.wf_instance_id)
+        .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+        .filter(
+            *_tr_filters,
+            TrWfStage.is_result_stage.is_(True),
+            _TrWfStageInstance.status.in_(("completed", "rejected")),
+            _TrWfStageInstance.started_at.isnot(None),
+            _TrWfStageInstance.completed_at.isnot(None),
+            or_(
+                TrWfStage.default_duration_hours.isnot(None),
+                TrWfStage.default_duration_days.isnot(None),
+            ),
+        )
+        .order_by(_TrWfStageInstance.completed_at.desc())
+        .all()
+    )
+    breaches = []
+    for si, stage, tr in rows:
+        deadline = (
+            si.started_at + timedelta(hours=stage.default_duration_hours)
+            if stage.default_duration_hours is not None
+            else si.started_at + timedelta(days=stage.default_duration_days)
+        )
+        if si.completed_at <= deadline:
+            continue
+        eq = getattr(tr, "equipment", None)
+        breaches.append({
+            "stage_instance_id": str(si.id),
+            "request_id": str(tr.id),
+            "request_number": tr.request_number,
+            "stage_name": stage.name,
+            "test_type": stage.name,
+            "equipment_id": str(eq.id) if eq else None,
+            "equipment_label": eq.ueic if eq else (
+                tr.equipment_type.name if tr.equipment_type else "Equipment"),
+            "started_at": si.started_at.isoformat(),
+            "completed_at": si.completed_at.isoformat(),
+            "deadline": deadline.isoformat(),
+            "hours_over": round((si.completed_at - deadline).total_seconds() / 3600, 1),
+        })
+    total = len(breaches)
+    page = breaches[offset:offset + limit]
+    return {
+        "tickets": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
+
+
+@router.get("/review-sla-reviews")
+def get_review_sla_reviews_page(
+    severity: str = Query(..., pattern="^(ALERT|CRITICAL)$"),
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the severity-split Review SLA · ALERT /
+    CRITICAL reviews list. Same reasoning as get_review_sla_breaches_page
+    above for reimplementing the query directly rather than reaching into
+    _build_department_rollup's nested _review_sla_reviews_list_by_severity.
+    """
+    from models import TrWfStageInstance as _TrWfStageInstance, TrWfStage, TrWfInstance, TestingRequest, TestResult as _TestResult
+    svc = _svc(db, current_user, org_id, dept_id)
+    _tr_filters = [TestingRequest.organization_id == svc.org_id]
+    if svc.dept_ids:
+        _tr_filters.append(TestingRequest.department_id.in_(svc.dept_ids))
+    rows = (
+        db.query(_TrWfStageInstance, TestingRequest)
+        .join(TrWfStage, TrWfStage.id == _TrWfStageInstance.stage_id)
+        .join(TrWfInstance, TrWfInstance.id == _TrWfStageInstance.wf_instance_id)
+        .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
+        .filter(
+            *_tr_filters,
+            TrWfStage.is_result_stage.is_(True),
+            _TrWfStageInstance.status.in_(("completed", "rejected")),
+            _TrWfStageInstance.started_at.isnot(None),
+            _TrWfStageInstance.completed_at.isnot(None),
+        )
+        .all()
+    )
+    req_ids = {tr.id for _, tr in rows}
+    worst_severity_by_req = {}
+    if req_ids:
+        sev_rank = {"CRITICAL": 2, "ALERT": 1}
+        for req_id, overall in (
+            db.query(_TestResult.testing_request_id, _TestResult.evaluation_result["overall"].astext)
+            .filter(_TestResult.testing_request_id.in_(req_ids))
+            .all()
+        ):
+            rank = sev_rank.get(overall)
+            if rank is None:
+                continue
+            cur_rank = sev_rank.get(worst_severity_by_req.get(req_id))
+            if cur_rank is None or rank > cur_rank:
+                worst_severity_by_req[req_id] = overall
+    sla_hours = {
+        "ALERT": config.REVIEW_SLA_HOURS_ALERT,
+        "CRITICAL": config.REVIEW_SLA_HOURS_CRITICAL,
+    }[severity]
+    reviewed = []
+    for si, tr in rows:
+        if worst_severity_by_req.get(tr.id) != severity:
+            continue
+        deadline = si.started_at + timedelta(hours=sla_hours)
+        breached = si.completed_at > deadline
+        eq = getattr(tr, "equipment", None)
+        reviewed.append({
+            "stage_instance_id": str(si.id),
+            "request_id": str(tr.id),
+            "request_number": tr.request_number,
+            "stage_name": f"{severity.title()} Review",
+            "test_type": f"{severity.title()} Review",
+            "equipment_id": str(eq.id) if eq else None,
+            "equipment_label": eq.ueic if eq else (
+                tr.equipment_type.name if tr.equipment_type else "Equipment"),
+            "started_at": si.started_at.isoformat(),
+            "completed_at": si.completed_at.isoformat(),
+            "deadline": deadline.isoformat(),
+            "breached": breached,
+            "hours_over": round((si.completed_at - deadline).total_seconds() / 3600, 1)
+                          if breached else 0,
+        })
+    reviewed.sort(key=lambda r: (not r["breached"], -r["hours_over"]))
+    total = len(reviewed)
+    page = reviewed[offset:offset + limit]
+    return {
+        "tickets": page,
         "total": total,
         "offset": offset,
         "limit": limit,

@@ -7109,14 +7109,14 @@ SELECT
     d2.name                         AS ee_subdivision,
     d.name                          AS substation,
     COUNT(tr.id)                    AS calibrations_due,
-    COUNT(CASE WHEN tr.status IN ('approved','rejected','outcome_active','commissioned')
+    COUNT(CASE WHEN tr.status IN ('approved','rejected','outcome_active','commissioned','closed')
                  AND tr.completed_at <= tr.due_date THEN 1 END) AS calibrations_on_time,
     COUNT(CASE WHEN tr.due_date < NOW()
                  AND tr.status IN ('submitted','assigned','accepted','in_progress',
                                     'test_submitted','under_approval','under_review','finance_pending')
                 THEN 1 END)          AS calibrations_overdue,
     ROUND(
-        COUNT(CASE WHEN tr.status IN ('approved','rejected','outcome_active','commissioned')
+        COUNT(CASE WHEN tr.status IN ('approved','rejected','outcome_active','commissioned','closed')
                      AND tr.completed_at <= tr.due_date THEN 1 END)::numeric
         / NULLIF(COUNT(tr.id), 0) * 100, 1
     )                                AS compliance_pct
