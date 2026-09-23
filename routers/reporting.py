@@ -234,6 +234,19 @@ def run_report(
     except RuntimeError as e:
         raise HTTPException(422, str(e))
 
+    # Same "report ready" notification the scheduled job fires — a
+    # recipient doesn't care whether this run was triggered by a timer or
+    # by someone clicking Run. No-ops if the definition has no
+    # notification_event set.
+    try:
+        from models import ReportDefinition
+        from services.reporting_service import fire_report_ready
+        defn = db.query(ReportDefinition).filter(ReportDefinition.id == definition_id).first()
+        if defn:
+            fire_report_ready(db, defn, filename)
+    except Exception as notif_exc:
+        print(f"[Reports] Notification for definition {definition_id} failed: {notif_exc}")
+
     return Response(
         content=raw,
         media_type=content_type,
