@@ -9,7 +9,7 @@ public holidays are not (there's nothing to look them up against).
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 _WEEKEND = (5, 6)  # date.weekday(): Saturday=5, Sunday=6
 
@@ -66,4 +66,35 @@ def add_business_days(d: date, n: int) -> date:
         current += timedelta(days=1)
         if current.weekday() not in _WEEKEND:
             counted += 1
+    return current
+
+
+def add_business_hours(start: datetime, hours: float) -> datetime:
+    """
+    Return the datetime `hours` business-hours after `start`, treating
+    Sat/Sun as if the clock stops entirely -- a duration that would run
+    into or through a weekend resumes ticking at the following Monday
+    00:00 instead of counting weekend time. hours <= 0 returns start
+    unchanged. Preserves start's tzinfo (naive in, naive out; aware in,
+    aware out).
+
+    Used for SLA/deadline math that must agree with this module's
+    day-level functions above: Mon-Fri only, no holiday calendar (there's
+    nothing to look one up against in this schema).
+    """
+    if hours <= 0:
+        return start
+
+    remaining = timedelta(hours=hours)
+    current = start
+    while remaining > timedelta(0):
+        if current.weekday() in _WEEKEND:
+            current = datetime.combine(current.date() + timedelta(days=1), time.min, tzinfo=current.tzinfo)
+            continue
+        next_midnight = datetime.combine(current.date() + timedelta(days=1), time.min, tzinfo=current.tzinfo)
+        today_remaining = next_midnight - current
+        if remaining <= today_remaining:
+            return current + remaining
+        remaining -= today_remaining
+        current = next_midnight
     return current

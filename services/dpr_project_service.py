@@ -21,12 +21,25 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from models import RepairStageDefinition, RepairWorkflow, RepairWorkflowDefinition, User
+from models import (
+    RepairStageAuditLog,
+    RepairStageDefinition,
+    RepairStageInstance,
+    RepairWorkflow,
+    RepairWorkflowDefinition,
+    User,
+)
 from models_dpr import DprProject
 from services.repair_workflow_service import RepairWorkflowService
 
 DPR_WORKFLOW_CODE = "DPR_APPROVAL"
 DPR_ENTITY_TYPE = "dpr_project"
+
+# Intake approval chain (before the DPR_APPROVAL workflow above even
+# starts) -- see alter_dpr_intake_workflow.py for the seeded 2-stage
+# default. Mirrors PreCommissionService's INTAKE_WORKFLOW_CODE.
+DPR_INTAKE_WORKFLOW_CODE = "DPR_INTAKE"
+DPR_INTAKE_ENTITY_TYPE = "dpr_intake"
 
 
 class DprProjectService:
@@ -65,9 +78,9 @@ class DprProjectService:
         self.db.add(project)
         self.db.flush()
 
-        workflow = self._create_runtime_workflow(project, user)
-        project.workflow_id = workflow.id
-        self._sync_stage(project)
+        intake_workflow = self._create_intake_workflow(project, user)
+        project.intake_workflow_id = intake_workflow.id
+        self._sync_intake_stage_code(project)
         self.db.commit()
         self.db.refresh(project)
         return self._project_to_dict(project)
@@ -142,16 +155,96 @@ class DprProjectService:
         )
         return workflow
 
+    def _create_intake_workflow(self, project: DprProject, user: User) -> RepairWorkflow:
+        """
+        Mirrors PreCommissionService._create_intake_workflow -- a 2-level
+        (by default, admin-configurable) review chain that gates BEFORE
+        the real 5-stage DPR_APPROVAL workflow starts. The first stage
+        begins 'submitted' immediately (not 'pending') since there's no
+        separate per-level form to fill in -- each level just reviews the
+        project's own creation payload, same pure sign-off design as
+        Precommission's intake.
+        """
+        wf_def = (
+            self.db.query(RepairWorkflowDefinition)
+            .filter_by(workflow_code=DPR_INTAKE_WORKFLOW_CODE, is_active=True)
+            .first()
+        )
+        if not wf_def:
+            raise ValueError(
+                "DPR_INTAKE workflow definition not found. Run alter_dpr_intake_workflow.py first."
+            )
+        stages = (
+            self.db.query(RepairStageDefinition)
+            .filter(RepairStageDefinition.workflow_definition_id == wf_def.id)
+            .order_by(RepairStageDefinition.sequence)
+            .all()
+        )
+        if not stages:
+            raise ValueError("DPR_INTAKE workflow stages are not configured. Run alter_dpr_intake_workflow.py first.")
+
+        first_stage = stages[0]
+        workflow = RepairWorkflow(
+            # Suffixed: repair_workflows.workflow_number is unique, and
+            # this project will also get a DPR_APPROVAL RepairWorkflow
+            # (same project_number) once intake completes -- they can't
+            # share the raw number.
+            workflow_number=f"{project.project_number}-INTAKE",
+            workflow_code=DPR_INTAKE_WORKFLOW_CODE,
+            entity_type=DPR_INTAKE_ENTITY_TYPE,
+            entity_id=project.id,
+            equipment_id=project.equipment_id,
+            organization_id=project.organization_id,
+            current_stage_id=first_stage.id,
+            status="active",
+            assignment_pending=False,
+            progress=0,
+            priority="normal",
+            created_by=user.id,
+        )
+        self.db.add(workflow)
+        self.db.flush()
+
+        first_instance = None
+        for stage in stages:
+            is_first = stage.id == first_stage.id
+            instance = RepairStageInstance(
+                workflow_id=workflow.id,
+                stage_id=stage.id,
+                status="submitted" if is_first else "not_started",
+                assignment_pending=False,
+                started_at=self._utc_now() if is_first else None,
+                created_by=user.id,
+            )
+            self.db.add(instance)
+            self.db.flush()
+            if is_first:
+                first_instance = instance
+
+        workflow.current_stage_instance_id = first_instance.id if first_instance else None
+
+        self.db.add(
+            RepairStageAuditLog(
+                workflow_id=workflow.id,
+                stage_id=first_stage.id,
+                action="created",
+                performed_by=user.id,
+                note=f"DPR intake review started for {project.project_number}",
+            )
+        )
+        return workflow
+
     # ========================================
     # GET / LIST
     # ========================================
 
     def _get_project(self, project_id: UUID, user: User) -> DprProject:
-        project = self.db.query(DprProject).filter(DprProject.id == project_id).first()
+        project = self.db.query(DprProject).filter(
+            DprProject.id == project_id,
+            DprProject.organization_id == user.organization_id,
+        ).first()
         if not project:
             raise ValueError("DPR project not found.")
-        if user.organization_id and project.organization_id != user.organization_id:
-            raise ValueError("Unauthorized DPR project access.")
         return project
 
     def get_project(self, project_id: UUID, user: User) -> dict:
@@ -160,6 +253,11 @@ class DprProjectService:
         if project.workflow_id:
             result["workflow"] = self.workflow.get_workflow_detail(project.workflow_id)
             result["timeline"] = self.workflow.get_timeline(project.workflow_id)
+        elif project.intake_workflow_id:
+            # Still in the intake review chain -- DPR_APPROVAL workflow
+            # doesn't exist yet, so show the intake's own stage progress.
+            result["workflow"] = self.workflow.get_workflow_detail(project.intake_workflow_id)
+            result["timeline"] = self.workflow.get_timeline(project.intake_workflow_id)
         return result
 
     def list_projects(
@@ -170,9 +268,7 @@ class DprProjectService:
         skip: int = 0,
         limit: int = 100,
     ) -> list[dict]:
-        q = self.db.query(DprProject)
-        if user.organization_id:
-            q = q.filter(DprProject.organization_id == user.organization_id)
+        q = self.db.query(DprProject).filter(DprProject.organization_id == user.organization_id)
         if status and status != "all":
             q = q.filter(DprProject.status == status)
         if stage_code:
@@ -185,18 +281,35 @@ class DprProjectService:
     # ========================================
 
     def current_form(self, project_id: UUID, user: User) -> dict:
+        # QAP-equivalent form filling only applies once the real
+        # DPR_APPROVAL workflow exists -- the intake chain is pure
+        # sign-off with no per-level form (see _create_intake_workflow).
         project = self._get_project(project_id, user)
+        if not project.workflow_id:
+            raise ValueError("No DPR Approval workflow created yet — project is pending intake review.")
         data = self.workflow.get_current_form(project.workflow_id)
         data["project"] = self._project_to_dict(project)
         return data
 
     def timeline(self, project_id: UUID, user: User) -> list:
+        # Falls back to the intake workflow while workflow_id isn't set
+        # yet, so the approval screen can show intake progress before
+        # the DPR_APPROVAL workflow exists.
         project = self._get_project(project_id, user)
-        return self.workflow.get_timeline(project.workflow_id)
+        workflow_id = project.workflow_id or project.intake_workflow_id
+        if not workflow_id:
+            return []
+        return self.workflow.get_timeline(workflow_id)
 
     def available_actions(self, project_id: UUID, user: User) -> dict:
         project = self._get_project(project_id, user)
-        return self.workflow.get_available_transitions(project.workflow_id, user.id)
+        workflow_id = project.workflow_id or project.intake_workflow_id
+        if not workflow_id:
+            return {
+                "can_assign": False, "can_submit": False, "can_approve": False,
+                "can_reject": False, "can_cancel": False, "can_override": False,
+            }
+        return self.workflow.get_available_transitions(workflow_id, user.id)
 
     def eligible_users(self, project_id: UUID, stage_id: UUID, user: User) -> list:
         project = self._get_project(project_id, user)
@@ -224,14 +337,104 @@ class DprProjectService:
         return result
 
     def approve_stage(self, project_id: UUID, remarks: Optional[str], user: User) -> dict:
+        """
+        While workflow_id is unset, this advances the intake chain one
+        level instead of the real DPR_APPROVAL workflow. On the final
+        level's approval, intake completes and the real workflow starts
+        -- everything in between (however many levels an admin has
+        configured) is handled generically by RepairWorkflowService.
+        advance_stage, the same engine every other workflow type uses.
+        """
         project = self._get_project(project_id, user)
-        result = self.workflow.advance_stage(project.workflow_id, remarks, user.id, action_label="approve")
-        self._sync_stage(project)
+        in_intake = not project.workflow_id and bool(project.intake_workflow_id)
+        workflow_id = project.workflow_id or project.intake_workflow_id
+        if not workflow_id:
+            raise ValueError("No workflow found for this project.")
+
+        if in_intake:
+            intake = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+            if intake and intake.status == "completed":
+                # Recovery: a previous call already advanced the intake to
+                # 'completed' (advance_stage commits that internally) but
+                # runtime workflow creation never finished -- e.g. it
+                # raised before the commit below ran. advance_stage would
+                # now just fail ("Workflow is not active") if called
+                # again, so finish the interrupted step directly instead.
+                runtime_wf = self._create_runtime_workflow(project, user)
+                project.workflow_id = runtime_wf.id
+                self._sync_stage(project)
+                self.db.commit()
+                return {"message": "Workflow completed", "status": "completed", "progress": 100}
+
+        result = self.workflow.advance_stage(workflow_id, remarks, user.id, action_label="approve")
+
+        if in_intake:
+            intake = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
+            if intake and intake.status == "completed":
+                # Final level approved -- intake done, start the real workflow.
+                runtime_wf = self._create_runtime_workflow(project, user)
+                project.workflow_id = runtime_wf.id
+                self._sync_stage(project)
+            elif intake and intake.current_stage_instance_id:
+                # Moved to the next level -- auto-submit it too. Same
+                # reasoning as the first stage in _create_intake_workflow:
+                # nothing new to fill in per level, each one just reviews
+                # the same project.
+                next_inst = self.db.query(RepairStageInstance).filter(
+                    RepairStageInstance.id == intake.current_stage_instance_id
+                ).first()
+                if next_inst:
+                    next_inst.status = "submitted"
+                self._sync_intake_stage_code(project)
+        else:
+            self._sync_stage(project)
+
         self.db.commit()
         return result
 
     def reject_stage(self, project_id: UUID, remarks: Optional[str], user: User) -> dict:
+        """
+        Terminates the intake review directly when it's still in progress
+        -- deliberately NOT RepairWorkflowService.reject_stage(), whose
+        only non-"send back to an earlier stage" behavior is "re-queue
+        the same stage", not "end the workflow". A rejected intake should
+        end the review, not loop back for reassignment. See
+        alter_dpr_intake_workflow.py's docstring for the full reasoning.
+        Once the real DPR_APPROVAL workflow exists, reject keeps its
+        original "send back" semantics via the generic engine, unchanged.
+        """
         project = self._get_project(project_id, user)
+        if not project.workflow_id and project.intake_workflow_id:
+            intake = self.db.query(RepairWorkflow).filter(
+                RepairWorkflow.id == project.intake_workflow_id
+            ).first()
+            if not intake or intake.status != "active":
+                raise ValueError("Intake review is not active.")
+
+            current_inst = self.db.query(RepairStageInstance).filter(
+                RepairStageInstance.workflow_id == intake.id,
+                RepairStageInstance.stage_id == intake.current_stage_id,
+            ).first()
+            if current_inst:
+                current_inst.status = "rejected"
+                current_inst.completed_at = self._utc_now()
+
+            intake.status = "rejected"
+            intake.completed_at = self._utc_now()
+            intake.assignment_pending = False
+
+            self.db.add(RepairStageAuditLog(
+                workflow_id=intake.id,
+                stage_id=intake.current_stage_id,
+                action="reject",
+                performed_by=user.id,
+                note=remarks,
+            ))
+
+            project.status = "rejected"
+            self.db.commit()
+            return self._project_to_dict(project)
+
         result = self.workflow.reject_stage(project.workflow_id, remarks, user.id)
         self._sync_stage(project)
         self.db.commit()
@@ -269,6 +472,23 @@ class DprProjectService:
         if workflow and workflow.status in ("completed", "cancelled"):
             project.status = workflow.status
 
+    def _sync_intake_stage_code(self, project: DprProject) -> None:
+        """Denormalized current_stage_code for list/filter views while
+        still in the intake chain -- deliberately separate from
+        _sync_stage, which also mutates project.status on completion;
+        an intake completing means "start the real workflow", not
+        "the project is done", so that side effect must not fire here."""
+        if project.workflow_id or not project.intake_workflow_id:
+            return
+        intake = self.db.query(RepairWorkflow).filter(
+            RepairWorkflow.id == project.intake_workflow_id
+        ).first()
+        if intake and intake.current_stage_id:
+            stage = self.db.query(RepairStageDefinition).filter(
+                RepairStageDefinition.id == intake.current_stage_id
+            ).first()
+            project.current_stage_code = stage.code if stage else project.current_stage_code
+
     def _sync_denormalized_cost(self, project: DprProject, form_data: dict) -> None:
         """Mirror total_estimated_cost / approved_amount into DprProject's
         denormalized columns as they're entered, so list/dashboard views
@@ -299,6 +519,7 @@ class DprProjectService:
             "approved_cost": float(project.approved_cost) if project.approved_cost is not None else None,
             "status": project.status,
             "workflow_id": str(project.workflow_id) if project.workflow_id else None,
+            "intake_workflow_id": str(project.intake_workflow_id) if project.intake_workflow_id else None,
             "current_stage_code": project.current_stage_code,
             "created_at": project.created_at.isoformat() if project.created_at else None,
         }

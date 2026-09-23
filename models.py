@@ -1442,6 +1442,13 @@ class PreCommissionRequest(Base):
     workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
     equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True, index=True)
 
+    # Intake approval chain (RepairWorkflowDefinition workflow_code=
+    # PRECOMMISSION_INTAKE, 2 stages by default, admin-configurable) --
+    # created at request time, replaces approval_status as a manually-set
+    # field with a real, N-stage, role-gated review chain. workflow_id
+    # above (the QAP workflow) is only created once THIS one completes.
+    intake_workflow_id = Column(UUID(as_uuid=True), ForeignKey("repair_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
+
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
@@ -1453,6 +1460,7 @@ class PreCommissionRequest(Base):
     equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
     department = relationship("OrgDepartment", foreign_keys=[dept_id])
     workflow = relationship("RepairWorkflow", foreign_keys=[workflow_id])
+    intake_workflow = relationship("RepairWorkflow", foreign_keys=[intake_workflow_id])
     equipment = relationship("Equipment", foreign_keys=[equipment_id])
     approver = relationship("User", foreign_keys=[approved_by])
     rejecter = relationship("User", foreign_keys=[rejected_by])
@@ -5565,7 +5573,11 @@ class FailureCohortThresholdConfig(Base):
         index=True,
     )
     min_failure_rate = Column(Numeric(5, 2), nullable=False, default=1.0)
-    min_cohort_units = Column(Integer, nullable=False, default=3)
+    # >=4 so every cohort that clears this floor also clears the >=4-unit
+    # floor equipment_service.py's within-cohort outlier detection needs --
+    # a 3-unit cohort could otherwise get an is_design_problem_candidate
+    # flag with no per-unit is_outlier verdict able to explain it.
+    min_cohort_units = Column(Integer, nullable=False, default=4)
     # Within-cohort outlier detection (KPTCL spec §2/12.3): a unit whose own
     # failure_count Z-score against its cohort's mean/stdev clears this
     # threshold is flagged is_outlier. Same default as the unrelated

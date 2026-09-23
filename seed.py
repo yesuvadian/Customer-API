@@ -5789,6 +5789,40 @@ def seed_report_definitions(session):
             "group_name": "TA&QC",
             "notification_event": "taqc_report_ready",
         },
+        # ── Result Review group ───────────────────────────────────────────────────
+        {
+            "name": "Monthly Result Review Compliance Report",
+            "description": "% of Result Review stages closed within SLA, by zone/circle/substation (SRS D.8).",
+            "query_key": "result_review_compliance_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Result Review",
+            "notification_event": "result_review_report_ready",
+        },
+        # ── Calibration group ────────────────────────────────────────────────────
+        {
+            "name": "Calibration Compliance Report",
+            "description": "Relay/ETV calibration on-time %, by zone/circle/subdivision/substation. "
+                           "Same on-time computation as the EE RT Dashboard's calibration_compliance KPI.",
+            "query_key": "calibration_compliance_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Calibration",
+            "notification_event": "calibration_report_ready",
+        },
+        # ── Network Health group ─────────────────────────────────────────────────
+        {
+            "name": "Network Health Summary Report",
+            "description": "Health-band distribution (Critical/High/Medium/Low/Unknown) and average "
+                           "health score by zone/circle/subdivision/substation, worst-first — a "
+                           "tabular heat map of the same equipment_analytics data behind the Overall "
+                           "Dashboard's condition snapshot (SRS 12.5).",
+            "query_key": "network_health_summary_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Network Health",
+            "notification_event": "network_health_report_ready",
+        },
         # ── Vendor & Repairer group ───────────────────────────────────────────────
         {
             "name": "Vendor Performance Ranking Report",
@@ -6995,6 +7029,155 @@ WHERE  EXTRACT(MONTH FROM ti.cts)
   AND  (:department_id IS NULL OR tai.department_id = :department_id::uuid)
 GROUP  BY d.name, cd.name
 ORDER  BY compliance_pct ASC NULLS LAST
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Result Review
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="result_review_compliance_report",
+            label="Monthly Result Review Compliance Report",
+            group_name="Result Review",
+            description="% of Result Review stages closed within their configured SLA, "
+                        "grouped by zone / circle / subdivision / substation. Same "
+                        "computation as the Overall Dashboard's review_sla_pct tile "
+                        "(TrWfStage.is_result_stage + default_duration_hours/days), "
+                        "packaged as a monthly report (SRS D.8).",
+            parameters_schema={"month": "int", "year": "int", "department_id": "uuid"},
+            sort_order=10,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    d4.name                         AS zone,
+    d3.name                         AS ce_circle,
+    d2.name                         AS ee_subdivision,
+    d.name                          AS substation,
+    COUNT(tsi.id)                   AS reviews_closed,
+    COUNT(CASE WHEN tsi.completed_at <= (
+        tsi.started_at + (COALESCE(ws.default_duration_hours, ws.default_duration_days * 24) * interval '1 hour')
+    ) THEN 1 END)                   AS reviews_within_sla,
+    ROUND(
+        COUNT(CASE WHEN tsi.completed_at <= (
+            tsi.started_at + (COALESCE(ws.default_duration_hours, ws.default_duration_days * 24) * interval '1 hour')
+        ) THEN 1 END)::numeric
+        / NULLIF(COUNT(tsi.id), 0) * 100, 1
+    )                                AS compliance_pct
+FROM   public.tr_wf_stage_instances tsi
+JOIN   public.tr_wf_stages          ws ON ws.id = tsi.stage_id
+JOIN   public.tr_wf_instances       wi ON wi.id = tsi.wf_instance_id
+JOIN   public.testing_requests      tr ON tr.id = wi.testing_request_id
+LEFT JOIN public.equipment          e  ON e.id  = tr.equipment_id
+LEFT JOIN public.org_departments    d  ON d.id  = e.department_id
+LEFT JOIN public.org_departments    d2 ON d2.id = d.parent_department_id
+LEFT JOIN public.org_departments    d3 ON d3.id = d2.parent_department_id
+LEFT JOIN public.org_departments    d4 ON d4.id = d3.parent_department_id
+WHERE  ws.is_result_stage IS TRUE
+  AND  tsi.status IN ('completed', 'rejected')
+  AND  tsi.started_at IS NOT NULL
+  AND  tsi.completed_at IS NOT NULL
+  AND  (ws.default_duration_hours IS NOT NULL OR ws.default_duration_days IS NOT NULL)
+  AND  EXTRACT(MONTH FROM tsi.completed_at)
+         = COALESCE(:month, EXTRACT(MONTH FROM NOW()))
+  AND  EXTRACT(YEAR  FROM tsi.completed_at)
+         = COALESCE(:year,  EXTRACT(YEAR  FROM NOW()))
+  {org_clause}
+  AND  (:department_id IS NULL OR d.id = :department_id::uuid)
+GROUP  BY d4.name, d3.name, d2.name, d.name
+ORDER  BY compliance_pct ASC NULLS LAST
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Calibration
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="calibration_compliance_report",
+            label="Calibration Compliance Report",
+            group_name="Calibration",
+            description="Relay/ETV calibration on-time %, grouped by zone / circle / "
+                        "subdivision / substation. Same on-time computation as the EE RT "
+                        "Dashboard's calibration_compliance KPI "
+                        "(dashboard_role_kpi.py's K1), packaged as a report.",
+            parameters_schema={"period_start": "date", "period_end": "date", "department_id": "uuid"},
+            sort_order=10,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    d4.name                         AS zone,
+    d3.name                         AS ce_circle,
+    d2.name                         AS ee_subdivision,
+    d.name                          AS substation,
+    COUNT(tr.id)                    AS calibrations_due,
+    COUNT(CASE WHEN tr.status IN ('approved','rejected','outcome_active','commissioned','closed')
+                 AND tr.completed_at <= tr.due_date THEN 1 END) AS calibrations_on_time,
+    COUNT(CASE WHEN tr.due_date < NOW()
+                 AND tr.status IN ('submitted','assigned','accepted','in_progress',
+                                    'test_submitted','under_approval','under_review','finance_pending')
+                THEN 1 END)          AS calibrations_overdue,
+    ROUND(
+        COUNT(CASE WHEN tr.status IN ('approved','rejected','outcome_active','commissioned','closed')
+                     AND tr.completed_at <= tr.due_date THEN 1 END)::numeric
+        / NULLIF(COUNT(tr.id), 0) * 100, 1
+    )                                AS compliance_pct
+FROM   public.testing_requests tr
+LEFT JOIN public.org_departments d  ON d.id  = tr.department_id
+LEFT JOIN public.org_departments d2 ON d2.id = d.parent_department_id
+LEFT JOIN public.org_departments d3 ON d3.id = d2.parent_department_id
+LEFT JOIN public.org_departments d4 ON d4.id = d3.parent_department_id
+WHERE  tr.is_calibration IS TRUE
+  AND  tr.is_schedule_template IS FALSE
+  AND  tr.due_date BETWEEN COALESCE(:period_start, NOW() - INTERVAL '90 days')
+                       AND COALESCE(:period_end, NOW())
+  {org_clause}
+  AND  (:department_id IS NULL OR d.id = :department_id::uuid)
+GROUP  BY d4.name, d3.name, d2.name, d.name
+ORDER  BY compliance_pct ASC NULLS LAST
+"""),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Network Health
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="network_health_summary_report",
+            label="Network Health Summary Report",
+            group_name="Network Health",
+            description="Health-band distribution (Critical/High/Medium/Low/Unknown) and average "
+                        "health score, grouped by zone / circle / subdivision / substation, "
+                        "worst-first. Same equipment_analytics.risk_level snapshot behind the "
+                        "Overall Dashboard's condition breakdown, regrouped by department instead "
+                        "of by class (SRS 12.5).",
+            parameters_schema={"department_id": "uuid"},
+            sort_order=10,
+            org_alias="ea",
+            sql_template="""
+SELECT
+    d4.name                                                    AS zone,
+    d3.name                                                    AS ce_circle,
+    d2.name                                                    AS ee_subdivision,
+    d.name                                                      AS substation,
+    COUNT(ea.id)                                                AS total_assessed,
+    COUNT(CASE WHEN ea.risk_level = 'Critical' THEN 1 END)      AS critical_count,
+    COUNT(CASE WHEN ea.risk_level = 'High'     THEN 1 END)      AS high_count,
+    COUNT(CASE WHEN ea.risk_level = 'Medium'   THEN 1 END)      AS medium_count,
+    COUNT(CASE WHEN ea.risk_level = 'Low'      THEN 1 END)      AS low_count,
+    COUNT(CASE WHEN ea.risk_level IS NULL THEN 1 END)           AS unknown_count,
+    ROUND(AVG(ea.health_score), 1)                              AS avg_health_score,
+    ROUND(
+        COUNT(CASE WHEN ea.risk_level = 'Critical' THEN 1 END)::numeric
+        / NULLIF(COUNT(ea.id), 0) * 100, 1
+    )                                                            AS critical_pct
+FROM   public.equipment_analytics ea
+LEFT JOIN public.org_departments d  ON d.id  = ea.department_id
+LEFT JOIN public.org_departments d2 ON d2.id = d.parent_department_id
+LEFT JOIN public.org_departments d3 ON d3.id = d2.parent_department_id
+LEFT JOIN public.org_departments d4 ON d4.id = d3.parent_department_id
+WHERE  1=1
+  {org_clause}
+  AND  (:department_id IS NULL OR d.id = :department_id::uuid)
+GROUP  BY d4.name, d3.name, d2.name, d.name
+ORDER  BY critical_pct DESC NULLS LAST
 """),
 
         # ══════════════════════════════════════════════════════════════════════
@@ -10135,6 +10318,30 @@ def _seed_notification_event_catalogue(session) -> int:
             default_roles=["EE_TLSS", "SEE_WM"],
         ),
         dict(
+            event_type="result_review_report_ready",
+            label="Result Review Compliance Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Result Review Compliance Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["AEE R&T", "AEE-R&D", "EE_TLSS"],
+        ),
+        dict(
+            event_type="calibration_report_ready",
+            label="Calibration Compliance Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Calibration Compliance Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["EE_RT", "SEE_RT"],
+        ),
+        dict(
+            event_type="network_health_report_ready",
+            label="Network Health Summary Report Ready",
+            group_name="Reports",
+            description="Fired when the monthly Network Health Summary Report is generated.",
+            context_vars=["report_name", "report_period", "download_url", "format"],
+            default_roles=["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
+        ),
+        dict(
             event_type="vendor_report_ready",
             label="Vendor Performance Report Ready",
             group_name="Reports",
@@ -11073,6 +11280,49 @@ def _seed_notification_templates(session) -> int:
             ["Supervisory Officer", "Senior Management Approver"],
         ),
     )
+
+    # ── Report-Ready events (fired by services.reporting_service.run_scheduled_reports
+    # via ReportDefinition.notification_event) — all 15 share the same context_vars
+    # (report_name/report_period/download_url/format) per their
+    # notification_event_catalogue entries, so one shared template shape covers all
+    # of them; default_roles below are copied from that same catalogue.
+    _REPORT_READY_EVENTS = [
+        ("overdue_report_ready",        "Overdue Test Report",                       ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"]),
+        ("alert_report_ready",          "ALERT/CRITICAL Equipment Report",           ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM"]),
+        ("compliance_report_ready",     "Test Compliance Status Report",             ["EE_TLSS", "SEE_WM"]),
+        ("repair_report_ready",         "Transformer Repair Status Report",          ["AEE_MAINTENANCE", "EE_TLSS", "SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+        ("annual_failure_report_ready", "Equipment Failure Report",                  ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+        ("pm_report_ready",             "PM Compliance Report",                      ["AEE_MAINTENANCE", "EE_TLSS"]),
+        ("remedial_report_ready",       "Remedial Action Pending Report",            ["AEE_MAINTENANCE", "EE_TLSS"]),
+        ("taqc_report_ready",           "TA&QC Observation Compliance Report",       ["EE_TLSS", "SEE_WM"]),
+        ("result_review_report_ready",  "Monthly Result Review Compliance Report",   ["AEE R&T", "AEE-R&D", "EE_TLSS"]),
+        ("calibration_report_ready",    "Calibration Compliance Report",             ["EE_RT", "SEE_RT"]),
+        ("network_health_report_ready", "Network Health Summary Report",             ["EE_TLSS", "CEE_TRANSMISSION_ZONE"]),
+        ("vendor_report_ready",         "Vendor Performance Ranking Report",         ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+        ("repairer_report_ready",       "Repairer Performance Ranking Report",       ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+        ("oltc_report_ready",           "OLTC/CB Operations Count Report",           ["AEE_MAINTENANCE"]),
+        ("post_repair_report_ready",    "Post-Repair Transformer Evaluation Report", ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
+    ]
+    for _event_type, _label, _roles in _REPORT_READY_EVENTS:
+        _tmpl(_event_type,
+            _e(
+                f"[REPORT READY] {_label} — " "{{report_period}}",
+                f"<h3 style='color:#1E3C72'>{_label} Ready</h3>"
+                "<p>{{report_name}} for {{report_period}} has been generated.</p>"
+                "<table cellspacing='0' style='border-collapse:collapse;font-size:13px;width:100%'>"
+                "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Report</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_name}}</td></tr>"
+                "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Period</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_period}}</td></tr>"
+                "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Format</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{format}}</td></tr>"
+                "</table>"
+                "<p><a href='{{download_url}}'>Download the report</a> from SEACMS (login required).</p>",
+                _roles,
+            ),
+            _i(
+                f"{_label} ready — " "{{report_period}}",
+                "{{report_name}} for {{report_period}} is ready to download.",
+                _roles,
+            ),
+        )
 
     # ── Failure Registry ──────────────────────────────────────────────────────
     _tmpl("fr_submitted",
@@ -12728,6 +12978,33 @@ def run_seed():
         except Exception as _e:
             print(f"[WARN] Pre-commission workflow seed failed (non-fatal): {_e}")
 
+        # DPR Approval Workflow — 5-stage capital works / major maintenance
+        # proposal lifecycle (was never wired into seed.py before -- only
+        # runnable standalone via seed_dpr_workflow.py)
+        print("\n--- DPR Approval Workflow Seeding ---")
+        try:
+            from seed_dpr_workflow import seed_dpr_stages
+            seed_dpr_stages(session)
+        except Exception as _e:
+            print(f"[WARN] DPR workflow seed failed (non-fatal): {_e}")
+
+        # Intake review chains — Precommission / DPR / Annual Audit each
+        # gate their real workflow behind an admin-configurable N-stage
+        # sign-off chain before it starts. Org-agnostic definitions (no
+        # organization_id on these tables), so seeding once here covers
+        # every org, current and future.
+        print("\n--- Intake Review Chains Seeding ---")
+        try:
+            from alter_precommission_intake_workflow import seed_precommission_intake_stages
+            seed_precommission_intake_stages(session)
+        except Exception as _e:
+            print(f"[WARN] Precommission intake workflow seed failed (non-fatal): {_e}")
+        try:
+            from alter_dpr_intake_workflow import seed_dpr_intake_stages
+            seed_dpr_intake_stages(session)
+        except Exception as _e:
+            print(f"[WARN] DPR intake workflow seed failed (non-fatal): {_e}")
+
         # NOTE: All workflow role mappings moved after seed_seacms_roles_users
         # so KPTCL OrgRoles exist before stage→role assignments are made
 
@@ -12776,6 +13053,17 @@ def run_seed():
             seed_default_override_roles(session)
         except Exception as _e:
             print(f"[WARN] Default override roles seed failed (non-fatal): {_e}")
+
+        # Default intake approval roles — same reasoning and ordering
+        # constraint as the override grant just above: must run after
+        # System Administrator OrgRoles exist and the intake workflow
+        # definitions/stages are seeded (earlier in this same function).
+        print("\n--- Default Intake Approval Roles (System Administrator) ---")
+        try:
+            from alter_seed_default_intake_approval_roles import seed_default_intake_approval_roles
+            seed_default_intake_approval_roles(session)
+        except Exception as _e:
+            print(f"[WARN] Default intake approval roles seed failed (non-fatal): {_e}")
 
         # Org Registration Config — system_config rows + fix any existing orgs
         # with no admin role (idempotent, safe to run every time)

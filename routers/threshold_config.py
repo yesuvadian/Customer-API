@@ -11,6 +11,11 @@ Data Quality Index rule toggles:
     /threshold-config/condition-bands    -> EquipmentConditionBandThreshold
     /threshold-config/dqi-rules          -> DqiRuleConfig (key constrained to
                                             an allow-list, see DqiRuleCreate)
+    /threshold-config/calibration-configs -> EquipmentCalibrationConfig, one
+                                            row per equipment (lead_days +
+                                            is_scheduled), org-scoped via the
+                                            equipment it belongs to — unlike
+                                            the global lookup tables above.
 
 These replace the previously hardcoded _RISK_BANDS / _SCORE / _CONDITION
 constants in services/analytics_engine.py, the _condition_from_score
@@ -24,6 +29,7 @@ this router itself only requires an authenticated user, same as the other
 lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py).
 """
 from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -34,6 +40,8 @@ from auth_utils import get_current_user
 from database import get_db
 from models import (
     DqiRuleConfig,
+    Equipment,
+    EquipmentCalibrationConfig,
     EquipmentConditionBandThreshold,
     EquipmentHealthBandThreshold,
     FailureCohortThresholdConfig,
@@ -667,7 +675,7 @@ def update_failure_cohort_thresholds(
         row = FailureCohortThresholdConfig(
             organization_id=current_user.organization_id,
             min_failure_rate=default_row.min_failure_rate if default_row else 1.0,
-            min_cohort_units=default_row.min_cohort_units if default_row else 3,
+            min_cohort_units=default_row.min_cohort_units if default_row else 4,
             outlier_z_score=default_row.outlier_z_score if default_row else 3.0,
         )
         db.add(row)
@@ -712,3 +720,182 @@ def delete_dqi_rule(rule_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="DQI rule not found")
     db.delete(row)
     db.commit()
+
+
+# ── Calibration configs ─────────────────────────────────────────────────────
+# EquipmentCalibrationConfig is per-EQUIPMENT (unique on equipment_id), not a
+# label-keyed lookup table like the sections above — so it's addressed by
+# equipment_id, and a PUT does the create-or-update ("upsert") a singleton
+# config naturally calls for, rather than separate POST/PATCH-by-row-id.
+# Org-scoped via the equipment it belongs to (every other section in this
+# file is a global, org-agnostic table — this is the one exception).
+
+class CalibrationConfigUpsert(BaseModel):
+    lead_days: int = 30
+    is_scheduled: bool = True
+
+
+class CalibrationConfigResponse(BaseModel):
+    id: Optional[UUID] = None
+    equipment_id: UUID
+    equipment_label: str
+    lead_days: int
+    is_scheduled: bool
+    # None when no explicit override row exists yet — the effective
+    # lead_days/is_scheduled above are still the real values (defaults),
+    # this just tells the UI whether there's a row here to edit/delete.
+    has_override: bool
+
+
+def _calibration_org_id(current_user: User) -> UUID:
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User must belong to an organization to access calibration configs",
+        )
+    return current_user.organization_id
+
+
+@router.get("/calibration-configs", response_model=List[CalibrationConfigResponse])
+def list_calibration_configs(
+    search: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A triage queue of equipment whose LATEST calibration result is Fail
+    (CalibrationService.get_calibration_status(...)["state"] ==
+    "CRITICAL"), not a config screen for every calibration-tracked piece
+    of equipment. Deliberately does NOT filter on
+    EquipmentCalibrationConfig.is_scheduled — confirmed live that flag
+    drifts out of sync with the actual latest result (its own update path,
+    evaluate_calibration()/_handle_fail(), is invoked fire-and-forget from
+    testing_service.py wrapped in a bare try/except that swallows any
+    error, so a failed write there leaves is_scheduled=True even though
+    the equipment is genuinely still failing). get_calibration_status()
+    recomputes "state" straight from the latest TestResult every call, so
+    it can't drift the way a separately-persisted flag can: the row
+    appears the moment a result comes back Fail and disappears the moment
+    a later result comes back Pass, regardless of is_scheduled's state.
+
+    Equipment never appears here until it fails once — lead_days for
+    equipment that hasn't failed yet isn't editable from this screen.
+    """
+    from models import TestingRequest
+    from services.calibration_service import CalibrationService
+
+    org_id = _calibration_org_id(current_user)
+    q = (
+        db.query(Equipment)
+        .filter(
+            Equipment.organization_id == org_id,
+            Equipment.id.in_(
+                db.query(TestingRequest.equipment_id).filter(
+                    TestingRequest.organization_id == org_id,
+                    TestingRequest.is_calibration.is_(True),
+                    TestingRequest.equipment_id.isnot(None),
+                ).distinct()
+            ),
+        )
+    )
+    if search:
+        q = q.filter(Equipment.ueic.ilike(f"%{search}%"))
+    equipment_rows = q.order_by(Equipment.ueic.asc()).all()
+
+    svc = CalibrationService(db)
+    configs_by_equipment = {
+        c.equipment_id: c
+        for c in db.query(EquipmentCalibrationConfig)
+        .filter(EquipmentCalibrationConfig.equipment_id.in_([e.id for e in equipment_rows]))
+        .all()
+    }
+
+    out = []
+    for eq in equipment_rows:
+        status = svc.get_calibration_status(eq.id)
+        if status["state"] != "CRITICAL":
+            continue
+        cfg = configs_by_equipment.get(eq.id)
+        out.append(CalibrationConfigResponse(
+            id=cfg.id if cfg else None,
+            equipment_id=eq.id,
+            equipment_label=eq.ueic,
+            lead_days=cfg.lead_days if cfg else 30,
+            is_scheduled=cfg.is_scheduled if cfg else True,
+            has_override=cfg is not None,
+        ))
+
+    return out[offset:offset + limit]
+
+
+@router.put("/calibration-configs/{equipment_id}", response_model=CalibrationConfigResponse)
+def upsert_calibration_config(
+    equipment_id: UUID,
+    payload: CalibrationConfigUpsert,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org_id = _calibration_org_id(current_user)
+    equipment = (
+        db.query(Equipment)
+        .filter(Equipment.id == equipment_id, Equipment.organization_id == org_id)
+        .first()
+    )
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
+    if payload.lead_days < 0:
+        raise HTTPException(status_code=422, detail="lead_days cannot be negative")
+
+    cfg = (
+        db.query(EquipmentCalibrationConfig)
+        .filter(EquipmentCalibrationConfig.equipment_id == equipment_id)
+        .first()
+    )
+    if cfg:
+        cfg.lead_days = payload.lead_days
+        cfg.is_scheduled = payload.is_scheduled
+    else:
+        cfg = EquipmentCalibrationConfig(
+            equipment_id=equipment_id,
+            lead_days=payload.lead_days,
+            is_scheduled=payload.is_scheduled,
+            created_by=current_user.id,
+        )
+        db.add(cfg)
+    db.commit()
+    db.refresh(cfg)
+    return CalibrationConfigResponse(
+        id=cfg.id,
+        equipment_id=equipment.id,
+        equipment_label=equipment.ueic,
+        lead_days=cfg.lead_days,
+        is_scheduled=cfg.is_scheduled,
+        has_override=True,
+    )
+
+
+@router.delete("/calibration-configs/{equipment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_calibration_config(
+    equipment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Removes the explicit override row so this equipment falls back to
+    the system default (lead_days=30, is_scheduled=True) again — a no-op
+    (not a 404) if there was no override to begin with, matching
+    reset_failure_cohort_thresholds' own "already at default" reasoning."""
+    org_id = _calibration_org_id(current_user)
+    cfg = (
+        db.query(EquipmentCalibrationConfig)
+        .join(Equipment, Equipment.id == EquipmentCalibrationConfig.equipment_id)
+        .filter(
+            EquipmentCalibrationConfig.equipment_id == equipment_id,
+            Equipment.organization_id == org_id,
+        )
+        .first()
+    )
+    if cfg:
+        db.delete(cfg)
+        db.commit()

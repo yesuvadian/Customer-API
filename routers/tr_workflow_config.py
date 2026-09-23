@@ -1166,6 +1166,35 @@ def get_post_actions(
     ]
 
 
+@router.get("/options/request-types")
+def get_request_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin-editable picklist for TrWfDefinition.request_type / TestingRequest.
+    request_type -- the columns themselves stay plain strings (compared as
+    such throughout the routing engine); this only supplies the dropdown's
+    options via CategoryDetails, same "Annual Audit Categories" idiom, so
+    adding a new type is a Category Management admin action, not a
+    frontend code change. Seeded by alter_seed_workflow_request_types.py.
+    """
+    rows = (
+        db.query(CategoryDetails.id, CategoryDetails.name, CategoryDetails.description)
+        .join(CategoryMaster, CategoryDetails.category_master_id == CategoryMaster.id)
+        .filter(
+            CategoryDetails.category_type == "workflow_request_type",
+            CategoryDetails.is_active.is_(True),
+        )
+        .order_by(CategoryDetails.name)
+        .all()
+    )
+    return [
+        {"value": r.name, "label": r.name, "description": r.description}
+        for r in rows
+    ]
+
+
 @router.get("/picker-options")
 def get_picker_options(
     db: Session = Depends(get_db),
@@ -1178,6 +1207,7 @@ def get_picker_options(
         "equipment_types": get_equipment_types(db, current_user),
         "test_types": get_test_types(db, current_user),
         "org_roles": get_org_roles(db, current_user),
+        "request_types": get_request_types(db, current_user),
         "action_codes": [
             {"code": code, "label": label}
             for code, label in ACTION_CODE_LABELS.items()
