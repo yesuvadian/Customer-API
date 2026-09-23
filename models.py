@@ -3971,6 +3971,161 @@ class Recommendation(Base):
 
 
 # ------------------------------
+# Corrective Action Request (CAR) — auto-created by the evaluation engine
+# (services/car_service.py) when a test result evaluates CRITICAL, never
+# created manually by a user. See migrations/045_corrective_action_requests.sql.
+# ------------------------------
+class CarStatus:
+    """Plain string constants, not a DB enum — mirrors TestingRequestStatus-
+    adjacent string columns elsewhere in this file. Kept simple since the
+    lifecycle is short and unlikely to need DB-level enum migrations."""
+    OPEN = "OPEN"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    CLOSED = "CLOSED"
+    FAILED = "FAILED"
+    REOPENED = "REOPENED"
+    # A reviewer has recommended replacing the equipment instead of continuing
+    # to retest it — stops the auto-retest loop (see
+    # services/car_service._ensure_active_followup) without closing the CAR,
+    # since the underlying issue still isn't resolved.
+    REPLACEMENT_RECOMMENDED = "REPLACEMENT_RECOMMENDED"
+
+    OPEN_STATUSES = {OPEN, ASSIGNED, IN_PROGRESS, PENDING_VERIFICATION, FAILED, REOPENED, REPLACEMENT_RECOMMENDED}
+
+
+class CarRelationshipType:
+    ORIGINATING = "ORIGINATING"
+    FOLLOW_UP = "FOLLOW_UP"
+    RETEST = "RETEST"
+    VERIFICATION = "VERIFICATION"
+
+
+class CorrectiveActionRequest(Base):
+    __tablename__ = "corrective_action_requests"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    car_number = Column(String(50), unique=True, nullable=False)
+
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="SET NULL"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+
+    source_test_result_id = Column(UUID(as_uuid=True), ForeignKey("public.test_results.id", ondelete="SET NULL"), nullable=True)
+    template_key = Column(String(100), nullable=True)
+    severity = Column(String(20), nullable=False)  # ALERT | CRITICAL — evaluation.overall at trigger time
+
+    summary = Column(Text, nullable=True)
+    corrective_action = Column(Text, nullable=True)
+
+    status = Column(String(25), default=CarStatus.OPEN, nullable=False)
+    assigned_to = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    due_date = Column(Date, nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    source_test_result = relationship("TestResult", foreign_keys=[source_test_result_id])
+    assignee = relationship("User", foreign_keys=[assigned_to])
+    links = relationship("CarTestRequest", back_populates="car", cascade="all, delete-orphan")
+
+
+class CarTestRequest(Base):
+    """Many-to-many: which Test Requests belong to which CAR's lineage — a
+    failed retest attaches to the SAME CAR instead of spawning a new one."""
+    __tablename__ = "car_test_requests"
+    __table_args__ = (
+        UniqueConstraint("car_id", "test_request_id", name="uq_car_test_request"),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("public.corrective_action_requests.id", ondelete="CASCADE"), nullable=False)
+    test_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
+    relationship_type = Column(String(20), nullable=False)  # ORIGINATING | FOLLOW_UP | RETEST | VERIFICATION
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    car = relationship("CorrectiveActionRequest", back_populates="links")
+    test_request = relationship("TestingRequest", foreign_keys=[test_request_id])
+
+
+class CarTriggerConfig(Base):
+    """Admin-editable rule: for a given (equipment_type, test_type, severity),
+    should a CRITICAL/ALERT evaluation trigger a CAR — and if so, what
+    follow-up actions (see CarTriggerFollowup) should be auto-created?
+    Replaces the hardcoded CAR_TRIGGER_SEVERITIES = {"CRITICAL"} constant in
+    services/car_service.py. NULL organization_id = global default (same
+    convention as ConditionMonitoringRecommendation); an org-specific row
+    overrides it. NULL test_type_id = wildcard, applies to every test type
+    under that equipment type unless a more specific row exists."""
+    __tablename__ = "car_trigger_configs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "equipment_type_id", "test_type_id", "severity",
+            name="car_trigger_configs_organization_id_equipment_type_id_test_t_key",
+        ),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"), nullable=True)
+    severity = Column(String(20), nullable=False)  # ALERT | CRITICAL
+    car_trigger = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    display_order = Column(Integer, nullable=False, default=0)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    followups = relationship(
+        "CarTriggerFollowup",
+        back_populates="config",
+        cascade="all, delete-orphan",
+        order_by="CarTriggerFollowup.display_order",
+    )
+
+
+class CarTriggerFollowup(Base):
+    """One follow-up action fanned out from a CarTriggerConfig rule — mirrors
+    the "New Testing Request" form's own pattern of letting a user
+    multi-select several test types under one Request Type and creating one
+    independent TestingRequest per selection (see
+    create_testing_request_form.dart). follow_up_test_type_id's own
+    CategoryDetails.category_type tells the hook whether to create a
+    TestingRequest (test/maintenance/inspection) or start a repair workflow
+    instead (repair_lifecycle). due_in_days is mandatory (never an
+    open-ended follow-up from a CRITICAL finding)."""
+    __tablename__ = "car_trigger_followups"
+    __table_args__ = (
+        UniqueConstraint("car_trigger_config_id", "follow_up_test_type_id", name="uq_ctf_config_test_type"),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    car_trigger_config_id = Column(UUID(as_uuid=True), ForeignKey("public.car_trigger_configs.id", ondelete="CASCADE"), nullable=False)
+    follow_up_test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"), nullable=False)
+    display_order = Column(Integer, nullable=False, default=0)
+    due_in_days = Column(Integer, nullable=False, default=7)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    config = relationship("CarTriggerConfig", back_populates="followups")
+    follow_up_test_type = relationship("CategoryDetails", foreign_keys=[follow_up_test_type_id])
+
+
+# ------------------------------
 # ProcurementRequest Model
 # ------------------------------
 class ProcurementRequest(Base):

@@ -860,6 +860,35 @@ class TestingService:
             except Exception as _cs_err:
                 logger.warning(f"Cross-session comparison failed: {_cs_err}")
 
+            # ── CAR auto-creation hook (fire-and-forget; never block save) ────
+            # CRITICAL (after any cross-session escalation above) auto-creates
+            # or links a Corrective Action Request — never a manual user
+            # action. A clean PASS/NORMAL result checks whether it closes out
+            # an open CAR in this same equipment/test lineage (e.g. a retest
+            # that finally passes).
+            try:
+                from services.car_service import close_car_if_verified, process_evaluation_for_car
+                _car_overall = ev.get("overall", "NORMAL")
+                if _car_overall == "CRITICAL":
+                    process_evaluation_for_car(
+                        self.db,
+                        test_result=result,
+                        testing_request=request,
+                        evaluation_overall=_car_overall,
+                        summary=EvaluationService.build_remedial_summary(
+                            ev, request_title=getattr(request, "title", "") or ""
+                        ),
+                        created_by=tester_id,
+                    )
+                elif _car_overall == "NORMAL":
+                    close_car_if_verified(
+                        self.db,
+                        testing_request=request,
+                        evaluation_overall=_car_overall,
+                    )
+            except Exception as _car_err:
+                logger.warning(f"CAR auto-creation hook failed: {_car_err}")
+
             # ── Notification hooks (fire-and-forget; never block save) ────────
             try:
                 from services.notification_service import NotificationService
