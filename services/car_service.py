@@ -468,6 +468,17 @@ def close_car_if_verified(
     an open CAR in this TR's lineage — e.g. a retest that finally passes.
     No-op if there's no open CAR for this lineage, or the result wasn't
     actually clean.
+
+    Only closes on a NORMAL result of the SAME test_type as the CAR's
+    ORIGINATING failure. A CAR's lineage can include several parallel
+    follow-ups fanned out from one trigger (an inspection AND a retest,
+    say) that all share the same parent_request_id and so all resolve to
+    the same open CAR via find_open_car_for_lineage() below — closing on
+    ANY of them passing would let an unrelated inspection/maintenance/
+    repair ticket close out a CAR whose actual triggering problem (e.g. a
+    bad insulation-resistance reading) was never re-verified. A
+    non-verifying pass still gets linked into the lineage (so the CAR
+    detail sheet shows it happened) but doesn't close anything.
     """
     config = _find_trigger_config(
         db,
@@ -484,6 +495,26 @@ def close_car_if_verified(
     if not car:
         return None
 
+    originating_link = (
+        db.query(CarTestRequest)
+        .filter(CarTestRequest.car_id == car.id, CarTestRequest.relationship_type == CarRelationshipType.ORIGINATING)
+        .first()
+    )
+    originating_tr = (
+        db.query(TestingRequest).filter(TestingRequest.id == originating_link.test_request_id).first()
+        if originating_link else None
+    )
+    # Missing originating data should never happen (every CAR is created
+    # with this link — see process_evaluation_for_car above), but if it
+    # somehow did, default to NOT closing: a CAR that stays open in error
+    # is recoverable by hand from the CAR management screen; a CAR closed
+    # in error hides a real unresolved problem with nothing to flag it.
+    is_verifying = (
+        originating_tr is not None
+        and testing_request.test_type_id is not None
+        and testing_request.test_type_id == originating_tr.test_type_id
+    )
+
     already_linked = (
         db.query(CarTestRequest)
         .filter(CarTestRequest.car_id == car.id, CarTestRequest.test_request_id == testing_request.id)
@@ -493,8 +524,12 @@ def close_car_if_verified(
         db.add(CarTestRequest(
             car_id=car.id,
             test_request_id=testing_request.id,
-            relationship_type=CarRelationshipType.VERIFICATION,
+            relationship_type=CarRelationshipType.VERIFICATION if is_verifying else CarRelationshipType.FOLLOW_UP,
         ))
+        db.commit()
+
+    if not is_verifying:
+        return None
 
     car.status = CarStatus.CLOSED
     car.closed_at = datetime.now(timezone.utc)
