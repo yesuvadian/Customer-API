@@ -37,6 +37,7 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload
 
+from config import CAR_DUE_DAYS_ALERT, CAR_DUE_DAYS_CRITICAL
 from models import (
     CarRelationshipType,
     CarStatus,
@@ -334,6 +335,15 @@ def process_evaluation_for_car(
 
         return existing_car
 
+    # Per-rule override (car_due_in_days, set on the CarTriggerConfig row
+    # itself via the Trigger Config screen) wins over the global .env
+    # default for this severity -- same override-falls-back-to-default
+    # shape every other config in this fan-out already uses.
+    due_days = (
+        config.car_due_in_days
+        if config is not None and config.car_due_in_days is not None
+        else (CAR_DUE_DAYS_CRITICAL if evaluation_overall == "CRITICAL" else CAR_DUE_DAYS_ALERT)
+    )
     car = CorrectiveActionRequest(
         car_number=_car_number(db),
         equipment_id=testing_request.equipment_id,
@@ -344,6 +354,7 @@ def process_evaluation_for_car(
         severity=evaluation_overall,
         summary=summary,
         status=CarStatus.OPEN,
+        due_date=(datetime.now(timezone.utc) + timedelta(days=due_days)).date(),
         created_by=created_by,
     )
     db.add(car)
@@ -356,6 +367,7 @@ def process_evaluation_for_car(
     ))
     db.commit()
     db.refresh(car)
+    _fire_car_notification(db, event_type="car_created", car=car)
 
     if config is not None and config.followups:
         _create_followups(db, car=car, config=config, source_request=testing_request, created_by=created_by)
@@ -493,11 +505,40 @@ def close_car_if_verified(
 
 # ── Status-transition helpers (for the CAR management UI, not the hook) ──────
 
+def _fire_car_notification(db: Session, *, event_type: str, car: CorrectiveActionRequest) -> None:
+    """Best-effort — never blocks the CAR action it's attached to. No-ops
+    silently if the org hasn't got a NotificationTemplate for event_type
+    (same graceful-no-op NotificationService.fire() already gives every
+    other event in this codebase — see seed_car_notifications.py for the
+    seeded defaults)."""
+    try:
+        from services.notification_service import NotificationService
+        equipment_ueic = getattr(car.equipment, "ueic", None) if car.equipment_id else None
+        NotificationService(db).fire(
+            event_type=event_type,
+            context={
+                "car.number": car.car_number,
+                "car.severity": car.severity or "",
+                "car.status": car.status,
+                "car.summary": car.summary or "",
+                "car.due_date": car.due_date.isoformat() if car.due_date else "",
+                "equipment.ueic": equipment_ueic or "",
+            },
+            organization_id=car.organization_id,
+            department_id=car.department_id,
+            source_id=car.id,
+            source_type="corrective_action_request",
+        )
+    except Exception as exc:
+        logger.warning(f"CAR {car.car_number}: {event_type} notification failed: {exc}")
+
+
 def assign_car(db: Session, car: CorrectiveActionRequest, assigned_to: uuid.UUID) -> CorrectiveActionRequest:
     car.assigned_to = assigned_to
     car.status = CarStatus.ASSIGNED
     db.commit()
     db.refresh(car)
+    _fire_car_notification(db, event_type="car_assigned", car=car)
     return car
 
 

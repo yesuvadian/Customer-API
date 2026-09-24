@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from auth_utils import get_current_user
+from config import CAR_PAGE_SIZE
 from database import get_db
 from models import (
     CarStatus,
@@ -120,7 +121,63 @@ def department_summary(
     return {"current_department": current_dept, "cards": cards}
 
 
-@router.get("", summary="List CARs (filterable by status/equipment/department)")
+@router.get(
+    "/trend",
+    summary="Weekly CARs created vs. closed for a department (or org-wide) — "
+            "the backlog trend shown above the CAR table on the dashboard",
+)
+def car_trend(
+    department_id: Optional[UUID] = Query(
+        None, description="Scope to this department + all its descendants. Omit for org-wide."
+    ),
+    weeks: int = Query(12, ge=1, le=52),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func
+
+    org_id = _org_id(current_user)
+    dept_ids = get_dept_subtree_ids(db, department_id) if department_id else None
+
+    # Bucket by the Monday of each ISO week, oldest first — `weeks` full
+    # weeks back through the current (partial) week, so a CAR opened
+    # yesterday shows up in "this week" rather than being cut off.
+    now = datetime.now(timezone.utc)
+    week_start_of_now = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    range_start = week_start_of_now - timedelta(weeks=weeks - 1)
+
+    def _weekly_counts(date_col):
+        q = (
+            db.query(
+                func.date_trunc("week", date_col).label("week"),
+                func.count(CorrectiveActionRequest.id),
+            )
+            .filter(
+                CorrectiveActionRequest.organization_id == org_id,
+                date_col.isnot(None),
+                date_col >= range_start,
+            )
+        )
+        if dept_ids:
+            q = q.filter(CorrectiveActionRequest.department_id.in_(dept_ids))
+        return {row[0].date(): row[1] for row in q.group_by("week").all()}
+
+    created_by_week = _weekly_counts(CorrectiveActionRequest.created_at)
+    closed_by_week = _weekly_counts(CorrectiveActionRequest.closed_at)
+
+    points = []
+    for i in range(weeks):
+        week_start = (range_start + timedelta(weeks=i)).date()
+        points.append({
+            "week_start": week_start.isoformat(),
+            "created_count": created_by_week.get(week_start, 0),
+            "closed_count": closed_by_week.get(week_start, 0),
+        })
+    return {"points": points}
+
+
+@router.get("", summary="List CARs (filterable by status/equipment/department), paginated")
 def list_cars(
     status_filter: Optional[str] = Query(None, alias="status"),
     equipment_id: Optional[UUID] = None,
@@ -128,6 +185,8 @@ def list_cars(
         None, description="Scope to this department + all its descendants (same convention as the analytics dashboards)"
     ),
     open_only: bool = False,
+    page: int = Query(1, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=200, description=f"Defaults to CAR_PAGE_SIZE ({CAR_PAGE_SIZE})"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -145,8 +204,20 @@ def list_cars(
     if equipment_id:
         q = q.filter(CorrectiveActionRequest.equipment_id == equipment_id)
 
-    cars = q.order_by(CorrectiveActionRequest.created_at.desc()).all()
-    return [_serialize_summary(c, db) for c in cars]
+    ps = page_size or CAR_PAGE_SIZE
+    skip = (page - 1) * ps
+
+    total = q.count()
+    cars = q.order_by(CorrectiveActionRequest.created_at.desc()).offset(skip).limit(ps).all()
+    serialized = [_serialize_summary(c, db) for c in cars]
+
+    return {
+        "items": serialized,
+        "total": total,
+        "page": page,
+        "page_size": ps,
+        "has_more": (skip + len(serialized)) < total,
+    }
 
 
 @router.get("/{car_id}", summary="CAR detail with its full Test Request lineage")
@@ -191,6 +262,9 @@ def assign_car(car_id: UUID, body: CarAssignRequest, db: Session = Depends(get_d
     car_service.assign_car(db, car, body.assigned_to)
     if body.due_date:
         car.due_date = body.due_date
+        # A new deadline gets its own fresh overdue check — clear the marker
+        # so car_overdue can fire again if this new date also passes.
+        car.overdue_notified_at = None
         db.commit()
         db.refresh(car)
     return _serialize_summary(car, db)

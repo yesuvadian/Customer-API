@@ -19,6 +19,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from auth_utils import get_current_user
+from config import CAR_DUE_DAYS_ALERT, CAR_DUE_DAYS_CRITICAL
 from database import get_db
 from models import CarTriggerConfig, CarTriggerFollowup, CategoryDetails, CategoryMaster, User
 from services.category_master_service import CategoryMasterService
@@ -63,6 +64,10 @@ def _serialize(config: CarTriggerConfig, db: Session) -> dict:
         "car_trigger": config.car_trigger,
         "is_active": config.is_active,
         "display_order": config.display_order,
+        "car_due_in_days": config.car_due_in_days,
+        # So the UI can show "Default: N days" as a placeholder when this
+        # row hasn't overridden it (config.CAR_DUE_DAYS_CRITICAL/ALERT).
+        "car_due_in_days_default": CAR_DUE_DAYS_CRITICAL if config.severity == "CRITICAL" else CAR_DUE_DAYS_ALERT,
         "created_at": config.created_at.isoformat() if config.created_at else None,
         "modified_at": config.modified_at.isoformat() if config.modified_at else None,
         "followups": [
@@ -153,6 +158,7 @@ class CarTriggerConfigCreate(BaseModel):
     severity: str  # ALERT | CRITICAL
     car_trigger: bool = True
     display_order: int = 0
+    car_due_in_days: Optional[int] = Field(default=None, gt=0)
     org_specific: bool = False  # False = global default row (organization_id NULL)
     followups: list[FollowupInput] = []
 
@@ -183,6 +189,7 @@ def create_config(
         severity=body.severity,
         car_trigger=body.car_trigger,
         display_order=body.display_order,
+        car_due_in_days=body.car_due_in_days,
         created_by=_user_id(current_user),
     )
     db.add(config)
@@ -206,6 +213,7 @@ class CarTriggerConfigUpdate(BaseModel):
     car_trigger: Optional[bool] = None
     is_active: Optional[bool] = None
     display_order: Optional[int] = None
+    car_due_in_days: Optional[int] = Field(default=None, gt=0)
     followups: Optional[list[FollowupInput]] = None
 
 
@@ -226,6 +234,8 @@ def update_config(
         config.is_active = body.is_active
     if body.display_order is not None:
         config.display_order = body.display_order
+    if body.car_due_in_days is not None:
+        config.car_due_in_days = body.car_due_in_days
 
     if body.followups is not None:
         db.query(CarTriggerFollowup).filter(CarTriggerFollowup.car_trigger_config_id == config.id).delete()
