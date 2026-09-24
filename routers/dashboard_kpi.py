@@ -1606,6 +1606,26 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             if review_sla_total > 0 else None
         )
 
+        # Open Corrective Action Requests — a separate lifecycle metric from
+        # everything above (those are all about test-request/review
+        # turnaround; a CAR tracks whether an equipment issue is actually
+        # resolved yet, independent of how fast any single TR or review
+        # moved). Not folded into any SLA card for that reason — see
+        # services/car_service.py for the CAR lifecycle itself.
+        from models import CarStatus, CorrectiveActionRequest
+        car_filters = [CorrectiveActionRequest.organization_id == svc.org_id]
+        if dept_ids_for_scope:
+            car_filters.append(CorrectiveActionRequest.department_id.in_(dept_ids_for_scope))
+        open_car_count = db.query(func.count(CorrectiveActionRequest.id)).filter(
+            *car_filters,
+            CorrectiveActionRequest.status.in_(CarStatus.OPEN_STATUSES),
+        ).scalar() or 0
+        critical_open_car_count = db.query(func.count(CorrectiveActionRequest.id)).filter(
+            *car_filters,
+            CorrectiveActionRequest.status.in_(CarStatus.OPEN_STATUSES),
+            CorrectiveActionRequest.severity == "CRITICAL",
+        ).scalar() or 0
+
         # Severity-split SLA (the spec's actual 24h-ALERT/2h-CRITICAL
         # requirement) — additive to review_sla_pct above, not a
         # replacement: that one stays exactly as it was for any existing
@@ -1702,6 +1722,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
             "dqi_pct": dqi_pct,
             "dqi_ready_count": dqi_ready,
             "dqi_total_count": dqi_total,
+            "open_car_count": open_car_count,
+            "critical_open_car_count": critical_open_car_count,
         }
 
     def _dqi_issues_list(dept_ids_for_scope, limit=None, offset=0):

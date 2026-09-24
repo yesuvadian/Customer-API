@@ -9864,6 +9864,25 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
             default_roles=["CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
+        # ── Corrective Action Requests ───────────────────────────────────────
+        dict(
+            event_type="car_created",
+            label="Corrective Action Request Created",
+            group_name="Corrective Actions",
+            description="Fired when a CRITICAL/ALERT test evaluation auto-creates a new Corrective Action Request.",
+            context_vars=["car.number", "car.severity", "car.status", "car.summary",
+                          "car.due_date", "equipment.ueic"],
+            default_roles=["EE_TLSS"],
+        ),
+        dict(
+            event_type="car_assigned",
+            label="Corrective Action Request Assigned",
+            group_name="Corrective Actions",
+            description="Fired when a Corrective Action Request is assigned to an officer.",
+            context_vars=["car.number", "car.severity", "car.status", "car.summary",
+                          "car.due_date", "equipment.ueic"],
+            default_roles=["EE_TLSS"],
+        ),
         # ── Predictive Analytics ─────────────────────────────────────────────
         dict(
             event_type="deterioration_watch_escalated",
@@ -11162,6 +11181,45 @@ def _seed_notification_templates(session) -> int:
             "Systemic problem detected on {{equipment.manufacturer}} {{equipment.type}}:"
             " {{problem_description}}. {{affected_count}} unit(s) affected.",
             ["Maintenance Officer", "Reviewing Officer", "Supervisory Officer"],
+        ),
+    )
+
+    # ── Corrective Action Requests ──────────────────────────────────────────
+    _tmpl("car_created",
+        _e(
+            "[CAR {{car.severity}}] {{car.number}} opened — {{equipment.ueic}}",
+            "<h3 style='color:darkred'>Corrective Action Request Opened</h3>"
+            "<p>A {{car.severity}} test evaluation auto-created a Corrective Action Request.</p>"
+            + _html([
+                ("CAR Number", "car.number"), ("Severity", "car.severity"),
+                ("Status", "car.status"), ("Equipment", "equipment.ueic"),
+                ("Summary", "car.summary"), ("Due Date", "car.due_date"),
+            ]) +
+            "<p>Log in to SEACMS to review and assign this Corrective Action Request.</p>",
+            ["EE_TLSS"],
+        ),
+        _i(
+            "CAR opened — {{equipment.ueic}}",
+            "{{car.number}} ({{car.severity}}) opened for {{equipment.ueic}}, due {{car.due_date}}.",
+            ["EE_TLSS"],
+        ),
+    )
+    _tmpl("car_assigned",
+        _e(
+            "[CAR] {{car.number}} assigned — {{equipment.ueic}}",
+            "<h3>Corrective Action Request Assigned</h3>"
+            + _html([
+                ("CAR Number", "car.number"), ("Severity", "car.severity"),
+                ("Status", "car.status"), ("Equipment", "equipment.ueic"),
+                ("Due Date", "car.due_date"),
+            ]) +
+            "<p>Log in to SEACMS to view assignment details.</p>",
+            ["EE_TLSS"],
+        ),
+        _i(
+            "CAR assigned — {{equipment.ueic}}",
+            "{{car.number}} assigned, due {{car.due_date}}.",
+            ["EE_TLSS"],
         ),
     )
 

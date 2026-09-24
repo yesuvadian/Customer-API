@@ -1096,8 +1096,10 @@ def run_scheduled_reports(db_factory) -> int:
                       else "excel"
                 _raw, filename, _content_type = svc.generate(defn.id, {}, fmt)
                 count += 1
-                if defn.notification_event:
-                    _fire_report_ready(db, defn, filename, fmt)
+                try:
+                    fire_report_ready(db, defn, filename)
+                except Exception as notif_exc:
+                    print(f"[Reports] Notification for '{defn.name}' failed: {notif_exc}")
             except Exception as exc:
                 print(f"[Reports] Scheduled '{defn.name}' failed: {exc}")
     finally:
@@ -1105,26 +1107,61 @@ def run_scheduled_reports(db_factory) -> int:
     return count
 
 
-def _fire_report_ready(db: Session, defn: ReportDefinition, filename: str, fmt: str) -> None:
+def fire_report_ready(db: Session, defn: ReportDefinition, filename: str) -> None:
     """
-    Notify defn.notification_event's recipients that a scheduled report finished.
+    Notify defn.notification_event's recipients that a report just finished
+    generating — opt-in per definition (no-ops if notification_event isn't
+    set). Called from both the scheduled job (run_scheduled_reports) and the
+    on-demand "Run" endpoint (routers/reporting.py) — same event either way,
+    since a recipient doesn't care whether the report ran on a timer or was
+    triggered manually.
 
-    The 14 SRS report definitions are seeded once globally (organization_id
-    IS NULL) rather than one row per org -- but NotificationService recipient
-    resolution requires an organization_id to look up OrgRole/OrgUserRole
-    rows, so firing with org_id=None silently resolves to zero recipients.
-    Fire once per active organization in that case; definitions that already
-    carry their own organization_id (ad-hoc/per-org reports) fire once, as
-    normal.
+    Per-org fan-out: the 14 SRS report definitions are seeded once globally
+    (organization_id IS NULL) rather than one row per org — but
+    NotificationService recipient resolution requires an organization_id to
+    look up OrgRole/OrgUserRole rows, so firing with org_id=None silently
+    resolves to zero recipients. Fire once per active organization in that
+    case; definitions that already carry their own organization_id (ad-hoc/
+    per-org reports) fire once, as normal.
+
+    source_type/source_id point at the ReportLog generate() just committed
+    (looked up by definition_id + filename, so a concurrent generation of
+    the same definition can't be mismatched) — this is what lets
+    _generate_attachment_bytes()'s report_log branch attach the actual file,
+    and what _enrich_context_from_source()'s report_log branch fills
+    {{report.*}} variables from.
     """
+    if not defn.notification_event:
+        return
+
     from services.notification_service import NotificationService
-    from models import Organization
+    from models import Organization, ReportLog
 
+    log = (
+        db.query(ReportLog)
+        .filter(ReportLog.definition_id == defn.id, ReportLog.file_name == filename)
+        .order_by(ReportLog.completed_at.desc())
+        .first()
+    )
+    if not log or log.status != "completed":
+        return
+
+    # Both naming schemes populated — {{report.*}} (dotted, matches the
+    # convention _enrich_context_from_source already uses for every other
+    # source_type, and what this event's seeded templates reference) plus
+    # the flat names, in case anything else ends up referencing those.
     context = {
+        "report.name":         defn.name,
+        "report.description":  defn.description or "",
+        "report.frequency":    defn.frequency,
+        "report.format":       log.output_format or "",
+        "report.row_count":    str(log.row_count or 0),
+        "report.file_name":    log.file_name or "",
+        "report.generated_at": str(log.completed_at)[:19] if log.completed_at else "",
         "report_name":   defn.name,
         "report_period": datetime.now(timezone.utc).strftime("%B %Y"),
         "download_url":  f"/reports/download/{filename}",
-        "format":        fmt,
+        "format":        log.output_format or "",
     }
 
     if defn.organization_id:
@@ -1142,6 +1179,9 @@ def _fire_report_ready(db: Session, defn: ReportDefinition, filename: str, fmt: 
                 event_type=defn.notification_event,
                 context=context,
                 organization_id=org_id,
+                source_type="report_log",
+                source_id=log.id,
+                recipient_roles_override=defn.recipient_roles or None,
             )
         except Exception as exc:
             print(f"[Reports] notification_event '{defn.notification_event}' fire "
