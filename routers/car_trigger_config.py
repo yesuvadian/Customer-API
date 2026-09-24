@@ -19,7 +19,6 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from auth_utils import get_current_user
-from config import CAR_DUE_DAYS_ALERT, CAR_DUE_DAYS_CRITICAL
 from database import get_db
 from models import CarTriggerConfig, CarTriggerFollowup, CategoryDetails, CategoryMaster, User
 from services.category_master_service import CategoryMasterService
@@ -64,10 +63,6 @@ def _serialize(config: CarTriggerConfig, db: Session) -> dict:
         "car_trigger": config.car_trigger,
         "is_active": config.is_active,
         "display_order": config.display_order,
-        "car_due_in_days": config.car_due_in_days,
-        # So the UI can show "Default: N days" as a placeholder when this
-        # row hasn't overridden it (config.CAR_DUE_DAYS_CRITICAL/ALERT).
-        "car_due_in_days_default": CAR_DUE_DAYS_CRITICAL if config.severity == "CRITICAL" else CAR_DUE_DAYS_ALERT,
         "created_at": config.created_at.isoformat() if config.created_at else None,
         "modified_at": config.modified_at.isoformat() if config.modified_at else None,
         "followups": [
@@ -158,41 +153,8 @@ class CarTriggerConfigCreate(BaseModel):
     severity: str  # ALERT | CRITICAL
     car_trigger: bool = True
     display_order: int = 0
-    car_due_in_days: Optional[int] = Field(default=None, gt=0)
     org_specific: bool = False  # False = global default row (organization_id NULL)
     followups: list[FollowupInput] = []
-
-
-def _default_car_due_days(severity: str) -> int:
-    return CAR_DUE_DAYS_CRITICAL if severity == "CRITICAL" else CAR_DUE_DAYS_ALERT
-
-
-def _validate_due_days_consistency(severity: str, effective_car_due_days: Optional[int], active_due_in_days: list[int]) -> None:
-    """
-    A CAR is only ever checked for overdue while it's still open -- ASSIGNED
-    and IN_PROGRESS included, not just unassigned OPEN (see main.py's
-    _check_car_overdue) -- so "CAR due in N days" is a genuine resolution
-    SLA, not an independent check-in nudge. If an active follow-up (the
-    thing that's actually supposed to resolve the CAR) is due later than
-    the CAR itself, the CAR will get flagged overdue before its own
-    remediation chain has a chance to complete. Reject the save rather than
-    silently widening whatever number the admin typed -- the value they see
-    in the field should always be the value actually enforced.
-    """
-    car_due = effective_car_due_days if effective_car_due_days is not None else _default_car_due_days(severity)
-    if not active_due_in_days:
-        return
-    worst = max(active_due_in_days)
-    if worst > car_due:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"A follow-up action is due in {worst} day(s), but the CAR itself is due in "
-                f"{car_due} day(s) -- the CAR would be flagged overdue before that follow-up "
-                f"completes. Increase 'CAR due in (days)' to at least {worst}, or reduce the "
-                f"follow-up's own due-in-days."
-            ),
-        )
 
 
 @router.post("", summary="Create a CAR trigger config rule")
@@ -203,12 +165,6 @@ def create_config(
 ):
     if body.severity not in ("ALERT", "CRITICAL"):
         raise HTTPException(status_code=400, detail="severity must be ALERT or CRITICAL")
-
-    _validate_due_days_consistency(
-        body.severity,
-        body.car_due_in_days,
-        [f.due_in_days for f in body.followups if f.is_active],
-    )
 
     org_id = _org_id(current_user) if body.org_specific else None
     existing = db.query(CarTriggerConfig).filter(
@@ -227,7 +183,6 @@ def create_config(
         severity=body.severity,
         car_trigger=body.car_trigger,
         display_order=body.display_order,
-        car_due_in_days=body.car_due_in_days,
         created_by=_user_id(current_user),
     )
     db.add(config)
@@ -251,7 +206,6 @@ class CarTriggerConfigUpdate(BaseModel):
     car_trigger: Optional[bool] = None
     is_active: Optional[bool] = None
     display_order: Optional[int] = None
-    car_due_in_days: Optional[int] = Field(default=None, gt=0)
     followups: Optional[list[FollowupInput]] = None
 
 
@@ -266,21 +220,12 @@ def update_config(
     if not config:
         raise HTTPException(status_code=404, detail="CAR trigger config not found")
 
-    effective_car_due_days = body.car_due_in_days if body.car_due_in_days is not None else config.car_due_in_days
-    effective_active_due_in_days = (
-        [f.due_in_days for f in body.followups if f.is_active] if body.followups is not None
-        else [f.due_in_days for f in config.followups if f.is_active]
-    )
-    _validate_due_days_consistency(config.severity, effective_car_due_days, effective_active_due_in_days)
-
     if body.car_trigger is not None:
         config.car_trigger = body.car_trigger
     if body.is_active is not None:
         config.is_active = body.is_active
     if body.display_order is not None:
         config.display_order = body.display_order
-    if body.car_due_in_days is not None:
-        config.car_due_in_days = body.car_due_in_days
 
     if body.followups is not None:
         db.query(CarTriggerFollowup).filter(CarTriggerFollowup.car_trigger_config_id == config.id).delete()

@@ -9880,15 +9880,6 @@ def _seed_notification_event_catalogue(session) -> int:
                           "car.due_date", "equipment.ueic"],
             default_roles=["EE_TLSS"],
         ),
-        dict(
-            event_type="car_overdue",
-            label="Corrective Action Request Overdue",
-            group_name="Corrective Actions",
-            description="Fired once when a still-open Corrective Action Request passes its due date.",
-            context_vars=["car.number", "car.severity", "car.status", "car.summary",
-                          "car.due_date", "equipment.ueic", "days_overdue"],
-            default_roles=["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
-        ),
         # ── Predictive Analytics ─────────────────────────────────────────────
         dict(
             event_type="deterioration_watch_escalated",
@@ -11226,30 +11217,6 @@ def _seed_notification_templates(session) -> int:
             "CAR assigned — {{equipment.ueic}}",
             "{{car.number}} assigned, due {{car.due_date}}.",
             ["EE_TLSS"],
-        ),
-    )
-    _tmpl("car_overdue",
-        _e(
-            "[CAR OVERDUE] {{car.number}} — {{equipment.ueic}} ({{days_overdue}} days)",
-            "<h3 style='color:darkred'>Corrective Action Request Overdue</h3>"
-            "<p>This Corrective Action Request has passed its due date and is still open.</p>"
-            + _html([
-                ("CAR Number", "car.number"), ("Severity", "car.severity"),
-                ("Status", "car.status"), ("Equipment", "equipment.ueic"),
-                ("Summary", "car.summary"), ("Due Date", "car.due_date"),
-                ("Days Overdue", "days_overdue"),
-            ]) +
-            "<p>Log in to SEACMS to review and progress this Corrective Action Request.</p>",
-            ["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
-        ),
-        _s(
-            "[KPTCL-SEACMS] CAR OVERDUE: {{car.number}} ({{equipment.ueic}}), {{days_overdue}} days overdue. Login SEACMS.",
-            ["EE_TLSS"],
-        ),
-        _i(
-            "CAR overdue — {{equipment.ueic}}",
-            "{{car.number}} is {{days_overdue}} days overdue.",
-            ["EE_TLSS", "CEE_TRANSMISSION_ZONE"],
         ),
     )
 

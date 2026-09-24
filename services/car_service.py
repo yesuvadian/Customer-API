@@ -335,15 +335,7 @@ def process_evaluation_for_car(
 
         return existing_car
 
-    # Per-rule override (car_due_in_days, set on the CarTriggerConfig row
-    # itself via the Trigger Config screen) wins over the global .env
-    # default for this severity -- same override-falls-back-to-default
-    # shape every other config in this fan-out already uses.
-    due_days = (
-        config.car_due_in_days
-        if config is not None and config.car_due_in_days is not None
-        else (CAR_DUE_DAYS_CRITICAL if evaluation_overall == "CRITICAL" else CAR_DUE_DAYS_ALERT)
-    )
+    due_days = CAR_DUE_DAYS_CRITICAL if evaluation_overall == "CRITICAL" else CAR_DUE_DAYS_ALERT
     car = CorrectiveActionRequest(
         car_number=_car_number(db),
         equipment_id=testing_request.equipment_id,

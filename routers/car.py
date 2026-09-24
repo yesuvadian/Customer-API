@@ -262,9 +262,6 @@ def assign_car(car_id: UUID, body: CarAssignRequest, db: Session = Depends(get_d
     car_service.assign_car(db, car, body.assigned_to)
     if body.due_date:
         car.due_date = body.due_date
-        # A new deadline gets its own fresh overdue check — clear the marker
-        # so car_overdue can fire again if this new date also passes.
-        car.overdue_notified_at = None
         db.commit()
         db.refresh(car)
     return _serialize_summary(car, db)

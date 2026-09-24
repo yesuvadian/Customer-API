@@ -4023,11 +4023,6 @@ class CorrectiveActionRequest(Base):
     status = Column(String(25), default=CarStatus.OPEN, nullable=False)
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     due_date = Column(Date, nullable=True)
-    # Set once car_overdue fires for this CAR (services/car_service.py /
-    # main.py's periodic check) so it isn't re-notified every check cycle —
-    # cleared back to NULL whenever due_date changes (reassignment,
-    # reopening) so a new deadline gets its own fresh notification.
-    overdue_notified_at = Column(DateTime(timezone=True), nullable=True)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -4087,10 +4082,6 @@ class CarTriggerConfig(Base):
     car_trigger = Column(Boolean, nullable=False, default=True)
     is_active = Column(Boolean, nullable=False, default=True)
     display_order = Column(Integer, nullable=False, default=0)
-    # NULL = inherit config.CAR_DUE_DAYS_CRITICAL/CAR_DUE_DAYS_ALERT for this
-    # row's severity (see services/car_service.py's due_days resolution) --
-    # same override-falls-back-to-default shape as everything else here.
-    car_due_in_days = Column(Integer, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
