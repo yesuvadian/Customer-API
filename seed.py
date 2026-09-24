@@ -5370,7 +5370,8 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         except Exception:
             doc_date = None
 
-        # Determine status enum  (values: active, retired, scrapped, under_repair)
+        # Determine status enum (values: active, under_maintenance,
+        # under_repair, condemned, retired, replaced, decommissioned)
         raw_status = (_safe_str(row.get("status")) or "In-service").lower()
         from models import EquipmentStatus
         status_map = {
@@ -5379,10 +5380,12 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             "operational": EquipmentStatus.active,
             "active": EquipmentStatus.active,
             "retired": EquipmentStatus.retired,
-            "decommissioned": EquipmentStatus.scrapped,
-            "scrapped": EquipmentStatus.scrapped,
-            "under maintenance": EquipmentStatus.under_repair,
-            "maintenance": EquipmentStatus.under_repair,
+            "replaced": EquipmentStatus.replaced,
+            "condemned": EquipmentStatus.condemned,
+            "decommissioned": EquipmentStatus.decommissioned,
+            "scrapped": EquipmentStatus.decommissioned,
+            "under maintenance": EquipmentStatus.under_maintenance,
+            "maintenance": EquipmentStatus.under_maintenance,
             "under repair": EquipmentStatus.under_repair,
         }
         status = status_map.get(raw_status, EquipmentStatus.active)

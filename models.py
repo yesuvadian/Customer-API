@@ -155,9 +155,12 @@ class NextActionType(PyEnum):
 
 class EquipmentStatus(PyEnum):
     active = "active"
-    retired = "retired"
-    scrapped = "scrapped"
+    under_maintenance = "under_maintenance"
     under_repair = "under_repair"
+    condemned = "condemned"
+    retired = "retired"
+    replaced = "replaced"
+    decommissioned = "decommissioned"
 
 
 # =============================================================================
