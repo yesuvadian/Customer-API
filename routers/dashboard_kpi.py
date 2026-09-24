@@ -1756,63 +1756,13 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         configured SLA -- the actionable detail behind _scope_counts'
         review_sla_pct, same reasoning as _dqi_issues_list above: the
         aggregate percentage alone doesn't tell you which ticket to act on.
+        Shares _review_sla_judged_rows with GET /dashboard/review-sla-breaches
+        ("Load More") and GET /dashboard/review-sla-summary (the card's
+        charts), so all three agree on what counts as a breach.
         """
-        from models import TrWfStageInstance as _TrWfStageInstance
-        from sqlalchemy import or_ as _or_rsb
-        _tr_filters = [TestingRequest.organization_id == svc.org_id]
-        if dept_ids_for_scope:
-            _tr_filters.append(TestingRequest.department_id.in_(dept_ids_for_scope))
-
-        rows = (
-            db.query(_TrWfStageInstance, TrWfStage, TestingRequest)
-            .join(TrWfStage, TrWfStage.id == _TrWfStageInstance.stage_id)
-            .join(TrWfInstance, TrWfInstance.id == _TrWfStageInstance.wf_instance_id)
-            .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
-            .filter(
-                *_tr_filters,
-                TrWfStage.is_result_stage.is_(True),
-                _TrWfStageInstance.status.in_(("completed", "rejected")),
-                _TrWfStageInstance.started_at.isnot(None),
-                _TrWfStageInstance.completed_at.isnot(None),
-                _or_rsb(
-                    TrWfStage.default_duration_hours.isnot(None),
-                    TrWfStage.default_duration_days.isnot(None),
-                ),
-            )
-            .order_by(_TrWfStageInstance.completed_at.desc())
-            .all()
-        )
-
-        breaches = []
-        for si, stage, tr in rows:
-            # Same add_business_hours as review_sla_pct above and the
-            # escalation-matrix job -- weekends don't count against the SLA.
-            deadline = add_business_hours(
-                si.started_at,
-                stage.default_duration_hours if stage.default_duration_hours is not None
-                else stage.default_duration_days * 24,
-            )
-            if si.completed_at <= deadline:
-                continue
-            eq = getattr(tr, "equipment", None)
-            breaches.append({
-                "stage_instance_id": str(si.id),
-                "request_id": str(tr.id),
-                "request_number": tr.request_number,
-                "stage_name": stage.name,
-                # Reuses TicketsPanel's generic "test_type" display slot to
-                # show which stage breached, next to the request number --
-                # no separate widget needed for this one extra label.
-                "test_type": stage.name,
-                "equipment_id": str(eq.id) if eq else None,
-                "equipment_label": eq.ueic if eq else (
-                    tr.equipment_type.name if tr.equipment_type else "Equipment"),
-                "started_at": si.started_at.isoformat(),
-                "completed_at": si.completed_at.isoformat(),
-                "deadline": deadline.isoformat(),
-                "hours_over": round((si.completed_at - deadline).total_seconds() / 3600, 1),
-            })
-
+        breaches = [_review_sla_public(r)
+                    for r in _review_sla_judged_rows(db, svc.org_id, dept_ids_for_scope)
+                    if r["breached"]]
         total = len(breaches)
         page = breaches[:limit] if limit is not None else breaches
         return page, total
@@ -2798,31 +2748,25 @@ def get_critical_equipment_page(
     }
 
 
-@router.get("/review-sla-breaches")
-def get_review_sla_breaches_page(
-    org_id: Optional[UUID] = Query(None),
-    dept_id: Optional[UUID] = Query(None),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Paginated continuation of the blended Result Review SLA Breaches
-    list behind the "Result Review SLA" tile. The rollup's own
-    _review_sla_breaches_list is nested inside _build_department_rollup
-    (a closure over several rollup-local values not worth threading
-    through a standalone signature just for this), so this reimplements
-    the same query directly instead — it only needs org/dept scope plus
-    TrWfStage.is_result_stage + default_duration_hours/days, none of
-    which has any viewer/session dependency, so re-deriving it here is
-    safe and gives an identical result set.
+def _review_sla_judged_rows(db: Session, org_id, dept_ids):
+    """Every closed Result Review stage instance judged against its
+    configured stage duration (the blended review_sla_pct basis), newest
+    first, each flagged `breached` or not. Same filters and the same
+    weekend-aware add_business_hours deadline as _scope_counts'
+    review_sla_pct, so the breach list, its "Load More" pages and the
+    card's charts all count the same rows.
+
+    `severity` is the worst ALERT/CRITICAL evaluation_result['overall']
+    among the request's TestResults (same rule as the severity-split
+    tiles), or None when every result was NORMAL -- only used to colour
+    the compliance donut, never to change the deadline.
     """
     from sqlalchemy import or_
-    from models import TrWfStageInstance as _TrWfStageInstance, TrWfStage, TrWfInstance, TestingRequest
-    svc = _svc(db, current_user, org_id, dept_id)
-    _tr_filters = [TestingRequest.organization_id == svc.org_id]
-    if svc.dept_ids:
-        _tr_filters.append(TestingRequest.department_id.in_(svc.dept_ids))
+    from models import (TrWfStageInstance as _TrWfStageInstance, TrWfStage,
+                        TrWfInstance, TestingRequest, TestResult as _TestResult)
+    _tr_filters = [TestingRequest.organization_id == org_id]
+    if dept_ids:
+        _tr_filters.append(TestingRequest.department_id.in_(dept_ids))
     rows = (
         db.query(_TrWfStageInstance, TrWfStage, TestingRequest)
         .join(TrWfStage, TrWfStage.id == _TrWfStageInstance.stage_id)
@@ -2842,21 +2786,37 @@ def get_review_sla_breaches_page(
         .order_by(_TrWfStageInstance.completed_at.desc())
         .all()
     )
-    breaches = []
+
+    worst_severity_by_req = {}
+    req_ids = {tr.id for _, _, tr in rows}
+    if req_ids:
+        sev_rank = {"CRITICAL": 2, "ALERT": 1}
+        for req_id, overall in (
+            db.query(_TestResult.testing_request_id, _TestResult.evaluation_result["overall"].astext)
+            .filter(_TestResult.testing_request_id.in_(req_ids))
+            .all()
+        ):
+            rank = sev_rank.get(overall)
+            if rank is None:
+                continue
+            if rank > sev_rank.get(worst_severity_by_req.get(req_id), 0):
+                worst_severity_by_req[req_id] = overall
+
+    out = []
     for si, stage, tr in rows:
-        deadline = (
-            si.started_at + timedelta(hours=stage.default_duration_hours)
-            if stage.default_duration_hours is not None
-            else si.started_at + timedelta(days=stage.default_duration_days)
-        )
-        if si.completed_at <= deadline:
-            continue
+        sla_hours = (stage.default_duration_hours if stage.default_duration_hours is not None
+                     else stage.default_duration_days * 24)
+        # Weekends don't count against the SLA clock -- same as
+        # review_sla_pct and the escalation-matrix job.
+        deadline = add_business_hours(si.started_at, sla_hours)
         eq = getattr(tr, "equipment", None)
-        breaches.append({
+        out.append({
             "stage_instance_id": str(si.id),
             "request_id": str(tr.id),
             "request_number": tr.request_number,
             "stage_name": stage.name,
+            # Reuses TicketsPanel's generic "test_type" display slot to show
+            # which stage breached, next to the request number.
             "test_type": stage.name,
             "equipment_id": str(eq.id) if eq else None,
             "equipment_label": eq.ueic if eq else (
@@ -2864,8 +2824,153 @@ def get_review_sla_breaches_page(
             "started_at": si.started_at.isoformat(),
             "completed_at": si.completed_at.isoformat(),
             "deadline": deadline.isoformat(),
+            "sla_hours": float(sla_hours),
+            "hours_taken": round((si.completed_at - si.started_at).total_seconds() / 3600, 1),
             "hours_over": round((si.completed_at - deadline).total_seconds() / 3600, 1),
+            "breached": si.completed_at > deadline,
+            "severity": worst_severity_by_req.get(tr.id),
+            "_completed_at": si.completed_at,
         })
+    return out
+
+
+def _review_sla_public(row):
+    """_review_sla_judged_rows row minus its internal (underscored) keys."""
+    return {k: v for k, v in row.items() if not k.startswith("_")}
+
+
+# Aging buckets for the SLA card's bar chart, by hours past the deadline.
+_REVIEW_SLA_AGING_BUCKETS = (
+    ("< 1 day", 24),
+    ("1–3 days", 72),
+    ("3–7 days", 168),
+    ("7+ days", None),
+)
+
+
+@router.get("/review-sla-summary")
+def get_review_sla_summary(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    period: str = Query("30d", alias="range", pattern="^(30d|90d)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Chart data for the Result Review SLA Breaches card: a compliance
+    donut (on time vs breached, breaches split by result severity), an
+    aging bar chart (breaches by how late they finished, stacked by
+    stage) and a breach trend. `range` filters the donut, aging chart
+    AND the weekly trend by completed_at — the trend's week count scales
+    with the selected range (~5wk for 30d, ~13wk for 90d) so the chart
+    never implies a longer lookback than the range selector above it
+    actually covers.
+    """
+    from datetime import datetime, timedelta
+    svc = _svc(db, current_user, org_id, dept_id)
+    rows = _review_sla_judged_rows(db, svc.org_id, svc.dept_ids)
+
+    now = datetime.now()
+    since = {
+        "30d": now - timedelta(days=30),
+        "90d": now - timedelta(days=90),
+    }[period]
+    in_range = [r for r in rows if r["_completed_at"] >= since]
+    breaches = [r for r in in_range if r["breached"]]
+
+    by_severity = {"CRITICAL": 0, "ALERT": 0, "OTHER": 0}
+    for r in breaches:
+        by_severity[r["severity"] if r["severity"] in by_severity else "OTHER"] += 1
+    judged = len(in_range)
+    on_time = judged - len(breaches)
+
+    # Stage names in first-seen order so colours stay stable between loads.
+    stages = []
+    counts = {}
+    for r in breaches:
+        stage = r["stage_name"] or "Result Review"
+        if stage not in counts:
+            stages.append(stage)
+            counts[stage] = [0] * len(_REVIEW_SLA_AGING_BUCKETS)
+        for i, (_, upper) in enumerate(_REVIEW_SLA_AGING_BUCKETS):
+            if upper is None or r["hours_over"] < upper:
+                counts[stage][i] += 1
+                break
+
+    # Weekly trend window scales with the selected range (see docstring).
+    weeks = {"30d": 5, "90d": 13}[period]
+
+    this_monday = datetime.combine((now - timedelta(days=now.weekday())).date(), datetime.min.time())
+    week_starts = [this_monday - timedelta(weeks=weeks - 1 - i) for i in range(weeks)]
+    weekly = [0] * weeks
+    for r in rows:
+        if not r["breached"] or r["_completed_at"] < week_starts[0]:
+            continue
+        idx = (r["_completed_at"] - week_starts[0]).days // 7
+        weekly[min(weeks - 1, idx)] += 1
+
+    # Trend = second half of the window vs first half (the middle week is
+    # dropped for an odd-length window rather than double-counted).
+    half = weeks // 2
+    prev_half = sum(weekly[:half])
+    last_half = sum(weekly[weeks - half:]) if half else 0
+
+    def _week_label(ws: datetime) -> str:
+        we = ws + timedelta(days=6)
+        if ws.month == we.month:
+            return f"{ws.strftime('%b')} {ws.day}-{we.day}"
+        return f"{ws.strftime('%b')} {ws.day}-{we.strftime('%b')} {we.day}"
+
+    return {
+        "range": period,
+        "since": since.isoformat(),
+        "compliance": {
+            "judged": judged,
+            "on_time": on_time,
+            "breached": len(breaches),
+            "breached_critical": by_severity["CRITICAL"],
+            "breached_alert": by_severity["ALERT"],
+            "breached_other": by_severity["OTHER"],
+            "pct": int(on_time / judged * 100) if judged else None,
+        },
+        "aging": {
+            "buckets": [label for label, _ in _REVIEW_SLA_AGING_BUCKETS],
+            "stages": [{"name": s, "counts": counts[s]} for s in stages],
+            "total": len(breaches),
+        },
+        "weekly": [
+            {"week_start": ws.date().isoformat(),
+             "label": _week_label(ws),
+             "count": c}
+            for ws, c in zip(week_starts, weekly)
+        ],
+        "trend_pct": round((last_half - prev_half) / prev_half * 100) if prev_half else None,
+        "trend_window_weeks": half,
+    }
+
+
+@router.get("/review-sla-breaches")
+def get_review_sla_breaches_page(
+    org_id: Optional[UUID] = Query(None),
+    dept_id: Optional[UUID] = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated continuation of the blended Result Review SLA Breaches
+    list behind the "Result Review SLA" tile. The rollup's own
+    _review_sla_breaches_list is nested inside _build_department_rollup
+    (a closure over several rollup-local values not worth threading
+    through a standalone signature just for this), so this reimplements
+    the same query directly instead — it only needs org/dept scope plus
+    TrWfStage.is_result_stage + default_duration_hours/days, none of
+    which has any viewer/session dependency, so re-deriving it here is
+    safe and gives an identical result set.
+    """
+    svc = _svc(db, current_user, org_id, dept_id)
+    breaches = [_review_sla_public(r)
+                for r in _review_sla_judged_rows(db, svc.org_id, svc.dept_ids)
+                if r["breached"]]
     total = len(breaches)
     page = breaches[offset:offset + limit]
     return {

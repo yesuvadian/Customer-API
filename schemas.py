@@ -1206,6 +1206,12 @@ class TestingRequestResponse(BaseModel):
     # wf_status_name is just an org-configured label that can be reused
     # across different actions.
     wf_terminal_action_code: Optional[str] = None
+    # The comment recorded on that same terminal audit-log entry — the
+    # actual reject/cancel reason a reviewer typed (or, for an
+    # equipment-triggered auto-cancel, the "equipment marked X" reason) —
+    # so the Kanban board can show WHY a card landed in Rejected/Cancelled
+    # without a click-through.
+    wf_terminal_reason: Optional[str] = None
 
     # ─────────────────────────────────────────────
     # TR Workflow current stage flags
@@ -2616,7 +2622,7 @@ class EquipmentRetireRequest(BaseModel):
 
 
 class EquipmentStatusUpdateRequest(BaseModel):
-    status: str  # active | under_repair | retired
+    status: str  # active | under_repair | under_maintenance | retired | condemned | decommissioned
     reason: Optional[str] = None
 
 
@@ -2640,9 +2646,12 @@ class EquipmentReplaceRequest(BaseModel):
 
 class EquipmentCountResponse(BaseModel):
     active: int = 0
-    retired: int = 0
-    scrapped: int = 0
+    under_maintenance: int = 0
     under_repair: int = 0
+    condemned: int = 0
+    retired: int = 0
+    replaced: int = 0
+    decommissioned: int = 0
     total: int = 0
 
 
