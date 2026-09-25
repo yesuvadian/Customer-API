@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+from utils.db_time import db_naive_to_aware
 from models import (
     Equipment,
     RepairStageDefinition,
@@ -357,9 +358,8 @@ def get_surveillance_dashboard(
     )
 
     for wf_id, equipment_name, quarter, started_at, duration_days in overdue_stages:
-        # Make started_at timezone-aware if it's naive (database timestamps are usually naive)
-        if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=timezone.utc)
+        # started_at is stored as DB-session-local time, not UTC.
+        started_at = db_naive_to_aware(started_at, db)
         deadline = started_at + timedelta(days=duration_days)
         days_overdue = (now - deadline).days
 

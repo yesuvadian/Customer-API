@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+from utils.db_time import db_naive_to_aware
 from models import (
     Equipment,
     OrgDepartment,
@@ -223,39 +224,43 @@ def get_workflow_dashboard(
     ]
 
     # ── 4. Equipment at risk (active workflows) ───────────────────────────────
-    at_risk_rows = (
-        db.query(
-            RepairWorkflow.id,
-            RepairWorkflow.workflow_code,
-            RepairWorkflow.workflow_number,
-            RepairWorkflow.assignment_pending,
-            Equipment.ueic,
-            RepairStageDefinition.name.label("stage_name"),
+    def _at_risk_query():
+        return (
+            db.query(
+                RepairWorkflow.id,
+                RepairWorkflow.workflow_code,
+                RepairWorkflow.workflow_number,
+                RepairWorkflow.assignment_pending,
+                Equipment.ueic,
+                RepairStageDefinition.name.label("stage_name"),
+            )
+            .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
+            .outerjoin(
+                RepairStageDefinition,
+                RepairStageDefinition.id == RepairWorkflow.current_stage_id,
+            )
+            .filter(
+                _eq_filter(),
+                RepairWorkflow.status == "active",
+            )
         )
-        .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
-        .outerjoin(
-            RepairStageDefinition,
-            RepairStageDefinition.id == RepairWorkflow.current_stage_id,
-        )
-        .filter(
-            _eq_filter(),
-            RepairWorkflow.status == "active",
-        )
-        .order_by(RepairWorkflow.started_at.desc())
-        .limit(20)
-        .all()
+
+    def _at_risk_rows(rows):
+        return [
+            {
+                "workflow_id":        str(wf_id),
+                "workflow_code":      code,
+                "workflow_number":    number,
+                "equipment_ueic":     ueic,
+                "current_stage":      stage,
+                "assignment_pending": pending_flag,
+            }
+            for wf_id, code, number, pending_flag, ueic, stage in rows
+        ]
+
+    equipment_at_risk = _at_risk_rows(
+        _at_risk_query().order_by(RepairWorkflow.started_at.desc()).limit(20).all()
     )
-    equipment_at_risk = [
-        {
-            "workflow_id":        str(wf_id),
-            "workflow_code":      code,
-            "workflow_number":    number,
-            "equipment_ueic":     ueic,
-            "current_stage":      stage,
-            "assignment_pending": pending_flag,
-        }
-        for wf_id, code, number, pending_flag, ueic, stage in at_risk_rows
-    ]
 
     # ── 5. Recent activity (last 15 audit log entries) ────────────────────────
     activity_rows = (
@@ -284,6 +289,7 @@ def get_workflow_dashboard(
 
     # ── 6. Alerts — Overdue stages across all workflow types ─────────────────
     alerts = []
+    stage_deadline: dict[str, datetime] = {}  # workflow_id -> current stage deadline
     now = datetime.now(timezone.utc)
 
     # Get all active workflows with stage deadlines
@@ -318,14 +324,20 @@ def get_workflow_dashboard(
     for (
         wf_id, wf_code, wf_number, ueic, stage_name, started_at, duration_days,
     ) in overdue_workflows:
-        # Ensure started_at is timezone-aware (assume UTC if naive)
-        if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=timezone.utc)
+        # started_at is stored as DB-session-local time, not UTC.
+        started_at = db_naive_to_aware(started_at, db)
 
-        deadline = started_at + timedelta(days=duration_days)
-        days_overdue = (now - deadline).days
+        deadline = (started_at + timedelta(days=duration_days)).astimezone(timezone.utc)
+        late_by = now - deadline
+        days_overdue = late_by.days
+        stage_deadline[str(wf_id)] = deadline
 
-        if days_overdue > 0:
+        # Overdue the moment the deadline passes, not a full day later.
+        if late_by.total_seconds() > 0:
+            hours_overdue = int(late_by.total_seconds() // 3600)
+            late_label = (
+                f"{days_overdue} day(s)" if days_overdue > 0 else f"{hours_overdue} hour(s)"
+            )
             alerts.append({
                 "type": "overdue_stage",
                 "severity": "high",
@@ -334,12 +346,14 @@ def get_workflow_dashboard(
                 "workflow_number": wf_number,
                 "equipment": ueic,
                 "stage_name": stage_name,
-                "message": f"{stage_name} overdue by {days_overdue} day(s)",
+                "message": f"{stage_name} overdue by {late_label}",
                 "days_overdue": days_overdue,
+                "hours_overdue": hours_overdue,
+                "deadline": deadline.isoformat(),
             })
 
     # Sort alerts by days_overdue (most overdue first)
-    alerts.sort(key=lambda x: x.get("days_overdue", 0), reverse=True)
+    alerts.sort(key=lambda x: x.get("hours_overdue", 0), reverse=True)
 
     overdue_by_code: dict[str, int] = {}
     for a in alerts:
@@ -349,6 +363,28 @@ def get_workflow_dashboard(
     for wt in workflow_types:
         wt["overdue"] = overdue_by_code.get(wt["code"], 0)
     totals["overdue"] = len(alerts)
+
+    # Overdue workflows outside the 20 most recent at-risk rows would be
+    # counted on the tile but missing from the list, so append them.
+    listed_ids = {e["workflow_id"] for e in equipment_at_risk}
+    missing_ids = [UUID(a["workflow_id"]) for a in alerts if a["workflow_id"] not in listed_ids]
+    if missing_ids:
+        equipment_at_risk.extend(_at_risk_rows(
+            _at_risk_query().filter(RepairWorkflow.id.in_(missing_ids)).all()
+        ))
+
+    # Deadline fields per at-risk row, so the list can badge overdue items.
+    for e in equipment_at_risk:
+        deadline = stage_deadline.get(e["workflow_id"])
+        e["current_stage_deadline"] = deadline.isoformat() if deadline else None
+        overdue = bool(deadline and now > deadline)
+        e["is_overdue"] = overdue
+        # Whole days left, or -N for N full days late (0 while under a day late).
+        e["days_remaining"] = (
+            None if not deadline
+            else -(now - deadline).days if overdue
+            else (deadline - now).days
+        )
 
     # ── 7. Per-department breakdown ───────────────────────────────────────────
     # Get workflow counts grouped by equipment's department + workflow_code + status
