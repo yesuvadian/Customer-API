@@ -422,10 +422,33 @@ class TestingService:
                         if _last_s:
                             _term_code = _last_s.status_code
                     if _term_code:
+                        _from_stage_id = instance.current_stage_id
+                        _from_code = instance.current_status_code
                         request.current_status_code = _term_code
                         instance.current_status_code = _term_code
                         instance.current_stage_id = None
                         instance.status = "completed"
+                        # Record how the workflow ended, like every routed
+                        # terminal transition does. Without this row the
+                        # workflow's "last action" is whatever came before
+                        # (possibly an earlier send-back reject), and
+                        # analytics_engine.accepted_test_result_ids() - which
+                        # trusts the last audit action - could drop this
+                        # accepted result from the health score.
+                        from models import TrWfAuditLog as _TrWfAuditLog
+                        self.db.add(_TrWfAuditLog(
+                            wf_instance_id=instance.id,
+                            testing_request_id=request.id,
+                            from_stage_id=_from_stage_id,
+                            to_stage_id=None,
+                            action_code=complete_t.action_code,
+                            performed_by=tester_id,
+                            from_status_code=_from_code,
+                            to_status_code=_term_code,
+                            comment="Auto-closed on result submission (all remaining transitions terminal)",
+                            is_send_back=False,
+                            is_terminal=True,
+                        ))
                     # Auto-approve the recommendation and dispatch
                     self.db.flush()
                     rec_obj.approval_status = "approved"

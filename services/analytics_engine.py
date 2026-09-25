@@ -240,8 +240,10 @@ def accepted_test_result_ids(db: Session):
         Cancel transition configured with is_rejection=False also ends the
         instance "completed" (wf_cancelled / taqc_cancelled / fr_cancelled).
         The last audit-log action_code is the same ground truth the Kanban
-        board uses (routers/testing_requests.py wf_terminal_action_code); the
-        status code is checked too for instances with no audit rows. Active
+        board uses (routers/testing_requests.py wf_terminal_action_code). The
+        status code is used ONLY when there is no audit row: it can be a
+        fallback ("last status by sequence" in the tester auto-close path)
+        that says nothing about how the workflow actually ended. Active
         instances are still under review; terminated ones were rejected.
       - legacy requests (never had a wf instance): status is a closed/approved
         terminal state (dashboard_service.CLOSED_STATUSES) minus `rejected`,
@@ -269,7 +271,9 @@ def accepted_test_result_ids(db: Session):
     last_action = (
         db.query(_TWAL.action_code)
         .filter(_TWAL.wf_instance_id == _TWI.id)
-        .order_by(_TWAL.created_at.desc())
+        # created_at is server now() = transaction start, so rows written in
+        # one transaction tie; the terminal row is by definition the last.
+        .order_by(_TWAL.created_at.desc(), _TWAL.is_terminal.desc().nullslast())
         .limit(1)
         .correlate(_TWI)
         .scalar_subquery()
@@ -279,12 +283,15 @@ def accepted_test_result_ids(db: Session):
         .filter(
             _TWI.status == "completed",
             _TWI.testing_request_id.isnot(None),
-            or_(last_action.is_(None),
-                and_(~last_action.ilike("%cancel%"),
-                     ~last_action.ilike("%reject%"))),
-            or_(_TWI.current_status_code.is_(None),
-                and_(~_TWI.current_status_code.ilike("%cancel%"),
-                     ~_TWI.current_status_code.ilike("%reject%"))),
+            or_(
+                and_(last_action.isnot(None),
+                     ~last_action.ilike("%cancel%"),
+                     ~last_action.ilike("%reject%")),
+                and_(last_action.is_(None),
+                     or_(_TWI.current_status_code.is_(None),
+                         and_(~_TWI.current_status_code.ilike("%cancel%"),
+                              ~_TWI.current_status_code.ilike("%reject%")))),
+            ),
         )
     )
     has_wf = (
