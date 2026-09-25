@@ -770,6 +770,14 @@ def list_testing_requests(
             "panel's related-requests list), not the org-wide TR worklist."
         ),
     ),
+    include_scored: bool = Query(
+        False,
+        description=(
+            "With is_closed=true, also include requests whose results feed "
+            "equipment health scores (analytics_engine.accepted_test_result_ids) "
+            "- for the per-equipment Test Results dialog."
+        ),
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -828,6 +836,7 @@ def list_testing_requests(
         failure_year=failure_year,
         capacity_mva=capacity_mva,
         include_direct_submissions=include_direct_submissions,
+        include_scored=include_scored,
     )
 
     total = service.count_requests(**common)

@@ -475,6 +475,7 @@ class TestingRequestService:
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
         include_direct_submissions: bool = False,
+        include_scored: bool = False,
     ):
         query = (
             self.db.query(TestingRequest)
@@ -573,12 +574,22 @@ class TestingRequestService:
                 TrWfInstance.status.in_(["completed", "terminated", "cancelled"])
             ).scalar_subquery()
             if is_closed:
-                query = query.filter(
-                    or_(
-                        TestingRequest.status.in_(_LEGACY_CLOSED_STATUSES),
-                        TestingRequest.id.in_(wf_done_ids),
-                    )
-                )
+                closed_conds = [
+                    TestingRequest.status.in_(_LEGACY_CLOSED_STATUSES),
+                    TestingRequest.id.in_(wf_done_ids),
+                ]
+                if include_scored:
+                    # Also every request with a result that feeds equipment
+                    # health (e.g. legacy finance_pending after technical
+                    # approval). Used by the per-equipment Test Results
+                    # dialog so it can never be empty next to a real score,
+                    # whatever accepted_test_result_ids() evolves into.
+                    from services.analytics_engine import accepted_test_result_ids
+                    closed_conds.append(TestingRequest.id.in_(
+                        self.db.query(TestResult.testing_request_id)
+                        .filter(TestResult.id.in_(accepted_test_result_ids(self.db)))
+                    ))
+                query = query.filter(or_(*closed_conds))
             else:
                 query = query.filter(
                     TestingRequest.status.notin_(_LEGACY_CLOSED_STATUSES),
@@ -787,6 +798,7 @@ class TestingRequestService:
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
         include_direct_submissions: bool = False,
+        include_scored: bool = False,
     ) -> List[TestingRequest]:
         query = self._base_request_query(
             status_filter=status_filter,
@@ -809,6 +821,7 @@ class TestingRequestService:
             failure_year=failure_year,
             capacity_mva=capacity_mva,
             include_direct_submissions=include_direct_submissions,
+            include_scored=include_scored,
         )
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
 
@@ -834,6 +847,7 @@ class TestingRequestService:
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
         include_direct_submissions: bool = False,
+        include_scored: bool = False,
         **_ignored,
     ) -> int:
         query = self._base_request_query(
@@ -857,6 +871,7 @@ class TestingRequestService:
             failure_year=failure_year,
             capacity_mva=capacity_mva,
             include_direct_submissions=include_direct_submissions,
+            include_scored=include_scored,
         )
         return query.with_entities(func.count(TestingRequest.id)).scalar() or 0
 
