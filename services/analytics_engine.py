@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import mean, stdev
 from typing import Optional
 
-from sqlalchemy import func, text
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 import config
@@ -223,6 +223,86 @@ def _risk_from_score(
     # being labeled Critical instead of silently keeping the old label via
     # a hardcoded fallback.
     return bands[-1][1] if bands else "Unknown"
+
+
+def accepted_test_result_ids(db: Session):
+    """Scalar subquery of TestResult ids whose results count as ACCEPTED -
+    the single rule for "which tests feed health scores / latest-test views".
+    Every query that picks an equipment's latest test (equipment health,
+    AI Analytics lab scores, per-test-type chips, parameter trends,
+    deterioration watch, comparison view, AI graph) must filter
+    TestAnalytics/ParameterAnalytics.test_result_id through this, or two
+    screens can disagree about the same equipment.
+
+    Accepted means:
+      - tr_wf requests: the workflow instance ended `completed` AND the action
+        that ended it was not a cancel/reject. Status alone is not enough - a
+        Cancel transition configured with is_rejection=False also ends the
+        instance "completed" (wf_cancelled / taqc_cancelled / fr_cancelled).
+        The last audit-log action_code is the same ground truth the Kanban
+        board uses (routers/testing_requests.py wf_terminal_action_code); the
+        status code is checked too for instances with no audit rows. Active
+        instances are still under review; terminated ones were rejected.
+      - legacy requests (never had a wf instance): status is a closed/approved
+        terminal state (dashboard_service.CLOSED_STATUSES) minus `rejected`.
+
+    Replaces the old per-site rules ("status NOT IN {draft, submitted,
+    assigned, accepted, in_progress}", "completed or terminated wf", or no
+    rule at all), which let results still in test_submitted / under_approval
+    / under_review / finance_pending / pending_assignment, and rejected or
+    cancelled ones, drive scores. This set is a strict subset of
+    GET /testing_requests?is_closed=true, so every result behind a score is
+    listable in the per-equipment Test Results dialog.
+    """
+    from models import TestResult as _TR2, TestingRequest as _TReq, TestingRequestStatus as _TRS, TrWfInstance as _TWI
+    from models import TrWfAuditLog as _TWAL
+    from services.dashboard_service import CLOSED_STATUSES as _CLOSED_STATUSES
+
+    scorable_statuses = [st for st in _CLOSED_STATUSES if st != _TRS.rejected]
+    last_action = (
+        db.query(_TWAL.action_code)
+        .filter(_TWAL.wf_instance_id == _TWI.id)
+        .order_by(_TWAL.created_at.desc())
+        .limit(1)
+        .correlate(_TWI)
+        .scalar_subquery()
+    )
+    wf_accepted = (
+        db.query(_TWI.testing_request_id)
+        .filter(
+            _TWI.status == "completed",
+            _TWI.testing_request_id.isnot(None),
+            or_(last_action.is_(None),
+                and_(~last_action.ilike("%cancel%"),
+                     ~last_action.ilike("%reject%"))),
+            or_(_TWI.current_status_code.is_(None),
+                and_(~_TWI.current_status_code.ilike("%cancel%"),
+                     ~_TWI.current_status_code.ilike("%reject%"))),
+        )
+    )
+    has_wf = (
+        db.query(_TWI.testing_request_id)
+        .filter(_TWI.testing_request_id.isnot(None))
+    )
+    wf_active = (
+        db.query(_TWI.testing_request_id)
+        .filter(_TWI.status == "active", _TWI.testing_request_id.isnot(None))
+    )
+    return (
+        db.query(_TR2.id)
+        .join(_TReq, _TReq.id == _TR2.testing_request_id)
+        .filter(
+            _TReq.id.notin_(wf_active),
+            or_(
+                _TReq.id.in_(wf_accepted),
+                and_(
+                    _TReq.id.notin_(has_wf),
+                    _TReq.status.in_(scorable_statuses),
+                ),
+            ),
+        )
+        .scalar_subquery()
+    )
 
 
 def _condition_from_score(score: Optional[float]) -> str:
@@ -1247,22 +1327,12 @@ class AnalyticsEngine:
         if not equipment:
             return None
 
-        from models import TestResult as _TR2, TestingRequest as _TReq, TestingRequestStatus as _TRS, TrWfInstance as _TWI
-
-        _OPEN_STATUSES = {
-            _TRS.draft, _TRS.submitted, _TRS.assigned,
-            _TRS.accepted, _TRS.in_progress,
-        }
-        # IDs of TRs that are wf-active (not yet completed)
-        _wf_active_tr_ids = {
-            row.testing_request_id
-            for row in self.db.query(_TWI.testing_request_id)
-            .filter(_TWI.status == "active").all()
-        }
-
-        all_rows = (
+        rows = (
             self.db.query(TestAnalytics)
-            .filter(TestAnalytics.equipment_id == equipment_id)
+            .filter(
+                TestAnalytics.equipment_id == equipment_id,
+                TestAnalytics.test_result_id.in_(accepted_test_result_ids(self.db)),
+            )
             .order_by(
                 TestAnalytics.tested_at.desc().nullslast(),
                 TestAnalytics.calculated_at.desc(),
@@ -1270,23 +1340,34 @@ class AnalyticsEngine:
             .all()
         )
 
-        # Filter out analytics whose TR is still open/in-progress
-        _tr_id_map: dict = {}
-        for _ta in all_rows:
-            if _ta.test_result_id not in _tr_id_map:
-                _res = self.db.get(_TR2, _ta.test_result_id)
-                _tr_id_map[_ta.test_result_id] = _res
-
-        rows = [
-            _ta for _ta in all_rows
-            if (_res := _tr_id_map.get(_ta.test_result_id)) is not None
-            and _res.testing_request is not None
-            and _res.testing_request.status not in _OPEN_STATUSES
-            and _res.testing_request_id not in _wf_active_tr_ids
-        ]
-
         if not rows:
-            return None
+            # Nothing eligible any more (e.g. the only closed request was
+            # reopened, or its results were removed). Reset an existing row
+            # instead of returning early: an early return left the previous
+            # score/risk in place, so the equipment stayed "Critical" on the
+            # dashboards with no test behind it.
+            existing = (
+                self.db.query(EquipmentAnalytics)
+                .filter(EquipmentAnalytics.equipment_id == equipment_id)
+                .first()
+            )
+            if not existing:
+                return None
+            ea = self._upsert_equipment_analytics(
+                equipment_id        = equipment_id,
+                organization_id     = equipment.organization_id,
+                department_id       = equipment.department_id,
+                health_score        = None,
+                test_type_scores    = {},
+                critical_findings   = [],
+                parameters_at_risk  = 0,
+                test_types_assessed = 0,
+                last_test_date      = None,
+            )
+            self.db.flush()
+            if equipment.department_id:
+                self.run_for_department(equipment.department_id)
+            return ea
 
         # Keep only the latest analytics per template_key
         seen: set[str] = set()
@@ -1512,6 +1593,13 @@ class AnalyticsEngine:
                 TestResult.template_key     == template_key,
                 TestResult.id               != exclude_result,
                 TestResult.test_data.isnot(None),
+                # History = accepted readings only (same rule as health
+                # scores). Rejected / cancelled / still-under-review results
+                # must not bend trend, anomaly, breach-forecast or
+                # Deterioration Watch figures. The result being analysed
+                # (exclude_result) is unaffected, so the Result Review
+                # preview of a pending test still gets its trend.
+                TestResult.id.in_(accepted_test_result_ids(self.db)),
             )
         )
         if before is not None:

@@ -31,6 +31,7 @@ import re
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from services.analytics_engine import accepted_test_result_ids
 
 from database import get_vendor_db
 from auth_utils import get_current_user
@@ -176,7 +177,8 @@ def _ta_with_dates(eq_ids: list, db: Session) -> list[tuple]:
         return []
     rows = db.query(TestAnalytics, TestResult.tested_at, TestResult.cts).join(
         TestResult, TestResult.id == TestAnalytics.test_result_id
-    ).filter(TestAnalytics.equipment_id.in_(eq_ids)).all()
+    ).filter(TestAnalytics.equipment_id.in_(eq_ids),
+             TestAnalytics.test_result_id.in_(accepted_test_result_ids(db))).all()
     result = []
     for ta, tr_tested_at, tr_cts in rows:
         eff_date = tr_tested_at or tr_cts
@@ -706,6 +708,7 @@ def get_ageing(
 
     pa_rows: list[ParameterAnalytics] = db.query(ParameterAnalytics).filter(
         ParameterAnalytics.equipment_id.in_(eq_ids),
+        ParameterAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
     ).all() if eq_ids else []
 
     # Resolve each parameter's test date up front and trim pa_rows to the
@@ -865,6 +868,7 @@ def get_dielectric(
 
     pa_rows: list[ParameterAnalytics] = db.query(ParameterAnalytics).filter(
         ParameterAnalytics.equipment_id.in_(eq_ids),
+        ParameterAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
     ).all() if eq_ids else []
 
     # Resolve each parameter's test date up front and trim pa_rows to the

@@ -566,8 +566,11 @@ class TestingRequestService:
                     query = query.filter(_status_conditions(statuses))
         if is_closed is not None:
             from services.dashboard_service import CLOSED_STATUSES as _LEGACY_CLOSED_STATUSES
+            # "cancelled" included to match the per-row is_closed flag
+            # (routers/testing_requests.py _enrich), which already treats a
+            # cancelled workflow instance as closed.
             wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
-                TrWfInstance.status.in_(["completed", "terminated"])
+                TrWfInstance.status.in_(["completed", "terminated", "cancelled"])
             ).scalar_subquery()
             if is_closed:
                 query = query.filter(
@@ -617,14 +620,24 @@ class TestingRequestService:
 
         if date_from or date_to:
 
-            # All tab -> use tested_at
-            if is_closed is None:
+            # All / Closed -> use when the test was actually performed
+            # (TestResult.tested_at, coalesced with cts for legacy rows with
+            # no tested_at — same rule as routers/analytics.py
+            # _apply_tested_at_filter, so the Analytics Dashboard's scores and
+            # its per-equipment Test Results dialog agree for one date range).
+            # Closed used to fall through to TestingRequest.cts below, which
+            # is when the request ROW was created: bulk-imported historical
+            # tests (created 2026, tested 1997-2025) all fell outside any
+            # realistic range and the dialog showed "No test results found"
+            # next to a health score computed from exactly those tests.
+            if is_closed is not False:
 
+                tested_on = func.coalesce(TestResult.tested_at, TestResult.cts)
                 subquery = self.db.query(TestResult.testing_request_id)
 
                 if date_from:
                     subquery = subquery.filter(
-                        TestResult.tested_at >= datetime.combine(
+                        tested_on >= datetime.combine(
                             date_from,
                             datetime.min.time(),
                         )
@@ -632,7 +645,7 @@ class TestingRequestService:
 
                 if date_to:
                     subquery = subquery.filter(
-                        TestResult.tested_at <
+                        tested_on <
                         datetime.combine(
                             date_to + timedelta(days=1),
                             datetime.min.time(),
@@ -643,7 +656,7 @@ class TestingRequestService:
                     TestingRequest.id.in_(subquery.subquery())
                 )
 
-            # Open / Assigned / Overdue -> use CTS
+            # Open (not yet tested) -> use CTS
             else:
 
                 if date_from:

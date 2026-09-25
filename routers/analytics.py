@@ -60,7 +60,7 @@ from models import (
     TestingRequest,
 )
 from services.condition_recommendation_service import evaluate_for_equipment
-from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words
+from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words, accepted_test_result_ids
 from category_labels import RiskLevelColors
 from utils.common_service import get_user_dept_scope
 
@@ -352,7 +352,10 @@ def _lab_only_scores(eq_ids: list, db: Session) -> dict:
     rows = (
         db.query(TestAnalytics)
         .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
-        .filter(TestAnalytics.equipment_id.in_(eq_ids))
+        .filter(TestAnalytics.equipment_id.in_(eq_ids),
+                # Same accepted-results rule as EquipmentAnalytics - see
+                # services.analytics_engine.accepted_test_result_ids.
+                TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         .order_by(
             TestAnalytics.equipment_id,
             TestAnalytics.template_key,
@@ -628,6 +631,7 @@ def get_asset_breakdown(
             .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
             .filter(
                 TestAnalytics.equipment_id.in_(eq_id_set),
+                TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
                 # This endpoint is AI Analytics-specific - exclude the same
                 # TA&QC/Failure Registry/cumulative-counter test types the
                 # equipment list (/dashboard/equipment) and the modal do, so
@@ -1029,7 +1033,8 @@ def get_analytics_dashboard(
         dated_ta_q = (
             db.query(TestAnalytics, coalesced.label("eff_date"))
             .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
-            .filter(TestAnalytics.equipment_id.in_(active_eq_ids))
+            .filter(TestAnalytics.equipment_id.in_(active_eq_ids),
+                    TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         ) if active_eq_ids else None
         if dated_ta_q is not None:
             if date_from:
@@ -1127,7 +1132,8 @@ def get_analytics_dashboard(
     # ── 5. Recent anomalies ──────────────────────────────────────────────────
     anom_query = (
         db.query(ParameterAnalytics)
-        .filter(ParameterAnalytics.is_anomaly == True)  # noqa: E712
+        .filter(ParameterAnalytics.is_anomaly == True,  # noqa: E712
+                ParameterAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         .order_by(ParameterAnalytics.calculated_at.desc())
     )
     if dept_ids:
@@ -1622,6 +1628,7 @@ def get_dashboard_equipment(
         .filter(
             ParameterAnalytics.equipment_id.in_(eq_ids),
             ParameterAnalytics.condition == "Poor",
+            ParameterAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
         )
         .all()
     )
@@ -2060,7 +2067,8 @@ def get_deterioration_watch_list(
     # when it was (re)computed — the reliable ordering key here.
     pa_rows = (
         db.query(ParameterAnalytics)
-        .filter(ParameterAnalytics.equipment_id.in_(eq_ids))
+        .filter(ParameterAnalytics.equipment_id.in_(eq_ids),
+                ParameterAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         .order_by(ParameterAnalytics.history_count.desc(), ParameterAnalytics.calculated_at.desc())
         .all()
     )
@@ -2528,28 +2536,9 @@ def get_equipment_test_history(
       - template_key, tested_at, health_score, risk_level, critical_findings
       - links.analytics, links.raw
     """
-    from models import TestResult as _TR2, TestingRequest as _TReq, TestingRequestStatus as _TRS, TrWfInstance as _TWI
-    from sqlalchemy import or_ as _or
-
-    _SKIP = [
-        _TRS.draft, _TRS.submitted, _TRS.assigned,
-        _TRS.accepted, _TRS.in_progress,
-    ]
-    # Sub-select: test_result_ids whose TR is closed/completed
-    _wf_done = db.query(_TWI.testing_request_id).filter(
-        _TWI.status.in_(["completed", "terminated"])
-    ).scalar_subquery()
-    _closed_result_ids = (
-        db.query(_TR2.id)
-        .join(_TReq, _TR2.testing_request_id == _TReq.id)
-        .filter(
-            _or(
-                _TReq.status.notin_(_SKIP),
-                _TReq.id.in_(_wf_done),
-            )
-        )
-        .scalar_subquery()
-    )
+    # Same accepted-results rule as EquipmentAnalytics - see
+    # services.analytics_engine.accepted_test_result_ids.
+    _closed_result_ids = accepted_test_result_ids(db)
 
     q = (
         db.query(TestAnalytics)
@@ -2599,7 +2588,8 @@ def get_equipment_test_types(
     rows = (
         db.query(TestAnalytics)
         .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
-        .filter(TestAnalytics.equipment_id == equipment_id)
+        .filter(TestAnalytics.equipment_id == equipment_id,
+                TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         .order_by(
             TestAnalytics.template_key,
             func.coalesce(TestResult.tested_at, TestResult.cts).desc(),
@@ -2675,7 +2665,8 @@ def get_parameter_analytics(
     q = (
         db.query(ParameterAnalytics)
         .join(TR, TR.id == ParameterAnalytics.test_result_id)
-        .filter(ParameterAnalytics.equipment_id == equipment_id)
+        .filter(ParameterAnalytics.equipment_id == equipment_id,
+                ParameterAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
     )
     if template_key:
         q = q.filter(ParameterAnalytics.template_key == template_key)
@@ -2787,6 +2778,7 @@ def get_parameter_history(
         .filter(
             ParameterAnalytics.equipment_id  == equipment_id,
             ParameterAnalytics.parameter_key == parameter_key,
+            ParameterAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
         )
         .order_by(func.coalesce(TestResult.tested_at, TestResult.cts,
                                  ParameterAnalytics.calculated_at).desc(),
