@@ -65,8 +65,23 @@ def run_recompute_all():
             except Exception as exc:
                 failed += 1
                 print(f"  FAILED for test_result {tr.id}: {exc}")
+        # Second pass: re-aggregate EVERY equipment that has a health row.
+        # The loop above only reaches equipment with an eligible result, so
+        # a stale EquipmentAnalytics row with no accepted result behind it
+        # (e.g. its only request was rejected / cancelled / reopened) kept
+        # its old score - the dashboards showed HEALTH 0 while the Test
+        # Results dialog was empty. run_for_equipment() resets such rows.
+        from models import EquipmentAnalytics
+        eq_ids = [row[0] for row in db.query(EquipmentAnalytics.equipment_id).all()]
+        for eq_id in eq_ids:
+            try:
+                engine.run_for_equipment(eq_id)
+            except Exception as exc:
+                failed += 1
+                print(f"  FAILED equipment re-aggregation {eq_id}: {exc}")
         db.commit()
-        print(f"Recompute complete: {done} recomputed, {failed} failed, {len(results)} total eligible")
+        print(f"Recompute complete: {done} recomputed, {failed} failed, {len(results)} total eligible, "
+              f"{len(eq_ids)} equipment re-aggregated")
     finally:
         db.close()
 
