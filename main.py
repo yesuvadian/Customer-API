@@ -1469,6 +1469,31 @@ scheduler.add_job(
 )
 
 
+# Repair-family stage deadline alerts (hourly) - due soon / overdue /
+# escalation, one-shot per stage entry. See services/repair_stage_deadline_service.py.
+def _check_repair_stage_deadlines():
+    db = SessionLocal()
+    try:
+        from services.repair_stage_deadline_service import RepairStageDeadlineService
+        sent = RepairStageDeadlineService(db).run_deadline_check()
+        if any(sent.values()):
+            logger.info(f"[StageDeadline] Alerts sent: {sent}")
+    except Exception as e:
+        logger.error(f"[StageDeadline] Deadline check job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_repair_stage_deadlines,
+    trigger="interval",
+    hours=1,
+    id="repair_stage_deadline_job",
+    max_instances=1,
+    coalesce=True,
+)
+
+
 # Calibration pre-due check (runs daily at 08:00 UTC)
 # Auto-creates new calibration TestingRequests for equipment where
 # today >= next_due - lead_days and no open calibration request exists.

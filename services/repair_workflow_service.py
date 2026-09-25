@@ -2123,11 +2123,9 @@ class RepairWorkflowService:
                         RepairStageInstance.id == workflow.current_stage_instance_id
                     ).first()
 
-                    if (stage_instance and stage_instance.started_at and
-                        stage.default_duration_days is not None):
-                        # started_at is stored as DB-session-local time, not UTC.
-                        started_at = db_naive_to_aware(stage_instance.started_at, self.db)
-                        deadline = (started_at + timedelta(days=stage.default_duration_days)).astimezone(timezone.utc)
+                    if stage_instance and stage_instance.due_at:
+                        # due_at is stored as DB-session-local time, not UTC.
+                        deadline = db_naive_to_aware(stage_instance.due_at, self.db).astimezone(timezone.utc)
                         current_stage_deadline = deadline.isoformat()
 
                         now = datetime.now(timezone.utc)
@@ -2322,11 +2320,10 @@ class RepairWorkflowService:
                 # ── Compute real deadline and overdue days from stage definition ──
                 deadline_str = "-"
                 days_overdue = 0
-                duration = getattr(stage, "default_duration_days", None)
-                started_at = getattr(stage_instance, "started_at", None) if stage_instance else None
-                if duration is not None and started_at is not None:
-                    # started_at is stored as DB-session-local time, not UTC.
-                    deadline_dt = db_naive_to_aware(started_at, self.db) + timedelta(days=duration)
+                due_at = getattr(stage_instance, "due_at", None) if stage_instance else None
+                if due_at is not None:
+                    # due_at is stored as DB-session-local time, not UTC.
+                    deadline_dt = db_naive_to_aware(due_at, self.db)
                     deadline_str = deadline_dt.strftime("%Y-%m-%d")
                     days_overdue = max(0, (datetime.now(timezone.utc) - deadline_dt).days)
 

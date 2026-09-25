@@ -335,8 +335,7 @@ def get_surveillance_dashboard(
             RepairWorkflow.id,
             Equipment.ueic,
             RepairStageInstance.quarter_number,
-            RepairStageInstance.started_at,
-            RepairStageDefinition.default_duration_days
+            RepairStageInstance.due_at,
         )
         .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .join(
@@ -350,17 +349,15 @@ def get_surveillance_dashboard(
         .filter(
             RepairWorkflow.workflow_type == 'surveillance',
             RepairWorkflow.status == 'active',
-            RepairStageInstance.started_at.isnot(None),
-            RepairStageDefinition.default_duration_days.isnot(None),
+            RepairStageInstance.due_at.isnot(None),
             Equipment.organization_id == org_id
         )
         .all()
     )
 
-    for wf_id, equipment_name, quarter, started_at, duration_days in overdue_stages:
-        # started_at is stored as DB-session-local time, not UTC.
-        started_at = db_naive_to_aware(started_at, db)
-        deadline = started_at + timedelta(days=duration_days)
+    for wf_id, equipment_name, quarter, due_at in overdue_stages:
+        # due_at is stored as DB-session-local time, not UTC.
+        deadline = db_naive_to_aware(due_at, db)
         days_overdue = (now - deadline).days
 
         if days_overdue > 0:

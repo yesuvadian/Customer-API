@@ -10432,6 +10432,36 @@ def _seed_notification_event_catalogue(session) -> int:
                           "equipment.department", "days_overdue", "deadline"],
             default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
         ),
+        # Repair-family stage deadlines (Breakdown, Overhaul, Calibration,
+        # Surveillance, Annual Audit, Pre-Commission) - fired hourly by
+        # main.py's _check_repair_stage_deadlines, once per stage entry.
+        dict(
+            event_type="repair_stage_due_soon",
+            label="Repair Workflow Stage Due Soon",
+            group_name="Stage Workflows",
+            description="Fired STAGE_DUE_SOON_HOURS before a repair-family workflow stage reaches its deadline (started_at + default_duration_days). Sent to the stage's roles and assignee.",
+            context_vars=["workflow_number", "workflow_type", "equipment", "department",
+                          "stage", "deadline", "time_left", "assignee"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        dict(
+            event_type="repair_stage_overdue",
+            label="Repair Workflow Stage Overdue",
+            group_name="Stage Workflows",
+            description="Fired when a repair-family workflow stage passes its deadline while still open. Sent to the stage's roles and assignee.",
+            context_vars=["workflow_number", "workflow_type", "equipment", "department",
+                          "stage", "deadline", "overdue_by", "days_overdue", "assignee"],
+            default_roles=["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        dict(
+            event_type="repair_stage_escalation",
+            label="Repair Workflow Stage Escalation",
+            group_name="Stage Workflows",
+            description="Fired when a repair-family workflow stage is still open STAGE_ESCALATION_DAYS after its deadline. Sent to the stage's approver roles and the workflow's override roles.",
+            context_vars=["workflow_number", "workflow_type", "equipment", "department",
+                          "stage", "deadline", "overdue_by", "days_overdue", "assignee"],
+            default_roles=["EE_TLSS", "SEE_WM"],
+        ),
     ]
 
     # Guard: surface any default_roles value that isn't a known RoleTemplate name
@@ -12076,6 +12106,71 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    # Repair-family stage deadlines. Recipients normally come from the
+    # stage's own roles (recipient_roles_override); these template roles are
+    # only the fallback for a stage with no roles configured.
+    _tmpl("repair_stage_due_soon",
+        _e(
+            "[DUE SOON] {{stage}} — {{workflow_number}} ({{equipment}})",
+            "<h3>Workflow stage due soon</h3>"
+            "<p>The <b>{{stage}}</b> stage of {{workflow_type}} <b>{{workflow_number}}</b>"
+            " for {{equipment}} is due on <b>{{deadline}}</b> ({{time_left}} left).</p>"
+            "<p>Assigned to: {{assignee}}</p>"
+            "<p>Please complete the stage before the deadline.</p>",
+            ["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        _s(
+            "[SEACMS] {{stage}} for {{workflow_number}} ({{equipment}}) is due {{deadline}} - {{time_left}} left.",
+            ["AEE_MAINTENANCE"],
+        ),
+        _i(
+            "Stage due soon — {{workflow_number}}",
+            "{{stage}} for {{equipment}} is due {{deadline}} ({{time_left}} left). Assigned to: {{assignee}}.",
+            ["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+    )
+    _tmpl("repair_stage_overdue",
+        _e(
+            "[OVERDUE] {{stage}} — {{workflow_number}} ({{equipment}})",
+            "<h3 style='color:#c62828'>Workflow stage overdue</h3>"
+            "<p>The <b>{{stage}}</b> stage of {{workflow_type}} <b>{{workflow_number}}</b>"
+            " for {{equipment}} was due on <b>{{deadline}}</b> and is overdue by {{overdue_by}}.</p>"
+            "<p>Assigned to: {{assignee}}</p>"
+            "<p>Please complete or advance the stage.</p>",
+            ["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+        _s(
+            "[SEACMS] OVERDUE: {{stage}} for {{workflow_number}} ({{equipment}}) was due {{deadline}}, late by {{overdue_by}}.",
+            ["AEE_MAINTENANCE"],
+        ),
+        _i(
+            "Stage overdue — {{workflow_number}}",
+            "{{stage}} for {{equipment}} was due {{deadline}} and is overdue by {{overdue_by}}. Assigned to: {{assignee}}.",
+            ["AEE_MAINTENANCE", "EE_TLSS"],
+        ),
+    )
+    _tmpl("repair_stage_escalation",
+        _e(
+            "[ESCALATION] {{stage}} overdue {{overdue_by}} — {{workflow_number}} ({{equipment}})",
+            "<h3 style='color:red'>Workflow stage escalation</h3>"
+            "<p>The <b>{{stage}}</b> stage of {{workflow_type}} <b>{{workflow_number}}</b>"
+            " for {{equipment}} ({{department}}) was due on <b>{{deadline}}</b>"
+            " and is still open, <b>{{overdue_by}}</b> past its deadline.</p>"
+            "<p>Assigned to: {{assignee}}</p>"
+            "<p>Please review and take action.</p>",
+            ["EE_TLSS", "SEE_WM"],
+        ),
+        _s(
+            "[SEACMS] ESCALATION: {{stage}} for {{workflow_number}} ({{equipment}}) is {{overdue_by}} overdue. Assignee: {{assignee}}.",
+            ["EE_TLSS"],
+        ),
+        _i(
+            "Escalation: stage {{overdue_by}} overdue — {{workflow_number}}",
+            "{{stage}} for {{equipment}} was due {{deadline}} and is still open ({{overdue_by}} late). Assigned to: {{assignee}}.",
+            ["EE_TLSS", "SEE_WM"],
+        ),
+    )
+
     # ── Upsert into DB ────────────────────────────────────────────────────────
     inserted = 0
     for tpl in _TEMPLATES:
@@ -12680,6 +12775,21 @@ def _seed_notification_routing_rules(session) -> int:
          [], [],
          ["inapp"],
          "Workflow Stage SLA Breach — In-app"),
+
+        ("repair_stage_due_soon",
+         ["repair_lifecycle"], [],
+         ["inapp"],
+         "Repair Stage Due Soon — In-app"),
+
+        ("repair_stage_overdue",
+         ["repair_lifecycle"], [],
+         ["inapp", "email"],
+         "Repair Stage Overdue — In-app + Email"),
+
+        ("repair_stage_escalation",
+         ["repair_lifecycle"], [],
+         ["inapp", "email"],
+         "Repair Stage Escalation — In-app + Email"),
     ]
 
     inserted = 0

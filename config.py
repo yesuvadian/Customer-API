@@ -229,6 +229,14 @@ ANALYTICS_MIN_WATCH_HISTORY = int(os.getenv("ANALYTICS_MIN_WATCH_HISTORY", 4))
 ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS", 7))
 ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS", 15))
 
+# Repair-family stage deadline alerts (services/repair_stage_deadline_service,
+# run hourly from main.py): "due soon" fires this many hours before a stage's
+# due_at, escalation this many days after it. Env tunables rather than
+# NotificationScheduleRule rows for the same reason as above - that engine
+# only evaluates TestingRequest.due_date.
+STAGE_DUE_SOON_HOURS = int(os.getenv("STAGE_DUE_SOON_HOURS", 24))
+STAGE_ESCALATION_DAYS = int(os.getenv("STAGE_ESCALATION_DAYS", 3))
+
 # Result Review SLA, split by severity (KPTCL spec: 24h for ALERT, 2h for
 # CRITICAL) — routers/dashboard_kpi.py's review_sla_pct_alert/
 # review_sla_pct_critical. Separate from TrWfStage.default_duration_hours

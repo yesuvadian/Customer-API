@@ -300,8 +300,7 @@ def get_workflow_dashboard(
             RepairWorkflow.workflow_number,
             Equipment.ueic,
             RepairStageDefinition.name.label("stage_name"),
-            RepairStageInstance.started_at,
-            RepairStageDefinition.default_duration_days,
+            RepairStageInstance.due_at,
         )
         .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .join(
@@ -315,19 +314,16 @@ def get_workflow_dashboard(
         .filter(
             _eq_filter(),
             RepairWorkflow.status == "active",
-            RepairStageInstance.started_at.isnot(None),
-            RepairStageDefinition.default_duration_days.isnot(None),
+            RepairStageInstance.due_at.isnot(None),
         )
         .all()
     )
 
     for (
-        wf_id, wf_code, wf_number, ueic, stage_name, started_at, duration_days,
+        wf_id, wf_code, wf_number, ueic, stage_name, due_at,
     ) in overdue_workflows:
-        # started_at is stored as DB-session-local time, not UTC.
-        started_at = db_naive_to_aware(started_at, db)
-
-        deadline = (started_at + timedelta(days=duration_days)).astimezone(timezone.utc)
+        # due_at is stored as DB-session-local time, not UTC.
+        deadline = db_naive_to_aware(due_at, db).astimezone(timezone.utc)
         late_by = now - deadline
         days_overdue = late_by.days
         stage_deadline[str(wf_id)] = deadline
