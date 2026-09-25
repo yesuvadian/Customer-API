@@ -151,6 +151,14 @@ class WorkflowDispatchService:
             result["created"] = pr_number
             result["status"] = "finance_pending"
 
+            # If this TR is linked to an open CAR, an approved replacement
+            # recommendation IS the tester's "replace it instead of retesting"
+            # call - stop the CAR's auto-retest loop the same way a manual
+            # recommend_replacement() would, driven by this existing
+            # wizard -> approval -> dispatch pipeline rather than a separate
+            # CAR-level action.
+            self._recommend_replacement_for_linked_car(tr, approver_id, pr_number)
+
         # ── Calibration workflow auto-trigger ─────────────────────────────────
         # Fires on result approval when any test result for this TR has a
         # template containing a DATE_ADD rule AND overall_result == "fail".
@@ -832,3 +840,21 @@ class WorkflowDispatchService:
             print(f"[Dispatch] WARN: procurement_pending notification failed: {_n}")
 
         return pr_number
+
+    def _recommend_replacement_for_linked_car(self, tr: TestingRequest, approver_id: UUID, pr_number: str) -> None:
+        """Best-effort: if `tr` is in the lineage of a still-open CAR, flip it
+        to REPLACEMENT_RECOMMENDED so services/car_service.py's auto-retest
+        loop stops raising further retests for it. Never blocks the
+        procurement dispatch above if this fails or finds nothing."""
+        try:
+            from services.car_service import find_open_car_for_lineage, recommend_replacement
+            car = find_open_car_for_lineage(self.db, tr)
+            if car:
+                recommend_replacement(
+                    self.db,
+                    car,
+                    recommended_by=approver_id,
+                    notes=f"Replacement approved via {tr.request_number} (Procurement {pr_number})",
+                )
+        except Exception as exc:
+            print(f"[Dispatch] WARN: CAR replacement recommendation failed: {exc}")

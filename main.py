@@ -99,6 +99,7 @@ from routers import equipment
 from routers import equipment_type_kit_mappings
 from routers import condition_monitoring_recommendations
 from routers import threshold_config
+from routers import integration_settings
 
 # Notification & Alert Engine
 from routers import notifications as notifications_router
@@ -114,6 +115,8 @@ from routers import reporting as reporting_router
 # Analytics Engine
 from routers import analytics as analytics_router
 from routers import comparison_view as comparison_view_router  # AI-Assisted Comparison View
+from routers import car as car_router  # Corrective Action Requests
+from routers import car_trigger_config as car_trigger_config_router  # CAR Trigger Config (admin CRUD)
 from routers import ai_graph as ai_graph_router          # AI Graph Dashboard
 from routers import data_import as data_import_router  # Import Data module
 from routers import scada as scada_router               # SCADA Integration
@@ -1154,7 +1157,19 @@ def _check_auto_close_normal_results():
             stage = si.stage
             started_at = si.started_at
             if started_at.tzinfo is None:
-                started_at = started_at.replace(tzinfo=_tz6.utc)
+                # started_at is a naive DateTime column, but it isn't naive
+                # UTC - the app writes it as datetime.now(timezone.utc), and
+                # since the Postgres session timezone is Asia/Calcutta
+                # (fixed UTC+5:30, no DST), psycopg2 converts that aware
+                # value down to session-local wall-clock time before
+                # stripping tzinfo on insert into a naive column. Labeling
+                # it UTC directly (as before) made every deadline 5.5h later
+                # than the real UTC deadline, so a genuinely overdue NORMAL
+                # result still looked "not yet due" - confirmed live against
+                # Postgres NOW() vs this column for TR-KP-2026-0757.
+                started_at = started_at.replace(
+                    tzinfo=_tz6(timedelta(hours=5, minutes=30))
+                ).astimezone(_tz6.utc)
             deadline = started_at + timedelta(hours=stage.auto_close_normal_after_hours)
             if now <= deadline:
                 continue
@@ -1976,6 +1991,7 @@ app.include_router(equipment.router)
 app.include_router(equipment_type_kit_mappings.router)
 app.include_router(condition_monitoring_recommendations.router)
 app.include_router(threshold_config.router)
+app.include_router(integration_settings.router)
 
 # Notification & Alert Engine
 app.include_router(notifications_router.router)
@@ -1991,6 +2007,8 @@ app.include_router(reporting_router.router)
 # Analytics Engine
 app.include_router(analytics_router.router)
 app.include_router(comparison_view_router.router)  # AI-Assisted Comparison View
+app.include_router(car_router.router)  # Corrective Action Requests
+app.include_router(car_trigger_config_router.router)  # CAR Trigger Config (admin CRUD)
 app.include_router(ai_graph_router.router)   # AI Graph Dashboard
 app.include_router(data_import_router.router)  # Import Data module
 app.include_router(scada_router.router)         # SCADA Integration

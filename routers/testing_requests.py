@@ -250,6 +250,7 @@ def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None =
     req.wf_stage_name   = None
     req.wf_stage_roles  = []
     req.wf_terminal_action_code = None
+    req.wf_terminal_reason = None
     try:
         if req.wf_instance_id:
             from models import TrWfStage, TrWfStatus as _TrWfStatus, TrWfAuditLog as _TrWfAuditLog
@@ -278,6 +279,7 @@ def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None =
                     )
                     if _last_log:
                         req.wf_terminal_action_code = _last_log.action_code
+                        req.wf_terminal_reason = _last_log.comment
 
                     if req.current_status_code:
                         _st = (

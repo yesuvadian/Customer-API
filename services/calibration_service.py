@@ -30,6 +30,7 @@ Scheduler (pre-due check):
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone, date
 from typing import Optional
@@ -41,13 +42,17 @@ from sqlalchemy.orm import Session
 
 from utils.business_days import business_days_between, subtract_business_days
 
+logger = logging.getLogger(__name__)
+
 from models import (
     CalibrationRepairRecommendation,
     CategoryDetails,
     CategoryMaster,
     Equipment,
     EquipmentCalibrationConfig,
+    OrgRole,
     OrgTestTemplate,
+    OrgUserRole,
     RepairAssignmentQueue,
     RepairStageAuditLog,
     RepairStageDefinition,
@@ -57,6 +62,7 @@ from models import (
     TestingRequest,
     TestingRequestStatus,
     TestResult,
+    User,
 )
 
 def _fire_calibration_notification(db: Session, equipment: Equipment, event_type: str,
@@ -69,7 +75,7 @@ def _fire_calibration_notification(db: Session, equipment: Equipment, event_type
             event_type=event_type,
             context={
                 "kit.ueic":              equipment.ueic or str(equipment.id),
-                "kit.name":              equipment.name or equipment.ueic or "",
+                "kit.name":              equipment.ueic or "",
                 "kit.department":        dept_name,
                 "kit.calibration_due_date": next_due_date.isoformat(),
                 "kit.days_remaining":    str(max(0, days)),
@@ -193,6 +199,7 @@ def compute_interval_advisories(db: Session, org_id, department_ids: Optional[li
             Equipment.model_number,
             TestResult.test_data,
             TestResult.tested_at,
+            TestingRequest.created_by,
         )
         .join(TestResult, TestResult.testing_request_id == TestingRequest.id)
         .join(Equipment, Equipment.id == TestingRequest.equipment_id)
@@ -207,9 +214,21 @@ def compute_interval_advisories(db: Session, org_id, department_ids: Optional[li
     rows = query.all()
 
     cohorts: dict = {}
-    for test_type_id, test_type_name, equipment_id, ueic, manufacturer, model_number, test_data, tested_at in rows:
+    for (test_type_id, test_type_name, equipment_id, ueic, manufacturer, model_number,
+         test_data, tested_at, created_by) in rows:
         if not manufacturer or not model_number:
             continue  # can't form a real cohort without knowing the model
+        # created_by is null only for rows that never went through the real
+        # result form (calibration_hooks.py's certificate recording, or the
+        # test result wizard both always set it to the submitting user) —
+        # confirmed live: a batch of synthetic/seeded TestResults with
+        # nothing but a bare {"overall_result": "fail", "validity_months":
+        # ...} and no calibration_date/calibrated_by/certificate_number at
+        # all, all created_by=NULL, was silently driving "shorten the
+        # validity period" advisories off failures nobody ever actually
+        # observed. A cohort needs real evidence, not placeholder rows.
+        if created_by is None:
+            continue
         key = (test_type_id, manufacturer, model_number)
         entry = cohorts.setdefault(key, {
             "test_type_name": test_type_name or "Calibration",
@@ -249,15 +268,74 @@ def compute_interval_advisories(db: Session, org_id, department_ids: Optional[li
         fail_count = sum(1 for c in cycles if c["is_fail"])
         fail_rate_pct = round(fail_count / sample_size * 100, 1)
 
+        validities = [c["validity_months"] for c in cycles if c["validity_months"]]
+        if not validities:
+            continue
+
+        # Per-equipment breakdown, worst-first — needed by both branches
+        # below (the normal advisory AND the inconsistent-data one): the
+        # cohort-level advisory tells you a make/model's calibration
+        # validity should change, but not which actual relays/meters made
+        # up that fail rate. Grouped by equipment_id (not by cycle) so an
+        # officer sees "this specific relay failed 3 of its 3
+        # calibrations," not a flat cycle list.
+        units: dict = {}
+        for c in cycles:
+            u = units.setdefault(c["equipment_id"], {
+                "equipment_id": str(c["equipment_id"]) if c["equipment_id"] else None,
+                "ueic": c["ueic"],
+                "cycle_count": 0,
+                "fail_count": 0,
+            })
+            u["cycle_count"] += 1
+            if c["is_fail"]:
+                u["fail_count"] += 1
+        equipment = sorted(units.values(), key=lambda u: -u["fail_count"])
+
         # "Current" validity = the most common value actually in use for
         # this cohort (not just the latest cycle's — a standardised
         # interval per make/model is the realistic operational picture,
         # and taking the latest alone would be thrown off by one outlier
-        # certificate with a typo'd validity_months).
-        validities = [c["validity_months"] for c in cycles if c["validity_months"]]
-        if not validities:
+        # certificate with a typo'd validity_months). Requires an actual
+        # majority, not just "whichever value happens to sort first among
+        # ties" — confirmed live: ABB REF615's 5 relays each carry a
+        # DIFFERENT validity_months (8/9/10/12/14, a 5-way tie), and
+        # max(set(validities), key=validities.count) silently returned one
+        # of them (8) as if it meant something, when really there is no
+        # single "current validity" for this cohort to adjust from at all.
+        from collections import Counter
+        counts = Counter(validities)
+        max_count = max(counts.values())
+        top_values = sorted(v for v, cnt in counts.items() if cnt == max_count)
+
+        if len(top_values) > 1:
+            # No true majority — flag it instead of guessing. An interval
+            # suggestion needs a single agreed-on baseline to adjust from;
+            # picking one of several equally-common values would just
+            # misrepresent the cohort as more standardized than it is.
+            advisories.append({
+                "test_type_id": test_type_id,
+                "test_type_name": entry["test_type_name"],
+                "manufacturer": manufacturer,
+                "model_number": model_number,
+                "sample_size": sample_size,
+                "fail_count": fail_count,
+                "fail_rate_pct": fail_rate_pct,
+                "current_validity_months": None,
+                "suggested_validity_months": None,
+                "direction": "inconsistent",
+                "validity_months_min": min(validities),
+                "validity_months_max": max(validities),
+                "equipment": equipment,
+                "rationale": (
+                    f"Inconsistent validity periods ({min(validities)}–{max(validities)} months) "
+                    f"across {sample_size} calibration cycles for this make/model — standardize "
+                    f"the validity period before an interval recommendation is meaningful."
+                ),
+            })
             continue
-        current_validity = max(set(validities), key=validities.count)
+
+        current_validity = top_values[0]
 
         direction = None
         suggested_validity = current_validity
@@ -272,24 +350,6 @@ def compute_interval_advisories(db: Session, org_id, department_ids: Optional[li
 
         if direction is None:
             continue  # no meaningful change to advise
-
-        # Per-equipment breakdown, worst-first — the cohort-level advisory
-        # tells you a make/model's calibration validity should change, but
-        # not which actual relays/meters made up that fail rate. Grouped by
-        # equipment_id (not by cycle) so an officer sees "this specific
-        # relay failed 3 of its 3 calibrations," not a flat cycle list.
-        units: dict = {}
-        for c in cycles:
-            u = units.setdefault(c["equipment_id"], {
-                "equipment_id": str(c["equipment_id"]) if c["equipment_id"] else None,
-                "ueic": c["ueic"],
-                "cycle_count": 0,
-                "fail_count": 0,
-            })
-            u["cycle_count"] += 1
-            if c["is_fail"]:
-                u["fail_count"] += 1
-        equipment = sorted(units.values(), key=lambda u: -u["fail_count"])
 
         advisories.append({
             "test_type_id": test_type_id,
@@ -310,9 +370,11 @@ def compute_interval_advisories(db: Session, org_id, department_ids: Optional[li
             ),
         })
 
-    # Worst-first: the most concerning (shorten) advisories surface before
-    # the "you could relax this" ones.
-    advisories.sort(key=lambda a: (a["direction"] != "shorten", -a["fail_rate_pct"]))
+    # Worst-first: shorten (most concerning) before inconsistent (a
+    # data-quality issue blocking any real recommendation) before extend
+    # (the least urgent — "you could relax this").
+    _direction_rank = {"shorten": 0, "inconsistent": 1, "extend": 2}
+    advisories.sort(key=lambda a: (_direction_rank.get(a["direction"], 2), -a["fail_rate_pct"]))
     return advisories
 
 
@@ -796,6 +858,19 @@ class CalibrationService:
         next_run_date is set explicitly from the calibration result's
         calibration_date + validity_months — it is NOT derived from frequency.
         Frequency is stored only so the scheduler has a fallback interval.
+
+        next_run_date must hold the REAL due date here, exactly like every
+        other schedule type (test_request_schedule_service.py's own
+        generation path treats next_run_date as the due date and derives the
+        earlier trigger date itself via `next_run_date - advance_days`, then
+        stamps the generated ticket's own due_date from next_run_date
+        unchanged). This function previously pre-subtracted lead_days into
+        next_run_date itself (storing the trigger date, not the due date) —
+        with advance_days ALSO set to lead_days, the generic scheduler then
+        subtracted lead_days a second time (firing ~2x lead_days early), and
+        every ticket it generated inherited that already-shifted date as its
+        own due_date — silently marking calibration equipment "due"/
+        "overdue" up to lead_days early on the Overall Dashboard.
         """
         from models import Equipment, TestRequestSchedule, ScheduleFrequency
         from datetime import timedelta, timezone
@@ -811,6 +886,10 @@ class CalibrationService:
             cal_date_str = latest["calibration_date"]
             validity_months = int(latest["validity_months"])
             next_due = date_add(cal_date_str, validity_months)
+            next_due_dt = datetime(
+                next_due.year, next_due.month, next_due.day,
+                tzinfo=timezone.utc,
+            )
 
             cfg = (
                 self.db.query(EquipmentCalibrationConfig)
@@ -818,15 +897,6 @@ class CalibrationService:
                 .first()
             )
             lead_days = cfg.lead_days if cfg else 30
-
-            # Trigger date: lead_days (business days) before next_due — matches
-            # run_pre_due_check()'s own trigger_date calc, so the two paths that
-            # both decide "is this due yet" agree on the date.
-            trigger_date = subtract_business_days(next_due, lead_days)
-            trigger_dt = datetime(
-                trigger_date.year, trigger_date.month, trigger_date.day,
-                tzinfo=timezone.utc,
-            )
 
             frequency = self._months_to_frequency(validity_months)
 
@@ -850,13 +920,15 @@ class CalibrationService:
             )
 
             if existing:
-                existing.next_run_date = trigger_dt
+                existing.next_run_date = next_due_dt
+                existing.advance_days = lead_days
                 existing.frequency = frequency
                 existing.is_active = True
                 self.db.flush()
                 print(
                     f"[CALIBRATION] Updated schedule {existing.id} "
-                    f"next_run={trigger_date} for equipment {tr.equipment_id}"
+                    f"next_run(due)={next_due} advance_days={lead_days} "
+                    f"for equipment {tr.equipment_id}"
                 )
                 return str(existing.id)
 
@@ -870,7 +942,7 @@ class CalibrationService:
                 request_category=tr.request_category,
                 frequency=frequency,
                 start_date=datetime.now(timezone.utc),
-                next_run_date=trigger_dt,
+                next_run_date=next_due_dt,
                 advance_days=lead_days,
                 is_active=True,
                 created_by=user_id,
@@ -880,7 +952,7 @@ class CalibrationService:
             self.db.commit()
             print(
                 f"[CALIBRATION] Created schedule {schedule.id} "
-                f"next_run={trigger_date} freq={frequency.value} "
+                f"next_run(due)={next_due} advance_days={lead_days} freq={frequency.value} "
                 f"for equipment {tr.equipment_id}"
             )
             return str(schedule.id)
@@ -965,6 +1037,19 @@ class CalibrationService:
         # tag the ticket this method creates itself.
         cal_type_id = self._get_calibration_type_id()
 
+        # Seed the running counter once from the DB, then increment it locally
+        # for each request created in this run. Re-querying count() per
+        # iteration would return the same value for every equipment due today
+        # (nothing is flushed until the final commit below), producing
+        # duplicate request_numbers and an IntegrityError on the batch insert.
+        next_seq = 1 + (
+            self.db.query(func.count(TestingRequest.id))
+            .filter(TestingRequest.request_number.like(
+                f"TR-CAL-{today.strftime('%Y%m%d')}-%"
+            ))
+            .scalar()
+        )
+
         # All equipment that have calibration configs with scheduling enabled
         configs = (
             self.db.query(EquipmentCalibrationConfig)
@@ -1032,30 +1117,64 @@ class CalibrationService:
                 skipped.append(str(equipment_id))
                 continue
 
-            count = (
-                self.db.query(func.count(TestingRequest.id))
-                .filter(TestingRequest.request_number.like(
-                    f"TR-CAL-{today.strftime('%Y%m%d')}-%"
-                ))
-                .scalar()
-            )
-            request_number = f"TR-CAL-{today.strftime('%Y%m%d')}-{(count + 1):04d}"
+            # originator_id is NOT NULL on TestingRequest. Prefer whoever
+            # configured this equipment's calibration schedule; fall back to
+            # the equipment's org admin so the auto-create never fails with
+            # an IntegrityError for equipment configured before created_by
+            # was tracked (or configured by a now-deleted user).
+            originator_id = cfg.created_by or self._get_org_admin_id(equipment.organization_id)
+            if not originator_id:
+                skipped.append(str(equipment_id))
+                continue
+
+            request_number = f"TR-CAL-{today.strftime('%Y%m%d')}-{next_seq:04d}"
+            next_seq += 1
 
             new_req = TestingRequest(
                 request_number=request_number,
-                title=f"Calibration — {equipment.name or str(equipment_id)}",
+                title=f"Calibration — {equipment.ueic or str(equipment_id)}",
                 description=f"Auto-created pre-due calibration. Next due: {next_due_str}",
                 equipment_id=equipment_id,
                 organization_id=equipment.organization_id,
                 test_type_id=cal_type_id,
                 request_category="test",
-                status=TestingRequestStatus.draft,
+                # Submitted, not draft — this ticket represents a calibration
+                # that's actually due; leaving it in draft meant nobody was
+                # ever notified to act on it and it never progressed past
+                # creation. Matches how the sibling recurring scheduler
+                # (test_request_schedule_service.py) submits its tickets.
+                status=TestingRequestStatus.submitted,
                 is_multi_session=False,
                 is_calibration=True,
                 priority="normal",
+                originator_id=originator_id,
+                # Never set before — the ticket's due_date stayed NULL, which
+                # is the opposite failure mode from upsert_calibration_schedule's
+                # bug above: instead of showing overdue early, this ticket
+                # would never show as due/overdue at all (every overdue query
+                # filters on due_date < now(), which NULL never satisfies),
+                # no matter how far past next_due it actually was.
+                due_date=datetime(next_due.year, next_due.month, next_due.day, tzinfo=timezone.utc),
             )
             self.db.add(new_req)
+            self.db.flush()
             created.append(str(equipment_id))
+
+            # Enroll in TR workflow engine so the ticket enters the L2→L3→L4
+            # approval/assignment/test flow instead of sitting idle at
+            # "submitted" with nothing to advance it.
+            try:
+                from services.tr_workflow_routing_service import WorkflowRoutingService
+                WorkflowRoutingService(self.db).instantiate_workflow(
+                    new_req,
+                    performed_by_id=originator_id,
+                )
+                self.db.flush()
+            except Exception as wf_err:
+                logger.error(
+                    "[CalibrationService] WF enrollment FAILED for ticket %s: %s",
+                    new_req.request_number, wf_err, exc_info=True,
+                )
 
             # Fire notification — business days, matching days_until_due above.
             days_until = business_days_between(today, next_due)
@@ -1074,5 +1193,22 @@ class CalibrationService:
         return (
             self.db.query(CategoryDetails.id)
             .filter(func.lower(CategoryDetails.name) == func.lower(CALIBRATION_NAME))
+            .scalar()
+        )
+
+    def _get_org_admin_id(self, organization_id: Optional[UUID]) -> Optional[UUID]:
+        """Fallback originator for auto-created calibration requests: the
+        organization's admin user, so the ticket has someone accountable
+        even when the calibration config predates created_by tracking."""
+        if not organization_id:
+            return None
+        return (
+            self.db.query(User.id)
+            .join(OrgUserRole, OrgUserRole.user_id == User.id)
+            .join(OrgRole, OrgRole.id == OrgUserRole.org_role_id)
+            .filter(
+                OrgRole.organization_id == organization_id,
+                OrgRole.is_org_admin == True,  # noqa: E712
+            )
             .scalar()
         )

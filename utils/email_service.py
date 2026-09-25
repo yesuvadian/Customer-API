@@ -11,13 +11,19 @@ from config import EMAIL_PASS, EMAIL_USER, FROM_EMAIL, SMTP_PORT, SMTP_SERVER
 load_dotenv()
 
 class EmailService:
-   
-    def __init__(self):
-        self.smtp_server = SMTP_SERVER
-        self.smtp_port = SMTP_PORT
-        self.username = EMAIL_USER
-        self.password = EMAIL_PASS
-        self.from_email =FROM_EMAIL
+
+    def __init__(self, overrides: Optional[Dict] = None):
+        """`overrides` (optional) — a dict from
+        integration_settings_service.get_effective_smtp_config(), used by
+        the notification dispatcher to apply an org's admin-configured SMTP
+        settings instead of the .env defaults. Callers that don't pass it
+        (auth emails, OTPs, etc.) keep the original .env-only behavior."""
+        overrides = overrides or {}
+        self.smtp_server = overrides.get("smtp_server") or SMTP_SERVER
+        self.smtp_port = overrides.get("smtp_port") or SMTP_PORT
+        self.username = overrides.get("smtp_username") or EMAIL_USER
+        self.password = overrides.get("smtp_password") or EMAIL_PASS
+        self.from_email = overrides.get("smtp_from_email") or FROM_EMAIL
         
         # No default system CC — per-template cc_emails are passed explicitly
         self.cc_email = None

@@ -214,23 +214,38 @@ class TestingRequestService:
 
         return False, None, None
 
-    def _resolve_is_calibration(self, test_type_id) -> bool:
+    def _resolve_is_calibration(self, test_type_id, org_id=None) -> bool:
         """
-        Return True if the template has enable_calibration=true OR a DATE_ADD rule.
-        Covers both legacy flag-based templates and rule-driven templates.
-        Checks DB OrgTestTemplate first, then falls back to test_templates.py
-        static dict — same two-step pattern as _resolve_is_cumulative(), for
-        the same reason: OrgTestTemplate.test_type_id on the global (org_id=
-        None) row is whichever org's CategoryDetails id happened to be first
-        when provision_global_defaults() seeded it (see
+        Return True if the ACTUAL template this (test_type_id, org_id) pair
+        resolves to has enable_calibration=true OR a DATE_ADD rule. Covers
+        both legacy flag-based templates and rule-driven templates.
+
+        Whether a request counts as calibration is a property of WHICH FORM
+        IS ACTUALLY USED — not of the test type's name or id. An org can
+        mark ANY custom template calibration-enabled by setting that flag
+        on it, and this must pick it up as long as it's the template that
+        actually gets served for this test type. So the primary lookup goes
+        through OrgTestTemplateService.get_for_test_type(test_type_id,
+        org_id) — the SAME org-specific-then-global resolution every other
+        caller uses to fetch "the template" for a test type (e.g. rendering
+        the result form) — instead of a parallel, potentially-diverging
+        lookup of our own. Previously matched OrgTestTemplate.test_type_id
+        directly with no org_id at all, which could silently resolve to a
+        DIFFERENT org's row: the global (org_id=None) row's stored
+        test_type_id is whichever org's CategoryDetails id happened to be
+        first when provision_global_defaults() seeded it (see
         OrgTestTemplateService.provision_global_defaults's unscoped
-        `CategoryDetails.filter(name == type_name).first()`), so a different
-        org's CategoryDetails.id for the SAME-NAMED test type won't match it
-        at all. Confirmed live: an org whose "Protection Relay Calibration
-        and History" CategoryDetails.id was 102 got is_calibration=False on
-        every request, because the seeded global template's test_type_id was
-        45 (some other org's row for the same name) — the exact-id lookup
-        below silently found nothing for that org's own id every time.
+        `CategoryDetails.filter(name == type_name).first()`) — confirmed
+        live, KPTCL's own "Protection Relay Calibration and History"
+        CategoryDetails.id is 102, but the seeded global row's test_type_id
+        is 45 (a different org's row for the same name), so the old
+        id-only match silently found nothing for id=102 on every request.
+        get_for_test_type checks org_id first, so it never has that
+        cross-org ambiguity in the first place.
+
+        Falls back to test_templates.py's static dict, by test-type name,
+        only when get_for_test_type finds no OrgTestTemplate row at all yet
+        (its own 404 case — global defaults never provisioned for this org).
         """
         if not test_type_id:
             return False
@@ -243,16 +258,14 @@ class TestingRequestService:
                 for r in data.get("rules", [])
             )
 
-        tpl = (
-            self.db.query(OrgTestTemplate)
-            .filter(OrgTestTemplate.test_type_id == test_type_id)
-            .order_by(OrgTestTemplate.version.desc())
-            .first()
-        )
-        if tpl and _has_calibration(tpl.template_data or {}):
-            return True
+        from services.org_test_template_service import OrgTestTemplateService
+        try:
+            tpl = OrgTestTemplateService(self.db).get_for_test_type(test_type_id, org_id)
+            return _has_calibration(tpl.template_data or {})
+        except HTTPException:
+            pass  # no OrgTestTemplate row at all yet for this test type
 
-        # Fall back to test_templates.py static dict via test type name
+        # Static dict fallback, by test-type name -> template_key.
         try:
             from test_templates import TEST_TYPE_TO_TEMPLATE, get_template_by_key
             detail = self.db.query(CategoryDetails).filter(CategoryDetails.id == test_type_id).first()
@@ -360,7 +373,18 @@ class TestingRequestService:
                     )
 
         is_cumulative = self._resolve_is_cumulative(test_type_id)
-        is_calibration = self._resolve_is_calibration(test_type_id)
+        # A caller who already knows the exact template being used (e.g. the
+        # frontend, which fetched it to render the form) can say so directly
+        # instead of the backend re-deriving "which template applies" from
+        # test_type_id + org_id — trust that over the server-side guess
+        # whenever it's actually provided. None (unset) means "the caller
+        # doesn't know" (e.g. data imports), not "explicitly false", so it
+        # still falls through to the resolver rather than forcing False.
+        _client_is_calibration = data.get("is_calibration")
+        if _client_is_calibration is not None:
+            is_calibration = bool(_client_is_calibration)
+        else:
+            is_calibration = self._resolve_is_calibration(test_type_id, org_id=data.get("organization_id"))
         _tpl_multi, _tpl_sessions, _tpl_interval = self._resolve_is_multi_session(test_type_id)
         # Template-derived values; explicit payload values override if provided
         _is_multi = data.get("is_multi_session") or _tpl_multi

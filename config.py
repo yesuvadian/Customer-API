@@ -146,6 +146,25 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", EMAIL_USER or "noreply@example.com")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", 5))
 MAX_DOCUMENT_UPLOAD_MB = int(os.getenv("MAX_DOCUMENT_UPLOAD_MB", 10))
 
+# ==============================
+# CAR (CORRECTIVE ACTION REQUEST)
+# ==============================
+# GET /car's default page size / "Load More" pagination — same
+# admin-tunable-via-env convention as routers/testing_requests.py's
+# TR_PAGE_SIZE, rather than a number hardcoded into the router.
+CAR_PAGE_SIZE = int(os.getenv("CAR_PAGE_SIZE", 20))
+
+# ==============================
+# CAR (CORRECTIVE ACTION REQUEST) DUE DATES
+# ==============================
+# services/car_service.py stamps a due_date on every CAR at creation, keyed
+# by severity — CRITICAL findings get a tighter window than ALERT ones.
+# Read by the car_overdue check in main.py (every 15 min, same cadence as
+# the Result Review SLA breach check) to fire the Notification Center
+# "car_overdue" event once a still-open CAR passes this date.
+CAR_DUE_DAYS_CRITICAL = int(os.getenv("CAR_DUE_DAYS_CRITICAL", 3))
+CAR_DUE_DAYS_ALERT = int(os.getenv("CAR_DUE_DAYS_ALERT", 7))
+
 ALLOWED_UPLOAD_TYPES = {
     "document":    {"application/pdf": {".pdf"}, "image/jpeg": {".jpg", ".jpeg"}, "image/png": {".png"}},
     "image":       {"image/jpeg": {".jpg", ".jpeg"}, "image/png": {".png"}},
@@ -209,6 +228,31 @@ ANALYTICS_MIN_WATCH_HISTORY = int(os.getenv("ANALYTICS_MIN_WATCH_HISTORY", 4))
 # their own tunable rather than a rule row in that table.
 ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS", 7))
 ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS = int(os.getenv("ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS", 15))
+
+# Result Review SLA, split by severity (KPTCL spec: 24h for ALERT, 2h for
+# CRITICAL) — routers/dashboard_kpi.py's review_sla_pct_alert/
+# review_sla_pct_critical. Separate from TrWfStage.default_duration_hours
+# (the existing single blended per-stage duration behind review_sla_pct):
+# that field is an admin-configured, per-org/per-stage value with no
+# severity dimension; these two are the spec's fixed, org-wide severity
+# thresholds, applied using the worst evaluation_result['overall']
+# (CRITICAL > ALERT) among a closed review's TestResults. A review with
+# only NORMAL results isn't scored against either — the spec's SLA is
+# about how fast an ALERT/CRITICAL finding gets reviewed, not every result.
+REVIEW_SLA_HOURS_ALERT = int(os.getenv("REVIEW_SLA_HOURS_ALERT", 24))
+REVIEW_SLA_HOURS_CRITICAL = int(os.getenv("REVIEW_SLA_HOURS_CRITICAL", 2))
+
+# Dashboard drill-down panel page size — shared by every "+"-expandable
+# KPI tile on the Overall Dashboard (Overdue Tickets, Open Requests,
+# Closed This Week, Rejected/Cancelled, Critical Equipment, Awaiting
+# Approval, Data Quality, Result Review SLA breaches/severity-split
+# reviews): how many rows GET /dashboard/overview's own rollup returns for
+# a branch scope (a leaf scope returns its full, typically-small list
+# uncapped), and the default page size each panel's own "Load More"
+# pagination endpoint fetches per request. Admin-tunable the same way
+# routers/testing_requests.py's TR_PAGE_SIZE already is, rather than a
+# number hardcoded into the router.
+DASHBOARD_PANEL_PAGE_SIZE = int(os.getenv("DASHBOARD_PANEL_PAGE_SIZE", 15))
 
 # AI calibration-interval optimisation advisories (KPTCL spec §14.6,
 # services/calibration_service.py's compute_interval_advisories) — an

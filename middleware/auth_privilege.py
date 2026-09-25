@@ -2,6 +2,7 @@ import re
 
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import (
@@ -30,11 +31,25 @@ STAGE_BASED_MODULES = {"testing", "testing_requests", "equipment"}
 def _find_stage_gate(db, parts, org_role_ids):
     """
     Look for a TestingRequest.id among the URL's path segments. If one is
-    found, return True/False for whether the caller's org role(s) have
-    can_act_as_tester on that request's current active workflow stage —
-    this REPLACES the OrgRolePermission check entirely for that call.
-    Returns None if no TestingRequest is named in the path, meaning the
-    caller should fall back to the normal OrgRolePermission check.
+    found, return True/False for whether the caller's org role(s) are the
+    active tester on that request's current active workflow stage — this
+    REPLACES the OrgRolePermission check entirely for that call. Returns
+    None if no TestingRequest is named in the path, meaning the caller
+    should fall back to the normal OrgRolePermission check.
+
+    Checks can_edit OR can_act_as_tester on tr_wf_stage_roles. can_edit is
+    the flag the rest of the app already treats as "is the tester for this
+    stage" (see overview_dashboard.dart's canTest, which falls back to
+    can_edit because can_act_as_tester is inconsistently populated across
+    workflows — confirmed live: of 58 tr_wf_stage_roles rows, 17 have
+    can_edit=True and only 12 have can_act_as_tester=True, with ZERO
+    overlap between the two sets). Checking can_act_as_tester alone here
+    meant a tester the rest of the app recognized (can_edit=True) could
+    still get a hard 403 fetching their own assigned request's details —
+    which is exactly what broke the Testing Kit dropdown on Submit Test
+    Results for AE-R&D at the "L4 Test Execution" stage. OR'ing in
+    can_act_as_tester keeps the 12 existing grants that rely on it alone
+    working unchanged.
     """
     for segment in parts[1:]:
         if not _UUID_RE.match(segment):
@@ -59,7 +74,10 @@ def _find_stage_gate(db, parts, org_role_ids):
             .filter(
                 TrWfStageRole.stage_id == instance.current_stage_id,
                 TrWfStageRole.role_id.in_(org_role_ids),
-                TrWfStageRole.can_act_as_tester == True,
+                or_(
+                    TrWfStageRole.can_edit == True,
+                    TrWfStageRole.can_act_as_tester == True,
+                ),
             )
             .first()
         )
@@ -270,6 +288,21 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                     )
 
         request.state.user = user
+
+        # --------------------------------------------------
+        # Org admins bypass every module/stage-gate check below — the same
+        # blanket-access bypass already applied via has_org_admin_role() in
+        # routers/equipment.py's _require_permission() and elsewhere.
+        # Without it here, an org admin whose role has no TrWfStageRole row
+        # for a ticket's CURRENT stage got a hard 403 like any other role —
+        # confirmed live: orgadmin@utility.com (is_org_admin=True) 403'd on
+        # GET /testing_requests/{id} for a ticket sitting at "L2 Approval &
+        # Route", a stage no admin role is (or should need to be)
+        # explicitly listed on.
+        # --------------------------------------------------
+        if auth_utils.has_org_admin_role(user, db):
+            db.close()
+            return await call_next(request)
 
         # --------------------------------------------------
         # Skip privilege check for KYC
