@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
-from utils.db_time import db_naive_to_aware
 from models import (
     Equipment,
     RepairStageDefinition,
@@ -335,7 +334,8 @@ def get_surveillance_dashboard(
             RepairWorkflow.id,
             Equipment.ueic,
             RepairStageInstance.quarter_number,
-            RepairStageInstance.due_at,
+            RepairStageInstance.started_at,
+            RepairStageDefinition.default_duration_days
         )
         .join(Equipment, Equipment.id == RepairWorkflow.equipment_id)
         .join(
@@ -349,15 +349,18 @@ def get_surveillance_dashboard(
         .filter(
             RepairWorkflow.workflow_type == 'surveillance',
             RepairWorkflow.status == 'active',
-            RepairStageInstance.due_at.isnot(None),
+            RepairStageInstance.started_at.isnot(None),
+            RepairStageDefinition.default_duration_days.isnot(None),
             Equipment.organization_id == org_id
         )
         .all()
     )
 
-    for wf_id, equipment_name, quarter, due_at in overdue_stages:
-        # due_at is stored as DB-session-local time, not UTC.
-        deadline = db_naive_to_aware(due_at, db)
+    for wf_id, equipment_name, quarter, started_at, duration_days in overdue_stages:
+        # Make started_at timezone-aware if it's naive (database timestamps are usually naive)
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        deadline = started_at + timedelta(days=duration_days)
         days_overdue = (now - deadline).days
 
         if days_overdue > 0:

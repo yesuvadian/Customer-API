@@ -3778,7 +3778,7 @@ class NotificationService:
             f"<td style='{TD}'>{getattr(tr, 'request_number', '') or ''}</td>"
             f"<td style='{TD}'>{getattr(getattr(tr, 'equipment', None), 'ueic', '') or ''}</td>"
             f"<td style='{TD}'>{days_overdue:.1f}</td>"
-            f"<td style='{TD}'>{deadline.strftime('%Y-%m-%d %H:%M') if hasattr(deadline, 'strftime') else deadline}</td>"
+            f"<td style='{TD}'>{deadline}</td>"
             "</tr>"
             for _si, stage, tr, days_overdue, deadline in group
         )

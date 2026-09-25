@@ -887,9 +887,7 @@ def _check_schedule_notifications():
                 .all()
             )
 
-            from datetime import timezone as _tz4
-            from utils.db_time import db_naive_to_aware
-            now4 = _dt4.now(_tz4.utc)
+            now4 = _dt4.utcnow()
 
             # Group overdue instances by (org_id, dept_id)
             stage_digest: dict = _ddict(list)
@@ -901,8 +899,7 @@ def _check_schedule_notifications():
                     stage.default_duration_hours if stage.default_duration_hours is not None
                     else stage.default_duration_days * 24
                 )
-                # started_at is stored as DB-session-local time, not UTC.
-                deadline = db_naive_to_aware(si.started_at, db) + timedelta(hours=duration_hours)
+                deadline = si.started_at + timedelta(hours=duration_hours)
                 if now4 <= deadline:
                     continue
                 days_overdue = round((now4 - deadline).total_seconds() / 86400, 2)
@@ -949,7 +946,7 @@ def _check_schedule_notifications():
                             "equipment.department": dept_name,
                             "dept.name": dept_name,
                             "days_overdue": str(first_days),
-                            "deadline": first_deadline.strftime("%Y-%m-%d %H:%M"),
+                            "deadline": str(first_deadline),
                             "digest_count": str(len(group)),
                             "digest_table": NotificationService.build_stage_overdue_digest_table(group),
                         },
@@ -1001,7 +998,6 @@ def _check_review_sla_breaches():
         from models import TrWfStageInstance, TrWfStage, TrWfStageRole
         from services.notification_service import NotificationService
         from datetime import datetime as _dt5, timezone as _tz5
-        from utils.db_time import db_naive_to_aware
         from sqlalchemy import or_ as _or5
         from utils.business_days import add_business_hours
 
@@ -1026,9 +1022,9 @@ def _check_review_sla_breaches():
         nsvc = NotificationService(db)
         for si in candidates:
             stage = si.stage
-            # started_at is stored as DB-session-local time, not UTC. Kept in
-            # that zone so add_business_hours skips local, not UTC, weekends.
-            started_at = db_naive_to_aware(si.started_at, db)
+            started_at = si.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=_tz5.utc)
 
             duration_hours = (
                 stage.default_duration_hours if stage.default_duration_hours is not None
@@ -1141,7 +1137,6 @@ def _check_auto_close_normal_results():
         from models import TrWfStageInstance, TrWfStage, TrWfStageTransition, TestResult
         from services.tr_workflow_routing_service import WorkflowRoutingService
         from datetime import datetime as _dt6, timezone as _tz6, timedelta
-        from utils.db_time import db_naive_to_aware
 
         now = _dt6.now(_tz6.utc)
         candidates = (
@@ -1161,10 +1156,20 @@ def _check_auto_close_normal_results():
         for si in candidates:
             stage = si.stage
             started_at = si.started_at
-            # started_at is stored as DB-session-local time, not UTC (see
-            # utils/db_time.py) - confirmed live against Postgres NOW() for
-            # TR-KP-2026-0757.
-            started_at = db_naive_to_aware(started_at, db)
+            if started_at.tzinfo is None:
+                # started_at is a naive DateTime column, but it isn't naive
+                # UTC - the app writes it as datetime.now(timezone.utc), and
+                # since the Postgres session timezone is Asia/Calcutta
+                # (fixed UTC+5:30, no DST), psycopg2 converts that aware
+                # value down to session-local wall-clock time before
+                # stripping tzinfo on insert into a naive column. Labeling
+                # it UTC directly (as before) made every deadline 5.5h later
+                # than the real UTC deadline, so a genuinely overdue NORMAL
+                # result still looked "not yet due" - confirmed live against
+                # Postgres NOW() vs this column for TR-KP-2026-0757.
+                started_at = started_at.replace(
+                    tzinfo=_tz6(timedelta(hours=5, minutes=30))
+                ).astimezone(_tz6.utc)
             deadline = started_at + timedelta(hours=stage.auto_close_normal_after_hours)
             if now <= deadline:
                 continue
@@ -1466,31 +1471,6 @@ scheduler.add_job(
     hour=9,
     minute=0,
     id="annual_audit_overdue_check_job",
-)
-
-
-# Repair-family stage deadline alerts (hourly) - due soon / overdue /
-# escalation, one-shot per stage entry. See services/repair_stage_deadline_service.py.
-def _check_repair_stage_deadlines():
-    db = SessionLocal()
-    try:
-        from services.repair_stage_deadline_service import RepairStageDeadlineService
-        sent = RepairStageDeadlineService(db).run_deadline_check()
-        if any(sent.values()):
-            logger.info(f"[StageDeadline] Alerts sent: {sent}")
-    except Exception as e:
-        logger.error(f"[StageDeadline] Deadline check job error: {e}", exc_info=True)
-    finally:
-        db.close()
-
-
-scheduler.add_job(
-    _check_repair_stage_deadlines,
-    trigger="interval",
-    hours=1,
-    id="repair_stage_deadline_job",
-    max_instances=1,
-    coalesce=True,
 )
 
 

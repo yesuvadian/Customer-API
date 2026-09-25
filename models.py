@@ -516,17 +516,6 @@ class RepairStageInstance(Base):
 
     started_at = Column(DateTime)
 
-    # Stage deadline = started_at + stage.default_duration_days. Kept in step
-    # with started_at by _sync_repair_stage_due_at below; stored the same way
-    # as started_at (DB-session-local), so compare it with func.now() in SQL
-    # or read it through utils.db_time.db_naive_to_aware in Python.
-    due_at = Column(DateTime, nullable=True)
-    # One-shot guards for main.py's _check_repair_stage_deadlines; cleared
-    # whenever the stage (re)starts so each stage entry is alerted afresh.
-    due_soon_notified_at = Column(DateTime, nullable=True)
-    overdue_notified_at = Column(DateTime, nullable=True)
-    escalation_notified_at = Column(DateTime, nullable=True)
-
     completed_at = Column(DateTime)
 
     completed_by = Column(
@@ -622,35 +611,6 @@ class RepairStageInstance(Base):
             name="uq_repair_instance",
         ),
     )
-
-
-def _sync_repair_stage_due_at(session, flush_context, instances):
-    """Recompute due_at and clear the deadline-alert guards whenever a repair
-    stage instance's started_at is set - on creation, advance, override,
-    reject or any other path - so no caller has to remember to do it."""
-    from datetime import timedelta
-    from sqlalchemy.orm.attributes import get_history
-
-    for obj in list(session.new) + list(session.dirty):
-        if not isinstance(obj, RepairStageInstance):
-            continue
-        if obj not in session.new and not get_history(obj, "started_at").has_changes():
-            continue
-        due_at = None
-        if obj.started_at is not None and obj.stage_id is not None:
-            with session.no_autoflush:
-                stage = obj.stage or session.get(RepairStageDefinition, obj.stage_id)
-            if stage is not None and stage.default_duration_days is not None:
-                due_at = obj.started_at + timedelta(days=stage.default_duration_days)
-        obj.due_at = due_at
-        obj.due_soon_notified_at = None
-        obj.overdue_notified_at = None
-        obj.escalation_notified_at = None
-
-
-from sqlalchemy import event as _sa_event
-from sqlalchemy.orm import Session as _SaSession
-_sa_event.listen(_SaSession, "before_flush", _sync_repair_stage_due_at)
 
 
 class RepairStageData(Base):

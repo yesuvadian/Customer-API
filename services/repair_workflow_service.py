@@ -24,7 +24,6 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from utils.db_time import db_naive_to_aware
 from models import (
     Equipment,
     EquipmentStatus,
@@ -1053,10 +1052,8 @@ class RepairWorkflowService:
             workflow.assignment_pending = True
             instance.status = "pending"
             instance.assignment_pending = True
-            instance.started_at = self._utc_now()  # restart the stage deadline clock
             instance.assigned_user_id = None
             instance.current_role = None
-            workflow.current_stage_instance_id = instance.id
 
             # Re-queue for coordinator
             existing_q = (
@@ -1094,11 +1091,9 @@ class RepairWorkflowService:
         if prev_inst:
             prev_inst.status = "pending"
             prev_inst.assignment_pending = True
-            prev_inst.started_at = self._utc_now()  # restart the stage deadline clock
             prev_inst.completed_at = None
             prev_inst.assigned_user_id = None
             prev_inst.current_role = None
-            workflow.current_stage_instance_id = prev_inst.id
 
         workflow.current_stage_id = prev_stage_id
         workflow.assignment_pending = True
@@ -2123,15 +2118,14 @@ class RepairWorkflowService:
                         RepairStageInstance.id == workflow.current_stage_instance_id
                     ).first()
 
-                    if stage_instance and stage_instance.due_at:
-                        # due_at is stored as DB-session-local time, not UTC.
-                        deadline = db_naive_to_aware(stage_instance.due_at, self.db).astimezone(timezone.utc)
+                    if (stage_instance and stage_instance.started_at and
+                        stage.default_duration_days is not None):
+                        deadline = stage_instance.started_at + timedelta(days=stage.default_duration_days)
                         current_stage_deadline = deadline.isoformat()
 
-                        now = datetime.now(timezone.utc)
-                        is_overdue = now > deadline
-                        # Whole days left, or -N for N full days late.
-                        days_remaining = -(now - deadline).days if is_overdue else (deadline - now).days
+                        now = datetime.utcnow()
+                        days_remaining = (deadline - now).days
+                        is_overdue = days_remaining < 0
 
         return {
             "id": str(workflow.id),
@@ -2320,12 +2314,12 @@ class RepairWorkflowService:
                 # ── Compute real deadline and overdue days from stage definition ──
                 deadline_str = "-"
                 days_overdue = 0
-                due_at = getattr(stage_instance, "due_at", None) if stage_instance else None
-                if due_at is not None:
-                    # due_at is stored as DB-session-local time, not UTC.
-                    deadline_dt = db_naive_to_aware(due_at, self.db)
+                duration = getattr(stage, "default_duration_days", None)
+                started_at = getattr(stage_instance, "started_at", None) if stage_instance else None
+                if duration is not None and started_at is not None:
+                    deadline_dt = started_at + timedelta(days=duration)
                     deadline_str = deadline_dt.strftime("%Y-%m-%d")
-                    days_overdue = max(0, (datetime.now(timezone.utc) - deadline_dt).days)
+                    days_overdue = max(0, (datetime.utcnow() - deadline_dt).days)
 
                 if actual_event == "repair_delay":
                     svc.notify_repair_delay(
