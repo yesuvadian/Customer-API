@@ -689,6 +689,7 @@ class WorkflowRoutingService:
         ):
             try:
                 from services.analytics_engine import AnalyticsEngine
+                self.db.flush()
                 with self.db.begin_nested():
                     AnalyticsEngine(self.db).run_for_equipment(testing_request.equipment_id)
             except Exception as _analytics_err:

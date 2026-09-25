@@ -158,6 +158,27 @@ class WorkflowDispatchService:
         # auto-triggered by the template rule, not by the tester's recommendation.
         self._maybe_trigger_calibration_workflow(tr, approver_id, result)
 
+        # Equipment health only counts accepted results
+        # (analytics_engine.accepted_test_result_ids), and this is where a
+        # legacy (non-workflow) request reaches its accepted status - closed /
+        # outcome_active / commissioned / finance_pending. Re-aggregate so the
+        # approved test reaches the score now rather than at the next full
+        # recompute. Savepoint: an analytics failure must never undo the
+        # dispatch that was already committed above.
+        if tr.equipment_id:
+            try:
+                from services.analytics_engine import AnalyticsEngine
+                self.db.flush()
+                with self.db.begin_nested():
+                    AnalyticsEngine(self.db).run_for_equipment(tr.equipment_id)
+                self.db.commit()
+            except Exception as _analytics_err:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Post-dispatch analytics refresh failed for request %s: %s",
+                    tr.id, _analytics_err,
+                )
+
         return result
 
     # ─────────────────────────────────────────────────────────────────────────

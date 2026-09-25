@@ -244,7 +244,12 @@ def accepted_test_result_ids(db: Session):
         status code is checked too for instances with no audit rows. Active
         instances are still under review; terminated ones were rejected.
       - legacy requests (never had a wf instance): status is a closed/approved
-        terminal state (dashboard_service.CLOSED_STATUSES) minus `rejected`.
+        terminal state (dashboard_service.CLOSED_STATUSES) minus `rejected`,
+        or finance_pending / procurement_initiated (technically approved,
+        replacement awaiting finance/procurement - dropping those would hide
+        exactly the worst equipment from the score), and current_status_code
+        is not a cancel/reject code (repair cancellation closes linked
+        requests as status=closed + wf_cancelled).
 
     Replaces the old per-site rules ("status NOT IN {draft, submitted,
     assigned, accepted, in_progress}", "completed or terminated wf", or no
@@ -258,7 +263,9 @@ def accepted_test_result_ids(db: Session):
     from models import TrWfAuditLog as _TWAL
     from services.dashboard_service import CLOSED_STATUSES as _CLOSED_STATUSES
 
-    scorable_statuses = [st for st in _CLOSED_STATUSES if st != _TRS.rejected]
+    scorable_statuses = [st for st in _CLOSED_STATUSES if st != _TRS.rejected] + [
+        _TRS.finance_pending, _TRS.procurement_initiated,
+    ]
     last_action = (
         db.query(_TWAL.action_code)
         .filter(_TWAL.wf_instance_id == _TWI.id)
@@ -298,6 +305,9 @@ def accepted_test_result_ids(db: Session):
                 and_(
                     _TReq.id.notin_(has_wf),
                     _TReq.status.in_(scorable_statuses),
+                    or_(_TReq.current_status_code.is_(None),
+                        and_(~_TReq.current_status_code.ilike("%cancel%"),
+                             ~_TReq.current_status_code.ilike("%reject%"))),
                 ),
             ),
         )
@@ -1326,6 +1336,13 @@ class AnalyticsEngine:
         equipment = self.db.get(Equipment, equipment_id)
         if not equipment:
             return None
+
+        # Sessions run with autoflush=False (database.py), and
+        # accepted_test_result_ids() reads workflow/request state from the
+        # DB - flush so a status/audit row set earlier in this same
+        # transaction (e.g. the approval that triggered this refresh) is
+        # visible, or the just-approved result is silently left out.
+        self.db.flush()
 
         rows = (
             self.db.query(TestAnalytics)
