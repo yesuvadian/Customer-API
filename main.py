@@ -2060,11 +2060,22 @@ async def startup_event():
     anyio.to_thread.current_default_thread_limiter().total_tokens = thread_pool_size
     logger.info(f"[Startup] Thread pool limiter set to {thread_pool_size} (THREAD_POOL_SIZE)")
 
-    scheduler.start()
-    logger.info(
-        "[Scheduler] APScheduler started — "
-        "daily test request job scheduled at 00:00 UTC"
-    )
+    # scheduler.start() runs on every process startup — fine for a single
+    # instance, but if this container is ever scaled to multiple replicas
+    # (Docker/Kubernetes horizontal scaling), each replica would run its own
+    # copy of every cron/interval job (notification dispatch, daily overdue
+    # checks, etc.), causing duplicate emails and duplicate report runs.
+    # ENABLE_SCHEDULER lets a deployment designate exactly one replica to
+    # run the scheduler; every other replica still serves HTTP normally.
+    # Default "true" preserves today's single-instance behavior unchanged.
+    if os.getenv("ENABLE_SCHEDULER", "true").lower() in ("1", "true", "yes"):
+        scheduler.start()
+        logger.info(
+            "[Scheduler] APScheduler started — "
+            "daily test request job scheduled at 00:00 UTC"
+        )
+    else:
+        logger.info("[Scheduler] APScheduler disabled on this instance (ENABLE_SCHEDULER=false)")
     # Register workflow lifecycle hooks (import = self-registration side-effect)
     import calibration_hooks  # noqa: F401
     import overhaul_hooks  # noqa: F401

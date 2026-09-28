@@ -1,0 +1,78 @@
+# Local orchestration for both containers. Each service's own Dockerfile,
+# nginx.conf, docker-entrypoint.sh, and .dockerignore live inside that
+# service's own repo (this repo, and coginiwattcustomer/) — this file just
+# wires the two together.
+#
+# Paths below are relative to this file's own location (Customer-API's
+# deploy/ folder) — adjust build.context if coginiwattcustomer is checked
+# out somewhere other than as this repo's sibling, e.g. in CI.
+#
+# The databases (local Postgres, remote ERP Postgres, MongoDB, Redis — see
+# ../.env) are NOT containerized here. They're already real, live, external
+# services this whole session's work has been running against;
+# containerizing them would mean a data-migration decision this file
+# shouldn't make unilaterally. The api container reaches them the same way
+# any other process on this machine already does, via .env — except
+# .env's DB_HOST/REDIS_HOST/LICENSE_SERVER_URL all say "localhost", which
+# inside a container means the container itself, not this machine.
+# Overridden below to host.docker.internal (Docker Desktop's DNS name for
+# the host machine); extra_hosts makes that name resolve on Linux too,
+# where it isn't automatic the way it is on Docker Desktop.
+#
+# Usage (from this directory):
+#   docker compose up --build
+
+services:
+  api:
+    build:
+      context: ..
+    env_file:
+      - ../.env
+    environment:
+      - DB_HOST=host.docker.internal
+      - REDIS_HOST=host.docker.internal
+      - LICENSE_SERVER_URL=http://host.docker.internal:8001
+      - LICENSE_SERVER_UI_URL=http://host.docker.internal:3001
+      # Mirrors deploy.ps1's dev-branch $ServiceName block (APP_NAME,
+      # BASE_URL are the two values it sed's into .env on every real
+      # deploy) — .env's own committed values are stale/malformed for
+      # these two (APP_NAME is still the scaffold default; BASE_URL has a
+      # literal "http:https://" typo), so override rather than inherit.
+      - APP_NAME=Relu-Vendor-API
+      - BASE_URL=https://devsupplier.cogniwatt.com
+      # ENABLE_SCHEDULER stays "true" here since this is a single api
+      # replica. If you ever scale (`docker compose up --scale api=3`),
+      # override this to "false" on every replica but one — see main.py's
+      # startup_event for why: APScheduler runs in-process, so more than
+      # one enabled replica means every cron/interval job (notification
+      # dispatch, daily overdue checks, etc.) fires once per replica.
+      - ENABLE_SCHEDULER=true
+      - PORT=8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: ../../../coginiwattcustomer
+      dockerfile: deploy/Dockerfile
+    environment:
+      # NOT the container-to-container DNS name ("api") — this app calls
+      # the API directly from browser-side Dart/JS (AppConfig.apiUrl), not
+      # via an nginx server-side proxy, so it needs a URL the *browser*
+      # (running on the host, not inside the compose network) can resolve.
+      # "api" only resolves between containers; localhost:8000 works
+      # because the api service's port is published to the host below.
+      # Confirmed by testing: with API_BASE_URL=http://api:8000, the
+      # browser's /public-config fetch never even appeared in the network
+      # log — silently swallowed by AppConfig's own best-effort try/catch,
+      # so the failure was invisible without deliberately checking for it.
+      - API_BASE_URL=http://localhost:8000
+      - APP_ENV=production
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
