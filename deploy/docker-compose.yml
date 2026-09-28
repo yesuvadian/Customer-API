@@ -31,6 +31,17 @@
 #   docker compose --env-file prod.env up --build     # prod — see prod.env's
 #                                                      # own warning first
 #
+# API_HOST_PORT / UI_API_BASE_URL default to the local-testing values
+# (host port 8000, browser calls http://localhost:8000) because on your own
+# machine the browser and the published API port share the same host. That
+# stops being true on a real remote deploy (deploy-docker.ps1): the VM may
+# already have port 8000 taken by an existing non-Docker service, and the
+# end user's browser is on a different machine than the VM, so "localhost"
+# would resolve to their own machine, not the VM. deploy-docker.ps1 layers a
+# second --env-file (dev.remote.env / prod.remote.env) on top of dev.env/
+# prod.env to override just these two for that case:
+#   docker compose --env-file dev.env --env-file dev.remote.env up --build -d
+#
 # Usage (from this directory):
 #   docker compose up --build
 
@@ -65,7 +76,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8000:8000"
+      # Host-side port only (container always listens on 8000 internally).
+      # Defaults to 8000 for local testing; deploy-docker.ps1 overrides
+      # this to 8001 on the dev VM, where 8000 is already bound by the
+      # existing bare-metal customer-api service (confirmed via
+      # `ss -tlnp` — see dev.remote.env).
+      - "${API_HOST_PORT:-8000}:8000"
     restart: unless-stopped
 
   ui:
@@ -78,12 +94,18 @@ services:
       # via an nginx server-side proxy, so it needs a URL the *browser*
       # (running on the host, not inside the compose network) can resolve.
       # "api" only resolves between containers; localhost:8000 works
-      # because the api service's port is published to the host below.
-      # Confirmed by testing: with API_BASE_URL=http://api:8000, the
-      # browser's /public-config fetch never even appeared in the network
-      # log — silently swallowed by AppConfig's own best-effort try/catch,
-      # so the failure was invisible without deliberately checking for it.
-      - API_BASE_URL=http://localhost:8000
+      # locally because the api service's port is published to the host
+      # below, and the browser is on that same host. Confirmed by testing:
+      # with API_BASE_URL=http://api:8000, the browser's /public-config
+      # fetch never even appeared in the network log — silently swallowed
+      # by AppConfig's own best-effort try/catch, so the failure was
+      # invisible without deliberately checking for it.
+      #
+      # On a real remote deploy the browser is on a DIFFERENT machine than
+      # the VM, so "localhost" would resolve to the end user's own machine
+      # instead — deploy-docker.ps1 overrides this to the VM's own
+      # reachable address (see dev.remote.env / prod.remote.env).
+      - API_BASE_URL=${UI_API_BASE_URL:-http://localhost:8000}
       - APP_ENV=production
     ports:
       - "8080:80"
