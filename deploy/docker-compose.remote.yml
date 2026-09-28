@@ -1,0 +1,19 @@
+# Compose override, only for deploy-docker.ps1's remote deploy — layered
+# on top of docker-compose.yml via `-f docker-compose.yml -f
+# docker-compose.remote.yml`, never used for local Windows testing.
+#
+# docker-compose.yml's api service reads DB_USER/DB_PASSWORD/DB_NAME from
+# the shipped ../.env (env_file:) with no override, which is correct for
+# local testing (your own local Postgres). But the .env that gets shipped
+# to the VM is whatever's in the local working copy at deploy time, which
+# may be pointed at a different local database entirely. This forces the
+# real dev-VM credentials (matching deploy.ps1's dev branch exactly)
+# regardless of what .env happens to contain, the same way
+# docker-compose.yml's own environment: block already forces DB_HOST/
+# DB_PORT/BASE_URL. Values come from dev.remote.env / prod.remote.env.
+services:
+  api:
+    environment:
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}

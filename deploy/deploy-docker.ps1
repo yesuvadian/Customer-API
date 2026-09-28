@@ -111,7 +111,7 @@ function Deploy-ToServer {
     $remoteCommand = @"
 cd $RemoteApiPath && tar -xzf $ApiArchive && rm -f $ApiArchive &&
 cd $RemoteUiPath && tar -xzf $UiArchive && rm -f $UiArchive &&
-cd $RemoteApiPath/deploy && docker compose --env-file $EnvFile --env-file $RemoteEnvFile up --build -d
+cd $RemoteApiPath/deploy && docker compose -f docker-compose.yml -f docker-compose.remote.yml --env-file $EnvFile --env-file $RemoteEnvFile up --build -d
 "@
     $remoteCommand = $remoteCommand -replace "`r", ""
 
