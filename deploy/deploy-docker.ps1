@@ -71,6 +71,30 @@ if ($Environment -eq "main") {
 }
 
 # ---------------------------------
+# Checkout branch locally, both repos — matches deploy.ps1's own pattern,
+# so -Environment actually controls which branch's code ships, not just
+# which server/DB it ships to. Safe to switch the API repo's own branch
+# mid-script: PowerShell has already parsed this whole file into memory,
+# and dev/main both carry this deploy/ folder (see the commit that added
+# it there), so the script keeps finding itself and its own config files
+# after the checkout.
+# ---------------------------------
+Write-Host "Checking out branch: $Environment"
+Push-Location $ApiRepoRoot
+git checkout $Environment
+if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
+git pull origin $Environment
+if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
+Pop-Location
+
+Push-Location $UiRepoRoot
+git checkout $Environment
+if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
+git pull origin $Environment
+if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
+Pop-Location
+
+# ---------------------------------
 # Archive both repos
 # ---------------------------------
 Write-Host "Archiving API repo..."
