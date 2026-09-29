@@ -1,0 +1,17 @@
+# Secrets — never bake these into the image; supplied at run time instead.
+.env
+.env.*
+
+.git
+.gitignore
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime-generated content — should live on a mounted volume, not in the image.
+uploads/
+
+*.log
+docs/
