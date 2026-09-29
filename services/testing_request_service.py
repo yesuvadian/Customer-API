@@ -305,12 +305,23 @@ class TestingRequestService:
             return value.date()
         return value
 
-    def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
+    def create_request(
+        self,
+        data: dict,
+        originator_id: UUID,
+        duplicate_check_ignore_ids: Optional[set] = None,
+    ) -> TestingRequest:
+        """duplicate_check_ignore_ids: requests the same-period duplicate
+        guard below must not count. services/car_service.py passes the
+        request whose result is raising the follow-up / retest: at that
+        moment it is still active (its result is in review), so without
+        this every CAR retest of the same test type was refused with 409
+        by the very request it follows up."""
         test_type_id = data.get("test_type_id")
 
         equipment_id = data.get("equipment_id")
         if equipment_id and test_type_id and not data.get("is_schedule_template"):
-            candidates = (
+            candidates_q = (
                 self.db.query(TestingRequest)
                 .filter(
                     TestingRequest.equipment_id == equipment_id,
@@ -318,8 +329,10 @@ class TestingRequestService:
                     TestingRequest.is_schedule_template.is_(False),
                     ~TestingRequest.status.in_(self._DUPLICATE_CHECK_TERMINAL_STATUSES),
                 )
-                .all()
             )
+            if duplicate_check_ignore_ids:
+                candidates_q = candidates_q.filter(~TestingRequest.id.in_(list(duplicate_check_ignore_ids)))
+            candidates = candidates_q.all()
             if candidates:
                 # "Same scheduling period" — not "ever coexisting": a request
                 # due next quarter is a different cadence cycle from one due

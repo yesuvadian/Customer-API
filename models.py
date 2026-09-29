@@ -3148,6 +3148,11 @@ class TestingRequest(Base):
         nullable=True,
         index=True,
     )
+    # Lineage type (design doc section 3, migration 052): ORIGINAL for normal
+    # requests; FOLLOW_UP / RETEST when services/car_service.py raises one
+    # from a CAR Trigger Config rule. Not the same as request_type above,
+    # which is routing (normal | failure | special).
+    test_request_type = Column(String(20), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
 
     # Test Register: master catalogue template row (equipment_id=NULL, equipment_type_id set)
     is_schedule_template = Column(Boolean, default=False, nullable=False)  # True = register entry
@@ -3981,21 +3986,35 @@ class Recommendation(Base):
 class CarStatus:
     """Plain string constants, not a DB enum — mirrors TestingRequestStatus-
     adjacent string columns elsewhere in this file. Kept simple since the
-    lifecycle is short and unlikely to need DB-level enum migrations."""
+    lifecycle is short and unlikely to need DB-level enum migrations.
+
+    A CAR has no manual workflow of its own - it is a tracker over its
+    Test Request chain, and every status change comes from a TR result
+    (services/car_service.py):
+      OPEN      - raised by a triggering evaluation; follow-up/retest TRs in flight
+      REOPENED  - a later TR in the chain failed again, at a severity that
+                  needs a retest
+      CLOSED    - every test type that failed in the chain (at a CAR-
+                  triggering severity) has a passing retest, OR an approved
+                  Procurement (replace the equipment) closed it - the reason
+                  is kept in corrective_action ("REPLACEMENT: ...")
+      VOIDED    - raised in error (bad data / threshold), voided by an admin
+                  with a reason (POST /car/{id}/void). Not a workflow step - an
+                  escape hatch; left out of dashboards and open counts. The
+                  reason is kept in corrective_action ("VOIDED: ...").
+      REPLACEMENT_RECOMMENDED - legacy (no longer set): replacement now
+                  closes the CAR on approval.
+    The work itself (maintenance, repair, retest) is assigned, done and
+    approved inside each TR's own workflow."""
     OPEN = "OPEN"
-    ASSIGNED = "ASSIGNED"
-    IN_PROGRESS = "IN_PROGRESS"
-    PENDING_VERIFICATION = "PENDING_VERIFICATION"
     CLOSED = "CLOSED"
-    FAILED = "FAILED"
     REOPENED = "REOPENED"
-    # A reviewer has recommended replacing the equipment instead of continuing
-    # to retest it — stops the auto-retest loop (see
-    # services/car_service._ensure_active_followup) without closing the CAR,
-    # since the underlying issue still isn't resolved.
+    VOIDED = "VOIDED"
+    # Legacy - no longer set (an approved Procurement now CLOSES the CAR);
+    # kept so any existing row still reads as open.
     REPLACEMENT_RECOMMENDED = "REPLACEMENT_RECOMMENDED"
 
-    OPEN_STATUSES = {OPEN, ASSIGNED, IN_PROGRESS, PENDING_VERIFICATION, FAILED, REOPENED, REPLACEMENT_RECOMMENDED}
+    OPEN_STATUSES = {OPEN, REOPENED, REPLACEMENT_RECOMMENDED}
 
 
 class CarRelationshipType:

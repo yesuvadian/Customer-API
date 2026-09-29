@@ -285,6 +285,7 @@ def _create_tr_from_record(
             overall_result=overall_result,
             remarks=remarks_final,
             tester_id=current_user.id,
+            run_car_hook=False,  # historical rows: no live CARs / retests
         )
     except InvalidRequestError:
         db.expire_all()

@@ -144,20 +144,22 @@ class WorkflowDispatchService:
             result["status"] = "outcome_active"
 
         elif action == NextActionType.replacement:
+            # The CM workflow's own approval (this dispatch runs on it) IS the
+            # approval of the replacement - the procurement request is created
+            # already approved, no separate Finance approval step. The request
+            # is finished (outcome_active), same end state Finance approval gave.
             pr_number = self._create_procurement(tr, rec, approver_id)
-            tr.status = TestingRequestStatus.finance_pending
+            tr.status = TestingRequestStatus.outcome_active
+            tr.completed_at = datetime.now(timezone.utc)
             tr.modified_by = approver_id
             self.db.commit()
             result["created"] = pr_number
-            result["status"] = "finance_pending"
+            result["status"] = "outcome_active"
 
-            # If this TR is linked to an open CAR, an approved replacement
-            # recommendation IS the tester's "replace it instead of retesting"
-            # call - stop the CAR's auto-retest loop the same way a manual
-            # recommend_replacement() would, driven by this existing
-            # wizard -> approval -> dispatch pipeline rather than a separate
-            # CAR-level action.
-            self._recommend_replacement_for_linked_car(tr, approver_id, pr_number)
+            # Every open CAR on this equipment: open retests cancelled, then
+            # CLOSED (reason: replacement) - unless another of its requests is
+            # still open, in which case it closes when that one finishes.
+            self._close_cars_for_replacement(tr, approver_id, pr_number)
 
         # ── Calibration workflow auto-trigger ─────────────────────────────────
         # Fires on result approval when any test result for this TR has a
@@ -802,7 +804,8 @@ class WorkflowDispatchService:
         rec: Recommendation,
         approver_id: UUID,
     ) -> str:
-        """Create a ProcurementRequest for replacement approval by Finance."""
+        """Create the ProcurementRequest for an approved replacement - already
+        approved (the CM workflow's approval is the approval; no Finance step)."""
         from sqlalchemy import func
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
         count = (
@@ -823,38 +826,43 @@ class WorkflowDispatchService:
                 f"Source TR: {tr.request_number}\n"
                 f"Approver notes: {rec.approval_notes or 'N/A'}"
             ),
-            status="pending_finance",
+            status="approved",  # approved by the CM workflow - no Finance step
             replacement_products=rec.replacement_products or [],
-            raised_by=approver_id,
+            # raised_by is required: a configured auto-close approves with no
+            # person, so fall back to whoever made the recommendation
+            raised_by=approver_id or rec.submitted_by or tr.originator_id,
             created_by=approver_id,
         )
         self.db.add(pr)
         self.db.flush()
         print(f"[Dispatch] Created ProcurementRequest {pr_number}")
 
-        # Notify Finance Approvers that a new procurement request is awaiting review
+        # Approved on creation (the CM workflow approved it) - tell the
+        # originator / tester, instead of asking Finance to approve it.
         try:
             from services.notification_service import NotificationService
-            NotificationService(self.db).notify_procurement_pending(tr, pr_number)
+            NotificationService(self.db).notify_procurement_decision(
+                tr, pr_number, decision="approved", notes="Approved in the CM test workflow"
+            )
         except Exception as _n:
-            print(f"[Dispatch] WARN: procurement_pending notification failed: {_n}")
+            print(f"[Dispatch] WARN: procurement decision notification failed: {_n}")
 
         return pr_number
 
-    def _recommend_replacement_for_linked_car(self, tr: TestingRequest, approver_id: UUID, pr_number: str) -> None:
-        """Best-effort: if `tr` is in the lineage of a still-open CAR, flip it
-        to REPLACEMENT_RECOMMENDED so services/car_service.py's auto-retest
-        loop stops raising further retests for it. Never blocks the
-        procurement dispatch above if this fails or finds nothing."""
+    def _close_cars_for_replacement(self, tr: TestingRequest, approver_id: UUID, pr_number: str) -> None:
+        """Best-effort: an approved Procurement (replacement) recommendation
+        resolves every open CAR on this equipment - their open retests are
+        cancelled and they close (once every linked request is finished).
+        Never blocks the procurement dispatch above."""
         try:
-            from services.car_service import find_open_car_for_lineage, recommend_replacement
-            car = find_open_car_for_lineage(self.db, tr)
-            if car:
-                recommend_replacement(
-                    self.db,
-                    car,
-                    recommended_by=approver_id,
-                    notes=f"Replacement approved via {tr.request_number} (Procurement {pr_number})",
-                )
+            from services.car_service import close_cars_for_replacement
+            closed = close_cars_for_replacement(
+                self.db,
+                tr,
+                approved_by=approver_id,
+                notes=f"Equipment replacement approved via {tr.request_number} (Procurement {pr_number})",
+            )
+            if closed:
+                print(f"[Dispatch] Closed CAR(s) for replacement: {', '.join(c.car_number for c in closed)}")
         except Exception as exc:
-            print(f"[Dispatch] WARN: CAR replacement recommendation failed: {exc}")
+            print(f"[Dispatch] WARN: closing CAR(s) for replacement failed: {exc}")

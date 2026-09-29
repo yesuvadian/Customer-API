@@ -786,9 +786,26 @@ class WorkflowRoutingService:
                         log.warning("Dispatch after terminal action failed (non-fatal): %s", _de)
                         testing_request.status = _TRS.closed
                         testing_request.completed_at = _dt.now(_tz.utc)
+                elif testing_request.status in (
+                    _TRS.finance_pending, _TRS.outcome_active, _TRS.procurement_initiated, _TRS.commissioned,
+                ):
+                    # This transition's post_action (recommendation_finalize)
+                    # already dispatched and set the outcome - e.g. Procurement
+                    # -> finance_pending while Finance decides. Don't overwrite it.
+                    pass
                 else:
                     testing_request.status = _TRS.closed
                     testing_request.completed_at = _dt.now(_tz.utc)
+
+            # A request just finished: its CARs may now be closable (a CAR
+            # closes only when every linked request is finished) or have
+            # retests to raise (e.g. corrective work done). Runs after the
+            # caller commits this transition, in its own session.
+            try:
+                from services.car_service import schedule_recheck_after_commit
+                schedule_recheck_after_commit(self.db, testing_request.id)
+            except Exception as _car_err:
+                log.warning("CAR re-check scheduling failed (non-fatal): %s", _car_err)
 
         return instance
 
