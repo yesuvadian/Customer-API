@@ -1,0 +1,8 @@
+# Shell scripts must keep LF endings regardless of core.autocrlf — a CRLF
+# shebang line becomes "#!/bin/sh\r", which breaks when run on Linux (the
+# kernel looks for a literal "/bin/sh\r" interpreter and reports "not
+# found" even though the file exists and is executable). Hit this exact
+# bug on coginiwattcustomer's deploy/docker-entrypoint.sh; these scripts
+# are scp'd straight to the dev VM the same way, so they're exposed to it
+# too.
+*.sh text eol=lf
