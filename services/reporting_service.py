@@ -21,6 +21,7 @@ import io
 import os
 import re
 from datetime import datetime, timezone, date, timedelta
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -75,15 +76,64 @@ def _org_clause(org_id, alias: str = "tr") -> str:
     return f" AND {alias}.organization_id = '{org_id}'" if org_id else ""
 
 
+# How each report query alias reaches a department, for department-scoped
+# users (see ReportingService._scope). Aliases are the ones the built-in
+# queries and the ReportQueryKey.sql_template rows use:
+#   "direct"  — the aliased table has its own department_id
+#   "via_tr"  — table has testing_request_id → testing_requests.department_id
+#   "via_eq"  — table has equipment_id       → equipment.department_id
+_ALIAS_DEPT_LINK = {
+    "tr":  "direct",   # testing_requests
+    "fr":  "direct",   # testing_requests (failure_resolution_report)
+    "e":   "direct",   # equipment
+    "ea":  "direct",   # equipment_analytics
+    "tai": "direct",   # taqc_annual_inspections
+    "res": "via_tr",   # test_results
+    "rec": "via_tr",   # recommendations
+    "pr":  "via_tr",   # procurement_requests
+    "wf":  "via_eq",   # repair_workflows
+    "s":   "direct",   # test_request_schedules (missed_schedules_report)
+    "car": "direct",   # corrective_action_requests (open_car_report)
+}
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # ReportingService
 # ══════════════════════════════════════════════════════════════════════════
 
 class ReportingService:
 
-    def __init__(self, db: Session, org_id: Optional[UUID] = None):
+    def __init__(self, db: Session, org_id: Optional[UUID] = None,
+                 dept_ids: Optional[list] = None):
         self.db = db
         self.org_id = org_id
+        # Department subtree the caller may see; None = no department
+        # restriction (org admins, scheduled jobs). Set by routers/reporting.py
+        # from the logged-in user's own department scope.
+        self.dept_ids = [str(d) for d in dept_ids] if dept_ids else None
+
+    def _scope(self, alias: str) -> str:
+        """Org clause plus, for a department-scoped caller, a restriction of
+        `alias`'s rows to the caller's department subtree. Fails closed: an
+        alias with no known department link raises rather than silently
+        returning every department's rows."""
+        clause = _org_clause(self.org_id, alias)
+        if not self.dept_ids:
+            return clause
+        ids = ", ".join(f"'{UUID(d)}'" for d in self.dept_ids)   # UUID() validates
+        link = _ALIAS_DEPT_LINK.get(alias)
+        if link == "direct":
+            return clause + f" AND {alias}.department_id IN ({ids})"
+        if link == "via_tr":
+            return clause + (f" AND {alias}.testing_request_id IN (SELECT id FROM "
+                             f"public.testing_requests WHERE department_id IN ({ids}))")
+        if link == "via_eq":
+            return clause + (f" AND {alias}.equipment_id IN (SELECT id FROM "
+                             f"public.equipment WHERE department_id IN ({ids}))")
+        raise ValueError(
+            f"This report can't be limited to your department yet (alias '{alias}'). "
+            f"Ask an org admin to run it."
+        )
 
     # ── Public ─────────────────────────────────────────────────────────────
 
@@ -145,6 +195,24 @@ class ReportingService:
         self.db.commit()
         self.db.refresh(defn)
         return defn
+
+    def delete_definition(self, definition_id: UUID,
+                          user_id: Optional[UUID] = None) -> None:
+        """Soft delete (is_active=False): ReportLog rows cascade on a hard
+        delete, which would wipe the report's generation history. Inactive
+        definitions already drop out of list_definitions and the scheduler.
+        System definitions and other organisations' definitions are refused.
+        """
+        defn = self.get_definition(definition_id)
+        if not defn or not defn.is_active:
+            raise ValueError("Not found")
+        if defn.is_system:
+            raise PermissionError("System report definitions cannot be deleted")
+        if self.org_id and defn.organization_id != self.org_id:
+            raise PermissionError("Report definition belongs to another organisation")
+        defn.is_active = False
+        defn.modified_by = user_id
+        self.db.commit()
 
     def generate(
         self,
@@ -223,6 +291,11 @@ class ReportingService:
             "tester_performance_report":          self._q_tester_performance,
             "monthly_kpi_report":                 self._q_monthly_kpi,
             "dga_trend_report":                   self._q_dga_trend_report,
+            # Reports mirroring Notification Center topics whose logic lives
+            # in Python (not expressible as one sql_template).
+            "workflow_stage_delays_report":       self._q_workflow_stage_delays,
+            "kit_calibration_due_report":         self._q_kit_calibration_due,
+            "deterioration_watch_report":         self._q_deterioration_watch,
         }
         fn = registry.get(query_key)
         if fn:
@@ -245,7 +318,14 @@ class ReportingService:
         if not qk or not qk.sql_template:
             raise ValueError(f"Unknown query_key: '{query_key}'")
 
-        org_clause = _org_clause(self.org_id, qk.org_alias) if qk.org_alias else ""
+        if qk.org_alias:
+            org_clause = self._scope(qk.org_alias)
+        elif self.dept_ids:
+            # No alias to hang a department filter on — fail closed.
+            raise ValueError("This report can't be limited to your department yet. "
+                             "Ask an org admin to run it.")
+        else:
+            org_clause = ""
         sql = qk.sql_template.replace("{org_clause}", org_clause)
         # SQLAlchemy's text() bind-parameter tokenizer misreads ":name::type"
         # (no space) as a syntax error — insert a space so the Postgres cast
@@ -269,7 +349,7 @@ class ReportingService:
     # ── 14 Query Functions ─────────────────────────────────────────────────
 
     def _q_equipment_condition(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "e")
+        org = self._scope("e")
         # Capacity and voltage ratio live in nameplate_data (JSONB) under a
         # handful of different key names depending on which template was used
         # at onboarding — mirrors services/nameplate_helper.py's key list so
@@ -322,7 +402,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_overdue_tests(self, p: dict) -> list[dict]:
-        org   = _org_clause(self.org_id, "tr")
+        org   = self._scope("tr")
         today = date.today()
         df = _date(_p(p, "date_from"))
         dt = _date(_p(p, "date_to"))
@@ -334,7 +414,12 @@ class ReportingService:
         sql = text(f"""
             SELECT
                 tr.request_number,
-                tr.title,
+                -- Title is optional on the request form: blank ones (or the
+                -- old "  -  Test Name" shape) fall back to the test name.
+                COALESCE(
+                    NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
+                    cd.name
+                )                                         AS title,
                 tr.zone,
                 tr.ce_circle,
                 tr.ee_subdivision,
@@ -360,7 +445,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_active_alerts(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "res")
+        org = self._scope("res")
         sev = _p(p, "severity", "all")
         sev_clause = (
             f" AND res.evaluation_result->>'overall' = '{sev}'"
@@ -398,7 +483,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_flagged_equipment(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "res")
+        org = self._scope("res")
         # Same COALESCE key list as _q_equipment_condition / nameplate_helper.py
         sql = text(f"""
             SELECT DISTINCT ON (e.id)
@@ -444,7 +529,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_repair_progress(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "tr")
+        org = self._scope("tr")
         sql = text(f"""
             SELECT
                 tr.request_number,
@@ -473,7 +558,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_maintenance_overdue(self, p: dict) -> list[dict]:
-        org   = _org_clause(self.org_id, "tr")
+        org   = self._scope("tr")
         today = date.today()
         sql = text(f"""
             SELECT
@@ -500,7 +585,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_procurement_pipeline(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "pr")
+        org = self._scope("pr")
         st  = _p(p, "status", "all")
         st_clause = f" AND pr.status = '{st}'" if st and st != "all" else ""
         sql = text(f"""
@@ -522,7 +607,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_open_remediation(self, p: dict) -> list[dict]:
-        org   = _org_clause(self.org_id, "rec")
+        org   = self._scope("rec")
         today = date.today()
         sql = text(f"""
             SELECT
@@ -548,7 +633,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_testing_request_status(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "tr")
+        org = self._scope("tr")
         clauses = ""
         st  = _p(p, "status")
         cat = _p(p, "category")
@@ -592,7 +677,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_test_results_summary(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "res")
+        org = self._scope("res")
         sev = _p(p, "severity", "all")
         df  = _date(_p(p, "date_from"))
         dt  = _date(_p(p, "date_to"))
@@ -629,7 +714,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_recommendation_approval(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "rec")
+        org = self._scope("rec")
         st  = _p(p, "status")
         clauses = ""
         if st and st != "all":
@@ -659,7 +744,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_compliance_status(self, p: dict) -> list[dict]:
-        org         = _org_clause(self.org_id, "e")
+        org         = self._scope("e")
         period_days = int(_p(p, "period_days", 365))
         sql = text(f"""
             SELECT
@@ -701,7 +786,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_tester_performance(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "tr")
+        org = self._scope("tr")
         df  = _date(_p(p, "date_from"))
         dt  = _date(_p(p, "date_to"))
         clauses = ""
@@ -732,7 +817,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_monthly_kpi(self, p: dict) -> list[dict]:
-        org    = _org_clause(self.org_id, "tr")
+        org    = self._scope("tr")
         months = int(_p(p, "months", 12))
         sql = text(f"""
             SELECT
@@ -762,6 +847,156 @@ class ReportingService:
             ORDER  BY month DESC
         """)
         return self._exec(sql)
+
+    def _q_workflow_stage_delays(self, p: dict) -> list[dict]:
+        """Workflow stages running past their configured time limit — the
+        report behind the "Workflow Stage SLA Breach" and "<X> Stage Delayed"
+        notifications. Two sources: test-request workflow stages
+        (tr_wf_stage_instances; hours take precedence over days, same rule
+        as the notification job) and repair-type workflows' current stage
+        (repair, calibration, overhaul, pre-commission, surveillance,
+        annual audit; repair_stage_definitions.default_duration_days)."""
+        tr_sql = text(f"""
+            SELECT
+                'Test Request'                         AS workflow,
+                tr.request_number                      AS reference,
+                st.name                                AS stage,
+                e.ueic,
+                d.name                                 AS substation,
+                si.started_at                          AS stage_started,
+                si.started_at + INTERVAL '1 hour' *
+                    COALESCE(st.default_duration_hours, st.default_duration_days * 24)
+                                                       AS stage_deadline,
+                ROUND((EXTRACT(EPOCH FROM NOW() - (si.started_at + INTERVAL '1 hour' *
+                    COALESCE(st.default_duration_hours, st.default_duration_days * 24)))
+                    / 86400)::numeric, 1)              AS days_over
+            FROM   public.tr_wf_stage_instances si
+            JOIN   public.tr_wf_stages     st ON st.id = si.stage_id
+            JOIN   public.tr_wf_instances  wi ON wi.id = si.wf_instance_id
+            JOIN   public.testing_requests tr ON tr.id = wi.testing_request_id
+            LEFT JOIN public.equipment       e ON e.id = tr.equipment_id
+            LEFT JOIN public.org_departments d ON d.id = tr.department_id
+            WHERE  si.status = 'in_progress'
+              AND  si.started_at IS NOT NULL
+              AND  COALESCE(st.default_duration_hours, st.default_duration_days * 24) IS NOT NULL
+              AND  si.started_at + INTERVAL '1 hour' *
+                   COALESCE(st.default_duration_hours, st.default_duration_days * 24) < NOW()
+              {self._scope("tr")}
+        """)
+        wf_sql = text(f"""
+            SELECT
+                COALESCE(wf.workflow_code, wf.workflow_type, 'Repair') AS workflow,
+                wf.workflow_number                     AS reference,
+                rsd.name                               AS stage,
+                e.ueic,
+                d.name                                 AS substation,
+                rsi.started_at                         AS stage_started,
+                rsi.started_at + INTERVAL '1 day' * rsd.default_duration_days
+                                                       AS stage_deadline,
+                ROUND((EXTRACT(EPOCH FROM NOW() - (rsi.started_at
+                    + INTERVAL '1 day' * rsd.default_duration_days)) / 86400)::numeric, 1)
+                                                       AS days_over
+            FROM   public.repair_workflows wf
+            JOIN   public.repair_stage_instances   rsi ON rsi.id = wf.current_stage_instance_id
+            JOIN   public.repair_stage_definitions rsd ON rsd.id = rsi.stage_id
+            LEFT JOIN public.equipment       e ON e.id = wf.equipment_id
+            LEFT JOIN public.org_departments d ON d.id = e.department_id
+            WHERE  rsi.completed_at IS NULL
+              AND  rsi.started_at IS NOT NULL
+              AND  rsd.default_duration_days IS NOT NULL
+              AND  rsi.started_at + INTERVAL '1 day' * rsd.default_duration_days < NOW()
+              AND  LOWER(COALESCE(wf.status, '')) NOT IN ('completed', 'cancelled', 'closed')
+              {self._scope("wf")}
+        """)
+        rows = self._exec(tr_sql) + self._exec(wf_sql)
+        return sorted(rows, key=lambda r: r.get("days_over") or 0, reverse=True)
+
+    def _q_kit_calibration_due(self, p: dict) -> list[dict]:
+        """Calibration status of every equipment/testing kit with a
+        calibration configuration — the report behind the "Test Kit
+        Calibration Due Soon / Overdue" notifications. Uses
+        CalibrationService.get_calibration_status, the same status the
+        calibration scheduler and those notifications use."""
+        from models import Equipment, EquipmentCalibrationConfig, OrgDepartment, CategoryMaster
+        from services.calibration_service import CalibrationService
+
+        q = (
+            self.db.query(Equipment)
+            .join(EquipmentCalibrationConfig, EquipmentCalibrationConfig.equipment_id == Equipment.id)
+        )
+        if self.org_id:
+            q = q.filter(Equipment.organization_id == self.org_id)
+        if self.dept_ids:
+            q = q.filter(Equipment.department_id.in_(self.dept_ids))
+        equipment = q.all()
+
+        dept_names = {d.id: d.name for d in self.db.query(OrgDepartment).all()}
+        type_names = {c.id: c.name for c in self.db.query(CategoryMaster).all()}
+        cal = CalibrationService(self.db)
+        state_label = {"OVERDUE": "Overdue", "DUE_SOON": "Due soon",
+                       "NORMAL": "OK", "NOT_CALIBRATED": "Not calibrated"}
+        rows = []
+        for eq in equipment:
+            st = cal.get_calibration_status(eq.id)
+            rows.append({
+                "ueic":                  eq.ueic,
+                "equipment_type":        type_names.get(eq.equipment_type_id),
+                "substation":            dept_names.get(eq.department_id),
+                "calibration_status":    state_label.get(st.get("state"), st.get("state")),
+                "last_calibration_date": st.get("last_calibration_date"),
+                "next_due_date":         st.get("next_due_date"),
+                "days_until_due":        st.get("days_until_due"),
+                "calibrated_by":         st.get("calibrated_by"),
+                "certificate_number":    st.get("certificate_number"),
+            })
+        # Overdue first, then soonest due; never-calibrated last.
+        return sorted(rows, key=lambda r: (r["days_until_due"] is None,
+                                           r["days_until_due"] if r["days_until_due"] is not None else 0))
+
+    def _q_deterioration_watch(self, p: dict) -> list[dict]:
+        """Equipment parameters on the deterioration watch list (predicted to
+        breach a threshold) and whether each has been reviewed — the report
+        behind the "Deterioration Watch Escalated / Overdue Review"
+        notifications. Reuses routers.analytics.get_deterioration_watch_list,
+        the same list the watch dashboard and those notifications use."""
+        from routers.analytics import get_deterioration_watch_list
+        from models import OrgDepartment
+
+        result = get_deterioration_watch_list(
+            department_id=None, db=self.db,
+            user={"organization_id": self.org_id, "id": None},
+        )
+        allowed = set(self.dept_ids) if self.dept_ids else None
+        dept_names = {str(d.id): d.name for d in self.db.query(OrgDepartment).all()}
+        today = date.today()
+        rows = []
+        for eq in result.get("equipment", []):
+            dept = str(eq.get("department_id")) if eq.get("department_id") else None
+            if allowed is not None and dept not in allowed:
+                continue
+            for prm in eq.get("parameters", []):
+                tested = prm.get("tested_at")
+                try:
+                    pending = (today - date.fromisoformat(tested[:10])).days if tested else None
+                except ValueError:
+                    pending = None
+                rows.append({
+                    "ueic":               eq.get("equipment_label"),
+                    "equipment_type":     eq.get("equipment_type"),
+                    "substation":         dept_names.get(dept),
+                    "risk_level":         eq.get("risk_level"),
+                    "health_score":       eq.get("health_score"),
+                    "parameter":          prm.get("parameter_label"),
+                    "current_value":      prm.get("current_value"),
+                    "unit":               prm.get("unit"),
+                    "breach_threshold":   prm.get("breach_threshold"),
+                    "days_to_breach":     prm.get("days_to_breach"),
+                    "last_tested":        tested[:10] if tested else None,
+                    "reviewed":           "Yes" if prm.get("is_reviewed") else "No",
+                    "days_pending_review": None if prm.get("is_reviewed") else pending,
+                    "review_disposition": prm.get("review_disposition"),
+                })
+        return sorted(rows, key=lambda r: (r["days_to_breach"] is None, r["days_to_breach"] or 0))
 
     def _q_dga_trend_report(self, p: dict) -> list[dict]:
         """DGA gas readings per transformer over the trailing N months, with
@@ -793,6 +1028,8 @@ class ReportingService:
         )
         if self.org_id:
             q = q.filter(TestResult.organization_id == self.org_id)
+        if self.dept_ids:
+            q = q.filter(TestingRequest.department_id.in_(self.dept_ids))
         rows = q.order_by(TestResult.tested_at.asc()).all()
 
         eq_type_names = {c.id: c.name for c in self.db.query(CategoryMaster).all()}
@@ -933,6 +1170,12 @@ class ReportingService:
                 val = row.get(key)
                 if isinstance(val, datetime):
                     val = val.replace(tzinfo=None)
+                elif val is not None and not isinstance(
+                        val, (str, int, float, bool, date, Decimal)):
+                    # UUIDs, dicts/lists (JSON columns), etc. — openpyxl
+                    # rejects them ("Cannot convert UUID(...) to Excel"),
+                    # which failed the whole run with a misleading 404.
+                    val = str(val)
                 cell = ws.cell(row=ri, column=ci, value=val)
                 if fill:
                     cell.fill = fill
@@ -1029,13 +1272,51 @@ class ReportingService:
                 row_data.append(val)
             table_data.append(row_data)
 
-        # Create table with dynamic column widths
-        # Calculate rough column widths based on content
+        # Column widths proportional to content (header + longest value in the
+        # first rows), clamped so one long column can't starve the rest.
+        # Plain strings in a reportlab Table never wrap — they spilled into
+        # the neighbouring column — so every cell becomes a Paragraph that
+        # wraps inside its column (long unbroken values like UUIDs included).
+        from xml.sax.saxutils import escape as _esc
         col_count = len(headers)
         page_width = landscape(letter)[0] - 0.8*inch  # Account for margins
-        col_width = page_width / col_count
+        font_size = 8 if col_count <= 8 else 7 if col_count <= 12 else 6
+        char_w = font_size * 0.55          # average Helvetica glyph width
+        pad = 10                           # left + right cell padding
+        # Per column: the width it needs to show its longest single word
+        # unbroken (dates, request numbers, "Manufacturer") and the width
+        # for its longest whole value on one line. Every column gets its
+        # minimum first; leftover page width goes to the longer ones.
+        mins, naturals = [], []
+        for i in range(col_count):
+            cells = [str(table_data[0][i])] + [str(r[i]) for r in table_data[1:51]]
+            longest_word = max((len(w) for c in cells for w in c.split()), default=4)
+            longest_value = max((len(c) for c in cells), default=4)
+            mins.append(min(max(longest_word, 4), 22) * char_w + pad)
+            naturals.append(min(max(longest_value, 4), 60) * char_w + pad)
+        if sum(naturals) <= page_width:
+            scale = page_width / sum(naturals)
+            col_widths = [n * scale for n in naturals]
+        elif sum(mins) >= page_width:
+            col_widths = [m * page_width / sum(mins) for m in mins]
+        else:
+            k = (page_width - sum(mins)) / (sum(naturals) - sum(mins))
+            col_widths = [m + (n - m) * k for m, n in zip(mins, naturals)]
+        head_style = ParagraphStyle('CellHead', parent=styles['Normal'],
+                                    fontName='Helvetica-Bold', fontSize=font_size,
+                                    leading=font_size + 2, textColor=colors.whitesmoke,
+                                    alignment=TA_CENTER, splitLongWords=1)
+        cell_style = ParagraphStyle('Cell', parent=styles['Normal'],
+                                    fontName='Helvetica', fontSize=font_size,
+                                    leading=font_size + 2,
+                                    textColor=colors.HexColor('#333333'),
+                                    alignment=TA_LEFT, splitLongWords=1)
+        table_data = [
+            [Paragraph(_esc(str(v)), head_style if r_i == 0 else cell_style) for v in row]
+            for r_i, row in enumerate(table_data)
+        ]
 
-        table = Table(table_data, colWidths=[col_width] * col_count)
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
         
         # Style the table
         table.setStyle(TableStyle([
@@ -1107,7 +1388,10 @@ def run_scheduled_reports(db_factory) -> int:
     return count
 
 
-def fire_report_ready(db: Session, defn: ReportDefinition, filename: str) -> None:
+def fire_report_ready(db: Session, defn: ReportDefinition, filename: str,
+                      organization_id: Optional[UUID] = None,
+                      department_id: Optional[UUID] = None,
+                      event_type: Optional[str] = None) -> None:
     """
     Notify defn.notification_event's recipients that a report just finished
     generating — opt-in per definition (no-ops if notification_event isn't
@@ -1131,7 +1415,10 @@ def fire_report_ready(db: Session, defn: ReportDefinition, filename: str) -> Non
     and what _enrich_context_from_source()'s report_log branch fills
     {{report.*}} variables from.
     """
-    if not defn.notification_event:
+    # event_type overrides the definition's own event (Run now uses the
+    # generic scheduled_report_ready for definitions that have none).
+    event = event_type or defn.notification_event
+    if not event:
         return
 
     from services.notification_service import NotificationService
@@ -1164,7 +1451,13 @@ def fire_report_ready(db: Session, defn: ReportDefinition, filename: str) -> Non
         "format":        log.output_format or "",
     }
 
-    if defn.organization_id:
+    # A department-scoped run (routers/reporting.py passes the runner's org +
+    # department) only contains that department's rows, so it's only sent to
+    # that org, with recipients limited to that department — not fanned out
+    # to every org's role holders as an org-wide scheduled report is.
+    if organization_id:
+        org_ids = [organization_id]
+    elif defn.organization_id:
         org_ids = [defn.organization_id]
     else:
         org_ids = [
@@ -1176,15 +1469,16 @@ def fire_report_ready(db: Session, defn: ReportDefinition, filename: str) -> Non
     for org_id in org_ids:
         try:
             nsvc.fire(
-                event_type=defn.notification_event,
+                event_type=event,
                 context=context,
                 organization_id=org_id,
                 source_type="report_log",
                 source_id=log.id,
                 recipient_roles_override=defn.recipient_roles or None,
+                department_id=department_id,
             )
         except Exception as exc:
-            print(f"[Reports] notification_event '{defn.notification_event}' fire "
+            print(f"[Reports] notification_event '{event}' fire "
                   f"failed for '{defn.name}' org={org_id}: {exc}")
 
 

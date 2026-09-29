@@ -5876,17 +5876,85 @@ def seed_report_definitions(session):
             "group_name": "KPI & Performance",
             "notification_event": None,
         },
+        # ── Notification Center topics as reports ────────────────────────────
+        # Seeded with no recipient_roles: nobody is emailed until an admin
+        # picks recipients in Reporting Center → edit.
+        {
+            "name": "Missed Schedules",
+            "description": "CM/PM schedules past their run date that were never executed",
+            "query_key": "missed_schedules_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Preventive Maintenance",
+            "notification_event": None,
+        },
+        {
+            "name": "Upcoming Due Tests",
+            "description": "Open tests due in the next 15 days",
+            "query_key": "upcoming_due_tests_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Testing Requests",
+            "notification_event": None,
+        },
+        {
+            "name": "Workflow Stage Delays",
+            "description": "Workflow stages running past their configured time limit",
+            "query_key": "workflow_stage_delays_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Stage Workflows",
+            "notification_event": None,
+        },
+        {
+            "name": "Test Kit Calibration Due",
+            "description": "Calibration status of kits/equipment with a calibration schedule",
+            "query_key": "kit_calibration_due_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Calibration",
+            "notification_event": None,
+        },
+        {
+            "name": "Deterioration Watch",
+            "description": "Parameters predicted to breach a threshold, and their review status",
+            "query_key": "deterioration_watch_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Condition Monitoring",
+            "notification_event": None,
+        },
+        {
+            "name": "Open Corrective Actions (CAR)",
+            "description": "Corrective Action Requests not yet closed",
+            "query_key": "open_car_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Condition Monitoring",
+            "notification_event": None,
+        },
     ]
 
     created = updated = 0
+    def _event_for(d, frequency):
+        # A scheduled report with no dedicated "<x>_report_ready" event falls
+        # back to the generic scheduled_report_ready one (its email template
+        # attaches the file and goes to the definition's recipient_roles).
+        # Without any event, fire_report_ready() skips notifying entirely, so
+        # e.g. Tester Performance was generated every month but never emailed.
+        return d.get("notification_event") or (
+            "scheduled_report_ready" if frequency and frequency != "on_demand" else None
+        )
+
     for d in DEFINITIONS:
         existing = session.query(ReportDefinition).filter_by(
             query_key=d["query_key"]
         ).first()
         if existing:
-            # Upsert: refresh group_name + notification_event on existing rows
+            # Upsert: refresh group_name + notification_event on existing rows.
+            # Uses the row's current frequency — an admin may have changed it.
             existing.group_name         = d.get("group_name")
-            existing.notification_event = d.get("notification_event")
+            existing.notification_event = _event_for(d, existing.frequency)
             existing.name               = d["name"]          # keep name current
             updated += 1
         else:
@@ -5898,7 +5966,7 @@ def seed_report_definitions(session):
                 output_format=d["output_format"],
                 frequency=d["frequency"],
                 group_name=d.get("group_name"),
-                notification_event=d.get("notification_event"),
+                notification_event=_event_for(d, d["frequency"]),
                 recipient_roles=[],
                 is_active=True,
                 is_system=True,
@@ -7339,6 +7407,176 @@ WHERE  tr.cts >= NOW() - (INTERVAL '1 month' * COALESCE(:months, 12))
 GROUP  BY DATE_TRUNC('month', tr.cts)
 ORDER  BY month DESC
 """),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Reports mirroring Notification Center topics — the same condition
+        # the matching notification fires on, as one list instead of alerts
+        # one at a time.
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="missed_schedules_report",
+            label="Missed Schedules",
+            group_name="Preventive Maintenance",
+            description="CM/PM schedules past their run date with no successful run since "
+                        "(Schedule Execution Missed / Overdue Escalation notifications).",
+            parameters_schema={"department_id": "uuid"},
+            sort_order=90,
+            org_alias="s",
+            sql_template="""
+SELECT
+    s.title                                        AS schedule,
+    e.ueic,
+    cm.name                                        AS equipment_type,
+    cd.name                                        AS test_type,
+    d.name                                         AS substation,
+    s.frequency,
+    s.next_run_date::date                          AS due_run_date,
+    (CURRENT_DATE - s.next_run_date::date)         AS days_missed,
+    CASE WHEN CURRENT_DATE - s.next_run_date::date >= 7
+         THEN 'Escalation (7+ days)' ELSE 'Missed' END AS alert_level,
+    s.last_run_date::date                          AS last_run_date
+FROM   (
+         -- Many schedules carry no department_id of their own, only their
+         -- equipment does — fall back to it so they show a substation and
+         -- are visible to that department's users (department scoping
+         -- filters on s.department_id).
+         SELECT sch.id, sch.organization_id, sch.equipment_id, sch.equipment_type_id,
+                sch.test_type_id, sch.title, sch.frequency, sch.next_run_date,
+                sch.last_run_date, sch.is_active, sch.is_deleted,
+                COALESCE(sch.department_id, eq.department_id) AS department_id
+         FROM   public.test_request_schedules sch
+         LEFT JOIN public.equipment eq ON eq.id = sch.equipment_id
+       ) s
+LEFT JOIN public.equipment         e  ON e.id  = s.equipment_id
+LEFT JOIN public."CategoryMaster"  cm ON cm.id = COALESCE(e.equipment_type_id, s.equipment_type_id)
+LEFT JOIN public."CategoryDetails" cd ON cd.id = s.test_type_id
+LEFT JOIN public.org_departments   d  ON d.id  = s.department_id
+WHERE  s.is_active
+  AND  NOT s.is_deleted
+  AND  s.next_run_date < CURRENT_DATE
+  AND  NOT EXISTS (
+         SELECT 1 FROM public.test_request_schedule_logs l
+         WHERE  l.schedule_id = s.id
+           AND  l.status = 'success'
+           AND  l.run_date >= s.next_run_date)
+  {org_clause}
+  AND  (:department_id IS NULL OR s.department_id = :department_id::uuid)
+ORDER  BY days_missed DESC, d.name, e.ueic
+"""),
+
+        dict(
+            key="upcoming_due_tests_report",
+            label="Upcoming Due Tests",
+            group_name="Testing Requests",
+            description="Open tests due within the next N days, default 15 "
+                        "(Due Reminder / Final Due Reminder notifications).",
+            parameters_schema={"days": "int", "department_id": "uuid"},
+            sort_order=95,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    tr.request_number,
+    COALESCE(NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
+             cd.name)                              AS title,
+    cd.name                                        AS test_type,
+    e.ueic,
+    cm.name                                        AS equipment_type,
+    d.name                                         AS substation,
+    tr.status::text                                AS status,
+    tr.priority,
+    tr.due_date::date                              AS due_date,
+    (tr.due_date::date - CURRENT_DATE)             AS days_until_due,
+    CASE WHEN tr.due_date::date - CURRENT_DATE <= 7
+         THEN 'Final reminder (7 days or less)'
+         ELSE 'Reminder (15 days or less)' END     AS reminder
+FROM   public.testing_requests tr
+LEFT JOIN public.equipment         e  ON e.id  = tr.equipment_id
+LEFT JOIN public."CategoryMaster"  cm ON cm.id = COALESCE(e.equipment_type_id, tr.equipment_type_id)
+LEFT JOIN public."CategoryDetails" cd ON cd.id = tr.test_type_id
+LEFT JOIN public.org_departments   d  ON d.id  = tr.department_id
+WHERE  tr.request_category = 'test'
+  AND  tr.due_date IS NOT NULL
+  AND  tr.due_date::date BETWEEN CURRENT_DATE AND CURRENT_DATE + COALESCE(:days, 15)
+  AND  tr.status::text NOT IN ('closed', 'completed', 'rejected', 'cancelled')
+  {org_clause}
+  AND  (:department_id IS NULL OR tr.department_id = :department_id::uuid)
+ORDER  BY tr.due_date, d.name
+"""),
+
+        dict(
+            key="open_car_report",
+            label="Open Corrective Actions (CAR)",
+            group_name="Condition Monitoring",
+            description="Corrective Action Requests not yet closed, with owner, age and due date "
+                        "(CAR Created / Assigned notifications).",
+            parameters_schema={"department_id": "uuid"},
+            sort_order=100,
+            org_alias="car",
+            sql_template="""
+SELECT
+    car.car_number,
+    car.severity,
+    car.status,
+    car.summary,
+    car.corrective_action,
+    e.ueic,
+    cm.name                                        AS equipment_type,
+    d.name                                         AS substation,
+    NULLIF(TRIM(CONCAT(u.firstname, ' ', u.lastname)), '') AS assigned_to,
+    car.created_at::date                           AS raised_on,
+    car.due_date::date                             AS due_date,
+    (CURRENT_DATE - car.created_at::date)          AS days_open,
+    CASE WHEN car.due_date IS NOT NULL AND car.due_date::date < CURRENT_DATE
+         THEN 'Yes' ELSE 'No' END                  AS overdue
+FROM   public.corrective_action_requests car
+LEFT JOIN public.equipment        e  ON e.id  = car.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+LEFT JOIN public.org_departments  d  ON d.id  = car.department_id
+LEFT JOIN public.users            u  ON u.id  = car.assigned_to
+WHERE  UPPER(COALESCE(car.status, '')) NOT IN ('CLOSED', 'CANCELLED')
+  {org_clause}
+  AND  (:department_id IS NULL OR car.department_id = :department_id::uuid)
+ORDER  BY (car.due_date IS NULL), car.due_date, car.created_at
+"""),
+
+        # Python-implemented (ReportingService registry) — listed here so they
+        # appear as Data Sources; sql_template is never executed for these.
+        dict(
+            key="workflow_stage_delays_report",
+            label="Workflow Stage Delays",
+            group_name="Stage Workflows",
+            description="Workflow stages running past their time limit — test-request, repair, "
+                        "calibration, overhaul, pre-commission, surveillance and annual-audit "
+                        "workflows (Stage SLA Breach / Stage Delayed notifications).",
+            parameters_schema={},
+            sort_order=105,
+            org_alias=None,
+            sql_template="-- implemented in ReportingService._q_workflow_stage_delays",
+        ),
+        dict(
+            key="kit_calibration_due_report",
+            label="Test Kit Calibration Due",
+            group_name="Calibration",
+            description="Calibration status of every kit/equipment with a calibration schedule — "
+                        "overdue and due-soon first (Kit Calibration Due / Overdue notifications).",
+            parameters_schema={},
+            sort_order=110,
+            org_alias=None,
+            sql_template="-- implemented in ReportingService._q_kit_calibration_due",
+        ),
+        dict(
+            key="deterioration_watch_report",
+            label="Deterioration Watch",
+            group_name="Condition Monitoring",
+            description="Equipment parameters predicted to breach a threshold, and whether each "
+                        "has been reviewed (Deterioration Watch Escalated / Overdue Review "
+                        "notifications).",
+            parameters_schema={},
+            sort_order=115,
+            org_alias=None,
+            sql_template="-- implemented in ReportingService._q_deterioration_watch",
+        ),
 
     ]  # end KEYS
 
@@ -11364,9 +11602,18 @@ def _seed_notification_templates(session) -> int:
         ("oltc_report_ready",           "OLTC/CB Operations Count Report",           ["AEE_MAINTENANCE"]),
         ("post_repair_report_ready",    "Post-Repair Transformer Evaluation Report", ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
     ]
+    # The generated file itself is attached (NotificationService reads it off
+    # disk from the ReportLog the event fires for). A {{download_url}} link
+    # can't work from an inbox: it's a relative path (email clients render it
+    # as "http:///reports/...") and the endpoint needs the app's bearer token.
+    # var_key is deliberately not a context variable, so its empty value
+    # falls through to "generate from source" rather than "fetch this URL".
+    _REPORT_FILE_ATTACHMENT = [
+        {"var_key": "report_attachment", "type": "excel", "source_type": "report_log"},
+    ]
     for _event_type, _label, _roles in _REPORT_READY_EVENTS:
         _tmpl(_event_type,
-            _e(
+            _ea(
                 f"[REPORT READY] {_label} — " "{{report_period}}",
                 f"<h3 style='color:#1E3C72'>{_label} Ready</h3>"
                 "<p>{{report_name}} for {{report_period}} has been generated.</p>"
@@ -11375,8 +11622,10 @@ def _seed_notification_templates(session) -> int:
                 "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Period</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_period}}</td></tr>"
                 "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Format</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{format}}</td></tr>"
                 "</table>"
-                "<p><a href='{{download_url}}'>Download the report</a> from SEACMS (login required).</p>",
+                "<p>The report is attached to this email. It is also available in "
+                "SEACMS under Reporting Center &rarr; Log.</p>",
                 _roles,
+                _REPORT_FILE_ATTACHMENT,
             ),
             _i(
                 f"{_label} ready — " "{{report_period}}",

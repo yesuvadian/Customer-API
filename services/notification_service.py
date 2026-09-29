@@ -536,6 +536,26 @@ def _generate_attachment_bytes(
     try:
         att_type = att_type.lower().strip()
 
+        if source_type == "report_log":
+            # Read the already-generated report file straight off disk rather
+            # than re-running the report query — guarantees the emailed file is
+            # byte-identical to what ReportingService.generate() produced, and
+            # works whichever format (PDF or Excel) the definition generated.
+            import os
+            from models import ReportLog
+            from services.reporting_service import REPORTS_DIR
+
+            log = db.query(ReportLog).filter(ReportLog.id == source_id).first()
+            if not log or not log.file_name:
+                logger.warning(f"[Notif] ReportLog {source_id} not found or has no file_name")
+                return None
+            path = os.path.join(REPORTS_DIR, log.file_name)
+            if not os.path.exists(path):
+                logger.warning(f"[Notif] Report file missing on disk: {path}")
+                return None
+            with open(path, "rb") as f:
+                return f.read()
+
         if att_type == "pdf":
             if source_type == "testing_request":
                 from services.testing_request_pdf_service import TestingRequestPDFService
@@ -562,26 +582,6 @@ def _generate_attachment_bytes(
                 return bio.getvalue() if bio else None
 
         elif att_type in ("excel", "xlsx"):
-            if source_type == "report_log":
-                # Read the already-generated file straight off disk rather than
-                # re-running the report query a second time — guarantees the
-                # emailed file is byte-identical to what ReportingService.generate()
-                # actually produced and logged, and avoids a redundant query.
-                import os
-                from models import ReportLog
-                from services.reporting_service import REPORTS_DIR
-
-                log = db.query(ReportLog).filter(ReportLog.id == source_id).first()
-                if not log or not log.file_name:
-                    logger.warning(f"[Notif] ReportLog {source_id} not found or has no file_name")
-                    return None
-                path = os.path.join(REPORTS_DIR, log.file_name)
-                if not os.path.exists(path):
-                    logger.warning(f"[Notif] Report file missing on disk: {path}")
-                    return None
-                with open(path, "rb") as f:
-                    return f.read()
-
             # Any other source: Excel generation requires a ReportDefinition —
             # not wired for non-report notification attachments. Return None so
             # the email is sent without the Excel file rather than blocking delivery.
@@ -1586,6 +1586,18 @@ class EmailDispatcher(ChannelDispatcher):
                 src_label = (log.source_type or "report").replace("_", "-")
                 src_short = str(log.source_id)[:8] if log.source_id else "report"
                 filename  = f"{src_label}-{src_short}.{ext}"
+                if _src_type == "report_log":
+                    # Keep the generated file's real name, and its real type —
+                    # the template's attachment type can't know whether this
+                    # particular definition produced PDF or Excel.
+                    from models import ReportLog as _RL
+                    _rl = db.query(_RL).filter(_RL.id == _src_uuid).first()
+                    if _rl and _rl.file_name:
+                        filename  = _rl.file_name
+                        mime_type = self._MIME_MAP.get(
+                            "pdf" if _rl.file_name.lower().endswith(".pdf") else "xlsx",
+                            mime_type,
+                        )
             else:
                 logger.debug(f"[Notif] Skipping attachment with no url/type: {entry}")
                 continue
