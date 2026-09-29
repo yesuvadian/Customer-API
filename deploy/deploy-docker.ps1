@@ -95,25 +95,35 @@ if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
 Pop-Location
 
 # ---------------------------------
-# Archive both repos
+# Archive both repos — written directly to a system temp staging dir, NOT
+# to $PSScriptRoot (deploy/), since deploy/ lives INSIDE $ApiRepoRoot.
+# Creating the archive there and moving it afterward meant a leftover
+# archive from any prior interrupted run (Ctrl-C, closed terminal, etc.)
+# sat inside the very tree being archived — tar's `*` glob would pick it
+# up and refuse ("Can't add archive to itself"), and the archive step had
+# no exit-code check, so that failure was silently swallowed and a
+# broken/empty archive got shipped to production instead of stopping.
 # ---------------------------------
+$StagingDir = Join-Path $env:TEMP "customer-docker-deploy"
+New-Item -ItemType Directory -Force -Path $StagingDir | Out-Null
+$ApiArchivePath = Join-Path $StagingDir $ApiArchive
+$UiArchivePath  = Join-Path $StagingDir $UiArchive
+Remove-Item -Force $ApiArchivePath, $UiArchivePath -ErrorAction SilentlyContinue
+
 Write-Host "Archiving API repo..."
 Push-Location $ApiRepoRoot
 tar --exclude="venv" --exclude="__pycache__" --exclude=".git" --exclude=".github" `
-    --exclude=".vscode" --exclude="uploads" -czf $ApiArchive *
-Move-Item -Force $ApiArchive (Join-Path $PSScriptRoot $ApiArchive)
+    --exclude=".vscode" --exclude="uploads" -czf $ApiArchivePath *
+if ($LASTEXITCODE -ne 0) { Write-Host "Archiving API repo failed."; Pop-Location; exit 1 }
 Pop-Location
 
 Write-Host "Archiving UI repo..."
 Push-Location $UiRepoRoot
 tar --exclude=".git" --exclude="build" --exclude=".dart_tool" --exclude=".claude" `
     --exclude=".codex_work" --exclude="artifacts" --exclude="outputs" --exclude="test_driver" `
-    -czf $UiArchive *
-Move-Item -Force $UiArchive (Join-Path $PSScriptRoot $UiArchive)
+    -czf $UiArchivePath *
+if ($LASTEXITCODE -ne 0) { Write-Host "Archiving UI repo failed."; Pop-Location; exit 1 }
 Pop-Location
-
-$ApiArchivePath = Join-Path $PSScriptRoot $ApiArchive
-$UiArchivePath  = Join-Path $PSScriptRoot $UiArchive
 
 function Deploy-ToServer {
     param($TargetServer)
