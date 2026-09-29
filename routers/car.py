@@ -53,6 +53,12 @@ def _user_display_name(user: Optional[User]) -> Optional[str]:
 def _serialize_summary(car: CorrectiveActionRequest, db: Session) -> dict:
     equipment = db.query(Equipment).filter(Equipment.id == car.equipment_id).first() if car.equipment_id else None
     link_count = db.query(CarTestRequest).filter(CarTestRequest.car_id == car.id).count()
+    # for the CAR list's "group by" chips: the test that raised it, its department
+    trig = car_service.trigger_request(db, car)
+    dept_name = (
+        db.query(OrgDepartment.name).filter(OrgDepartment.id == car.department_id).scalar()
+        if car.department_id else None
+    )
     return {
         "id": str(car.id),
         "car_number": car.car_number,
@@ -66,6 +72,9 @@ def _serialize_summary(car: CorrectiveActionRequest, db: Session) -> dict:
         "test_request_count": link_count,
         "created_at": car.created_at.isoformat() if car.created_at else None,
         "closed_at": car.closed_at.isoformat() if car.closed_at else None,
+        "test_type_name": getattr(getattr(trig, "test_type", None), "name", None) if trig else None,
+        "department_id": str(car.department_id) if car.department_id else None,
+        "department_name": dept_name,
     }
 
 
@@ -341,6 +350,13 @@ def get_car(car_id: UUID, db: Session = Depends(get_db), current_user=Depends(ge
     data["test_requests"] = [_serialize_link(link, db, expecting) for link in links]
     data["active_test_request_count"] = sum(1 for t in data["test_requests"] if t["is_active"])
     data.update(_drive_state(db, car))
+    # the findings behind the summary, as tables (one per evaluated table)
+    source = db.query(TestResult).filter(TestResult.id == car.source_test_result_id).first()         if car.source_test_result_id else None
+    data["summary_tables"] = car_service.summary_tables(source.evaluation_result if source else None)
+    source_tr = source.testing_request if source is not None else None
+    data["summary_test_name"] = (
+        getattr(getattr(source_tr, "test_type", None), "name", None) or getattr(source_tr, "title", None)
+    ) if source_tr is not None else None
     # How it was closed: a passing retest, or an approved equipment replacement
     # (close_cars_for_replacement keeps the reason as "REPLACEMENT: ...")
     if car.status == CarStatus.CLOSED:
