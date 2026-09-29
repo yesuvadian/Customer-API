@@ -34,6 +34,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
+from services.analytics_engine import accepted_test_result_ids
 
 from database import get_vendor_db
 from auth_utils import get_current_user
@@ -211,6 +212,7 @@ def get_test_types(
         ).filter(
             TestAnalytics.template_key.in_(template_keys),
             TestAnalytics.tested_at.isnot(None),
+            TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
         )
         if org_id:
             year_bounds_q = year_bounds_q.filter(TestAnalytics.organization_id == org_id)
@@ -268,6 +270,7 @@ def get_dashboard(
             TestAnalytics.equipment_id.in_(eq_ids),
             TestAnalytics.template_key.in_(template_keys),
             TestAnalytics.tested_at.isnot(None),
+            TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
         )
         if org_id:
             ta_q = ta_q.filter(TestAnalytics.organization_id == org_id)
@@ -601,6 +604,7 @@ def get_equipment_for_slice(
             TestAnalytics.equipment_id.in_(list(eq_map.keys())),
             TestAnalytics.template_key == template_key,
             func.extract("year", TestAnalytics.tested_at) == year,
+            TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
         )
         .all()
     )
@@ -662,6 +666,7 @@ def get_equipment_tests_for_slice(
     q = db.query(TestAnalytics).filter(
         TestAnalytics.equipment_id == equipment_id,
         TestAnalytics.template_key == template_key,
+        TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
     )
     if year:
         q = q.filter(func.extract("year", TestAnalytics.tested_at) == year)

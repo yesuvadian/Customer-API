@@ -668,6 +668,36 @@ class WorkflowRoutingService:
                 },
             )
 
+        # ── Equipment health refresh on every terminal transition ─────────
+        # Equipment health only counts results whose workflow ended accepted
+        # (analytics_engine.accepted_test_result_ids), so the score must be
+        # recomputed whenever a workflow ends - not only when the org happened
+        # to configure a trigger_analytics / recommendation_finalize
+        # post_action on that transition. Seeded configs have terminal
+        # `complete` / `accept` transitions with no post_action, and no
+        # cancel/reject transition has one, so without this an approved test
+        # never reached the score and a cancelled one never left it until the
+        # next full recompute. TestAnalytics already exists from submission
+        # (TestingService.create_structured_result), so re-aggregating the
+        # equipment is enough. Savepoint so an analytics failure can't break
+        # the transition itself.
+        _analytics_post_actions = {"trigger_analytics", "recommendation_finalize"}
+        if (
+            is_terminal
+            and testing_request.equipment_id
+            and transition.post_action not in _analytics_post_actions
+        ):
+            try:
+                from services.analytics_engine import AnalyticsEngine
+                self.db.flush()
+                with self.db.begin_nested():
+                    AnalyticsEngine(self.db).run_for_equipment(testing_request.equipment_id)
+            except Exception as _analytics_err:
+                log.warning(
+                    "Terminal-transition analytics refresh failed for request %s: %s",
+                    testing_request.id, _analytics_err,
+                )
+
         # ── Notification ───────────────────────────────────────────────────
         # Fire the appropriate notification for every stage transition.
         # Rejection → request_rejected (has templates, notifies originator).
@@ -756,9 +786,26 @@ class WorkflowRoutingService:
                         log.warning("Dispatch after terminal action failed (non-fatal): %s", _de)
                         testing_request.status = _TRS.closed
                         testing_request.completed_at = _dt.now(_tz.utc)
+                elif testing_request.status in (
+                    _TRS.finance_pending, _TRS.outcome_active, _TRS.procurement_initiated, _TRS.commissioned,
+                ):
+                    # This transition's post_action (recommendation_finalize)
+                    # already dispatched and set the outcome - e.g. Procurement
+                    # -> finance_pending while Finance decides. Don't overwrite it.
+                    pass
                 else:
                     testing_request.status = _TRS.closed
                     testing_request.completed_at = _dt.now(_tz.utc)
+
+            # A request just finished: its CARs may now be closable (a CAR
+            # closes only when every linked request is finished) or have
+            # retests to raise (e.g. corrective work done). Runs after the
+            # caller commits this transition, in its own session.
+            try:
+                from services.car_service import schedule_recheck_after_commit
+                schedule_recheck_after_commit(self.db, testing_request.id)
+            except Exception as _car_err:
+                log.warning("CAR re-check scheduling failed (non-fatal): %s", _car_err)
 
         return instance
 

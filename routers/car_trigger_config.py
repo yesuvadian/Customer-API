@@ -153,7 +153,10 @@ class CarTriggerConfigCreate(BaseModel):
     severity: str  # ALERT | CRITICAL
     car_trigger: bool = True
     display_order: int = 0
-    org_specific: bool = False  # False = global default row (organization_id NULL)
+    # None (the screen's default) = this user's organization when they have
+    # one, so one org's admin can't change CAR behaviour for every org;
+    # False = explicit global default row (organization_id NULL).
+    org_specific: Optional[bool] = None
     followups: list[FollowupInput] = []
 
 
@@ -166,7 +169,7 @@ def create_config(
     if body.severity not in ("ALERT", "CRITICAL"):
         raise HTTPException(status_code=400, detail="severity must be ALERT or CRITICAL")
 
-    org_id = _org_id(current_user) if body.org_specific else None
+    org_id = _org_id(current_user) if body.org_specific is not False else None
     existing = db.query(CarTriggerConfig).filter(
         CarTriggerConfig.organization_id == org_id,
         CarTriggerConfig.equipment_type_id == body.equipment_type_id,
@@ -209,6 +212,48 @@ class CarTriggerConfigUpdate(BaseModel):
     followups: Optional[list[FollowupInput]] = None
 
 
+def _own_row(db: Session, config: CarTriggerConfig, current_user) -> CarTriggerConfig:
+    """The row this user's changes should land on. A global row (NULL
+    organization_id) edited by a user who belongs to an organization is
+    never changed in place - that would change it for every org - but
+    copied into an org override (same equipment type / test type /
+    severity, same follow-ups) the first time, and that override edited
+    from then on. _find_trigger_config() already prefers the org row."""
+    org_id = _org_id(current_user)
+    if config.organization_id is not None or not org_id:
+        return config
+    override = db.query(CarTriggerConfig).filter(
+        CarTriggerConfig.organization_id == org_id,
+        CarTriggerConfig.equipment_type_id == config.equipment_type_id,
+        CarTriggerConfig.test_type_id == config.test_type_id,
+        CarTriggerConfig.severity == config.severity,
+    ).first()
+    if override:
+        return override
+    override = CarTriggerConfig(
+        organization_id=org_id,
+        equipment_type_id=config.equipment_type_id,
+        test_type_id=config.test_type_id,
+        severity=config.severity,
+        car_trigger=config.car_trigger,
+        is_active=config.is_active,
+        display_order=config.display_order,
+        created_by=_user_id(current_user),
+    )
+    db.add(override)
+    db.flush()
+    for f in config.followups:
+        db.add(CarTriggerFollowup(
+            car_trigger_config_id=override.id,
+            follow_up_test_type_id=f.follow_up_test_type_id,
+            display_order=f.display_order,
+            due_in_days=f.due_in_days,
+            is_active=f.is_active,
+        ))
+    db.flush()
+    return override
+
+
 @router.put("/{config_id}", summary="Update a CAR trigger config rule (and optionally replace its follow-ups)")
 def update_config(
     config_id: UUID,
@@ -219,6 +264,7 @@ def update_config(
     config = db.query(CarTriggerConfig).filter(CarTriggerConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="CAR trigger config not found")
+    config = _own_row(db, config, current_user)  # a global row -> this org's override
 
     if body.car_trigger is not None:
         config.car_trigger = body.car_trigger
@@ -248,6 +294,7 @@ def deactivate_config(config_id: UUID, db: Session = Depends(get_db), current_us
     config = db.query(CarTriggerConfig).filter(CarTriggerConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="CAR trigger config not found")
+    config = _own_row(db, config, current_user)  # deactivate for this org only
     config.is_active = False
     db.commit()
     return {"id": str(config.id), "is_active": False}

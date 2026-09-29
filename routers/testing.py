@@ -481,12 +481,13 @@ def submit_test_results(
         if _completed < _tr_check.total_sessions_planned:
             rec_type = None   # intermediate session — skip recommendation
 
-    # ── Procurement validation ────────────────────────────────────────────────
-    if rec_type and next_action == "replacement" and not repl_prods:
-        raise HTTPException(
-            status_code=400,
-            detail="At least one replacement product is required when next_action is 'replacement' (Procurement).",
-        )
+    # ── Procurement: replacement products are optional ────────────────────────
+    # The recommendation form's product picker was removed with Zoho
+    # (frontend commit 9248869), so products can't be entered there any more;
+    # requiring them made Procurement impossible to submit. The procurement
+    # request is created without line items (workflow_dispatch_service.
+    # _create_procurement uses `replacement_products or []`) and Finance /
+    # Procurement adds the items.
 
     # ── Create / update Recommendation record ─────────────────────────────────
     rec = None

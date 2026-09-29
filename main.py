@@ -1601,6 +1601,50 @@ scheduler.add_job(
 )
 
 
+# ── Idle-CAR check (daily 20:30 UTC = 02:00 IST) ─────────────────────────────
+# A CAR is only moved by TR results. If the one request still expecting a
+# result for it is rejected / cancelled in its own workflow, it closes with
+# no result and the result hook never runs for that CAR again - it would sit
+# OPEN/REOPENED with nothing driving it. This links any in-flight request of
+# the same equipment/test, or raises one retest of the trigger test type
+# (services/car_service.heal_idle_cars - same logic as the live hook and as
+# alter_raise_retests_for_idle_cars.py). Daily and off-hours rather than at
+# startup, so a CAR raised in error can be voided first.
+def _check_idle_cars():
+    db = BackgroundSessionLocal()
+    try:
+        from services.car_service import car_lock, heal_idle_cars
+        # Every uvicorn worker (WEB_CONCURRENCY) runs its own scheduler, so
+        # this fires once per worker at the same moment - only the worker
+        # that gets the lock runs it; the others would race it into
+        # duplicate retests.
+        with car_lock(db, "car_idle_check_job", wait=False) as got:
+            if not got:
+                logger.info("[CAR idle check] another worker is running it - skipped")
+                return
+            report = heal_idle_cars(db, apply=True)
+        acted = [r for r in report if r["action"] in ("link", "retest", "close", "attention", "failed")]
+        for r in acted:
+            logger.info(f"[CAR idle check] {r['car_number']}: {r['action']} {r['detail']}")
+        if not acted:
+            logger.info(f"[CAR idle check] {len(report)} open CAR(s), none idle")
+    except Exception as e:
+        logger.error(f"[CAR idle check] job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_idle_cars,
+    trigger="cron",
+    hour=20,
+    minute=30,
+    id="car_idle_check_job",
+    max_instances=1,
+    coalesce=True,
+)
+
+
 # Scheduled report generation (runs every hour, service decides which are due)
 def _run_scheduled_reports():
     from services.reporting_service import run_scheduled_reports
@@ -2060,11 +2104,22 @@ async def startup_event():
     anyio.to_thread.current_default_thread_limiter().total_tokens = thread_pool_size
     logger.info(f"[Startup] Thread pool limiter set to {thread_pool_size} (THREAD_POOL_SIZE)")
 
-    scheduler.start()
-    logger.info(
-        "[Scheduler] APScheduler started — "
-        "daily test request job scheduled at 00:00 UTC"
-    )
+    # scheduler.start() runs on every process startup — fine for a single
+    # instance, but if this container is ever scaled to multiple replicas
+    # (Docker/Kubernetes horizontal scaling), each replica would run its own
+    # copy of every cron/interval job (notification dispatch, daily overdue
+    # checks, etc.), causing duplicate emails and duplicate report runs.
+    # ENABLE_SCHEDULER lets a deployment designate exactly one replica to
+    # run the scheduler; every other replica still serves HTTP normally.
+    # Default "true" preserves today's single-instance behavior unchanged.
+    if os.getenv("ENABLE_SCHEDULER", "true").lower() in ("1", "true", "yes"):
+        scheduler.start()
+        logger.info(
+            "[Scheduler] APScheduler started — "
+            "daily test request job scheduled at 00:00 UTC"
+        )
+    else:
+        logger.info("[Scheduler] APScheduler disabled on this instance (ENABLE_SCHEDULER=false)")
     # Register workflow lifecycle hooks (import = self-registration side-effect)
     import calibration_hooks  # noqa: F401
     import overhaul_hooks  # noqa: F401

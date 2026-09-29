@@ -305,12 +305,23 @@ class TestingRequestService:
             return value.date()
         return value
 
-    def create_request(self, data: dict, originator_id: UUID) -> TestingRequest:
+    def create_request(
+        self,
+        data: dict,
+        originator_id: UUID,
+        duplicate_check_ignore_ids: Optional[set] = None,
+    ) -> TestingRequest:
+        """duplicate_check_ignore_ids: requests the same-period duplicate
+        guard below must not count. services/car_service.py passes the
+        request whose result is raising the follow-up / retest: at that
+        moment it is still active (its result is in review), so without
+        this every CAR retest of the same test type was refused with 409
+        by the very request it follows up."""
         test_type_id = data.get("test_type_id")
 
         equipment_id = data.get("equipment_id")
         if equipment_id and test_type_id and not data.get("is_schedule_template"):
-            candidates = (
+            candidates_q = (
                 self.db.query(TestingRequest)
                 .filter(
                     TestingRequest.equipment_id == equipment_id,
@@ -318,8 +329,10 @@ class TestingRequestService:
                     TestingRequest.is_schedule_template.is_(False),
                     ~TestingRequest.status.in_(self._DUPLICATE_CHECK_TERMINAL_STATUSES),
                 )
-                .all()
             )
+            if duplicate_check_ignore_ids:
+                candidates_q = candidates_q.filter(~TestingRequest.id.in_(list(duplicate_check_ignore_ids)))
+            candidates = candidates_q.all()
             if candidates:
                 # "Same scheduling period" — not "ever coexisting": a request
                 # due next quarter is a different cadence cycle from one due
@@ -499,6 +512,7 @@ class TestingRequestService:
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
         include_direct_submissions: bool = False,
+        include_scored: bool = False,
     ):
         query = (
             self.db.query(TestingRequest)
@@ -590,16 +604,29 @@ class TestingRequestService:
                     query = query.filter(_status_conditions(statuses))
         if is_closed is not None:
             from services.dashboard_service import CLOSED_STATUSES as _LEGACY_CLOSED_STATUSES
+            # "cancelled" included to match the per-row is_closed flag
+            # (routers/testing_requests.py _enrich), which already treats a
+            # cancelled workflow instance as closed.
             wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
-                TrWfInstance.status.in_(["completed", "terminated"])
+                TrWfInstance.status.in_(["completed", "terminated", "cancelled"])
             ).scalar_subquery()
             if is_closed:
-                query = query.filter(
-                    or_(
-                        TestingRequest.status.in_(_LEGACY_CLOSED_STATUSES),
-                        TestingRequest.id.in_(wf_done_ids),
-                    )
-                )
+                closed_conds = [
+                    TestingRequest.status.in_(_LEGACY_CLOSED_STATUSES),
+                    TestingRequest.id.in_(wf_done_ids),
+                ]
+                if include_scored:
+                    # Also every request with a result that feeds equipment
+                    # health (e.g. legacy finance_pending after technical
+                    # approval). Used by the per-equipment Test Results
+                    # dialog so it can never be empty next to a real score,
+                    # whatever accepted_test_result_ids() evolves into.
+                    from services.analytics_engine import accepted_test_result_ids
+                    closed_conds.append(TestingRequest.id.in_(
+                        self.db.query(TestResult.testing_request_id)
+                        .filter(TestResult.id.in_(accepted_test_result_ids(self.db)))
+                    ))
+                query = query.filter(or_(*closed_conds))
             else:
                 query = query.filter(
                     TestingRequest.status.notin_(_LEGACY_CLOSED_STATUSES),
@@ -641,14 +668,24 @@ class TestingRequestService:
 
         if date_from or date_to:
 
-            # All tab -> use tested_at
-            if is_closed is None:
+            # All / Closed -> use when the test was actually performed
+            # (TestResult.tested_at, coalesced with cts for legacy rows with
+            # no tested_at — same rule as routers/analytics.py
+            # _apply_tested_at_filter, so the Analytics Dashboard's scores and
+            # its per-equipment Test Results dialog agree for one date range).
+            # Closed used to fall through to TestingRequest.cts below, which
+            # is when the request ROW was created: bulk-imported historical
+            # tests (created 2026, tested 1997-2025) all fell outside any
+            # realistic range and the dialog showed "No test results found"
+            # next to a health score computed from exactly those tests.
+            if is_closed is not False:
 
+                tested_on = func.coalesce(TestResult.tested_at, TestResult.cts)
                 subquery = self.db.query(TestResult.testing_request_id)
 
                 if date_from:
                     subquery = subquery.filter(
-                        TestResult.tested_at >= datetime.combine(
+                        tested_on >= datetime.combine(
                             date_from,
                             datetime.min.time(),
                         )
@@ -656,7 +693,7 @@ class TestingRequestService:
 
                 if date_to:
                     subquery = subquery.filter(
-                        TestResult.tested_at <
+                        tested_on <
                         datetime.combine(
                             date_to + timedelta(days=1),
                             datetime.min.time(),
@@ -667,7 +704,7 @@ class TestingRequestService:
                     TestingRequest.id.in_(subquery.subquery())
                 )
 
-            # Open / Assigned / Overdue -> use CTS
+            # Open (not yet tested) -> use CTS
             else:
 
                 if date_from:
@@ -798,6 +835,7 @@ class TestingRequestService:
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
         include_direct_submissions: bool = False,
+        include_scored: bool = False,
     ) -> List[TestingRequest]:
         query = self._base_request_query(
             status_filter=status_filter,
@@ -820,6 +858,7 @@ class TestingRequestService:
             failure_year=failure_year,
             capacity_mva=capacity_mva,
             include_direct_submissions=include_direct_submissions,
+            include_scored=include_scored,
         )
         return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
 
@@ -845,6 +884,7 @@ class TestingRequestService:
         failure_year: Optional[str] = None,
         capacity_mva: Optional[str] = None,
         include_direct_submissions: bool = False,
+        include_scored: bool = False,
         **_ignored,
     ) -> int:
         query = self._base_request_query(
@@ -868,6 +908,7 @@ class TestingRequestService:
             failure_year=failure_year,
             capacity_mva=capacity_mva,
             include_direct_submissions=include_direct_submissions,
+            include_scored=include_scored,
         )
         return query.with_entities(func.count(TestingRequest.id)).scalar() or 0
 

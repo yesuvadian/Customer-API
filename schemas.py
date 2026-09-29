@@ -1144,6 +1144,11 @@ class TestingRequestResponse(BaseModel):
     # Request category
     request_category: Optional[str] = "test"
 
+    # Lineage (design doc section 3): ORIGINAL | FOLLOW_UP | RETEST, and the
+    # request this one was raised from
+    test_request_type: Optional[str] = "ORIGINAL"
+    parent_request_id: Optional[UUID] = None
+
     # New department-based location
     organization_id: Optional[UUID] = None
     department_id: Optional[UUID] = None

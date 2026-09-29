@@ -422,10 +422,33 @@ class TestingService:
                         if _last_s:
                             _term_code = _last_s.status_code
                     if _term_code:
+                        _from_stage_id = instance.current_stage_id
+                        _from_code = instance.current_status_code
                         request.current_status_code = _term_code
                         instance.current_status_code = _term_code
                         instance.current_stage_id = None
                         instance.status = "completed"
+                        # Record how the workflow ended, like every routed
+                        # terminal transition does. Without this row the
+                        # workflow's "last action" is whatever came before
+                        # (possibly an earlier send-back reject), and
+                        # analytics_engine.accepted_test_result_ids() - which
+                        # trusts the last audit action - could drop this
+                        # accepted result from the health score.
+                        from models import TrWfAuditLog as _TrWfAuditLog
+                        self.db.add(_TrWfAuditLog(
+                            wf_instance_id=instance.id,
+                            testing_request_id=request.id,
+                            from_stage_id=_from_stage_id,
+                            to_stage_id=None,
+                            action_code=complete_t.action_code,
+                            performed_by=tester_id,
+                            from_status_code=_from_code,
+                            to_status_code=_term_code,
+                            comment="Auto-closed on result submission (all remaining transitions terminal)",
+                            is_send_back=False,
+                            is_terminal=True,
+                        ))
                     # Auto-approve the recommendation and dispatch
                     self.db.flush()
                     rec_obj.approval_status = "approved"
@@ -678,6 +701,7 @@ class TestingService:
         test_session_id: Optional[UUID] = None,
         testing_kit_id: Optional[UUID] = None,
         finalize: bool = True,
+        run_car_hook: bool = True,
     ) -> TestResult:
         """Create a structured test result with JSONB data."""
         from test_templates import get_template_by_key
@@ -799,6 +823,7 @@ class TestingService:
             self.db.refresh(result)
             return result
 
+        _car_pending = None  # (overall, evaluation) - acted on after the result is committed
         try:
             from services.evaluation_service import EvaluationService
             ev = EvaluationService.run(template_key, test_data, self.db, org_id=request.organization_id)
@@ -860,34 +885,12 @@ class TestingService:
             except Exception as _cs_err:
                 logger.warning(f"Cross-session comparison failed: {_cs_err}")
 
-            # ── CAR auto-creation hook (fire-and-forget; never block save) ────
-            # CRITICAL (after any cross-session escalation above) auto-creates
-            # or links a Corrective Action Request — never a manual user
-            # action. A clean PASS/NORMAL result checks whether it closes out
-            # an open CAR in this same equipment/test lineage (e.g. a retest
-            # that finally passes).
-            try:
-                from services.car_service import close_car_if_verified, process_evaluation_for_car
-                _car_overall = ev.get("overall", "NORMAL")
-                if _car_overall == "CRITICAL":
-                    process_evaluation_for_car(
-                        self.db,
-                        test_result=result,
-                        testing_request=request,
-                        evaluation_overall=_car_overall,
-                        summary=EvaluationService.build_remedial_summary(
-                            ev, request_title=getattr(request, "title", "") or ""
-                        ),
-                        created_by=tester_id,
-                    )
-                elif _car_overall == "NORMAL":
-                    close_car_if_verified(
-                        self.db,
-                        testing_request=request,
-                        evaluation_overall=_car_overall,
-                    )
-            except Exception as _car_err:
-                logger.warning(f"CAR auto-creation hook failed: {_car_err}")
+            # CAR hook input, captured here and run after the commit below
+            # (see "CAR auto-creation hook" there). run_car_hook=False
+            # (historical data import): past results must not raise live
+            # CARs, retests or notifications.
+            if run_car_hook:
+                _car_pending = (ev.get("overall", "NORMAL"), ev)
 
             # ── Notification hooks (fire-and-forget; never block save) ────────
             try:
@@ -961,6 +964,42 @@ class TestingService:
 
         self.db.commit()
         self.db.refresh(result)
+
+        # ── CAR auto-creation hook (fire-and-forget; never blocks save) ──────
+        # Runs only after the result is committed: car_service commits and
+        # rolls back the session itself (CAR, links, follow-up TRs), so running
+        # it mid-save could commit the result half-built or, on a CAR error,
+        # leave the session failed and make the tester's submission fail.
+        # ALERT / CRITICAL (after cross-session escalation) goes to
+        # process_evaluation_for_car, which decides from CarTriggerConfig
+        # whether to create or link a CAR - never a manual user action. A
+        # NORMAL result checks whether it closes an open CAR in the same
+        # equipment/test lineage (e.g. a retest that finally passes).
+        if _car_pending:
+            _car_overall, _car_ev = _car_pending
+            try:
+                from services.car_service import build_car_summary, close_car_if_verified, process_evaluation_for_car
+                if _car_overall in ("ALERT", "CRITICAL"):
+                    process_evaluation_for_car(
+                        self.db,
+                        test_result=result,
+                        testing_request=request,
+                        evaluation_overall=_car_overall,
+                        summary=build_car_summary(
+                            _car_ev, _car_overall, request_title=getattr(request, "title", "") or ""
+                        ),
+                        created_by=tester_id,
+                    )
+                elif _car_overall == "NORMAL":
+                    close_car_if_verified(
+                        self.db,
+                        testing_request=request,
+                        evaluation_overall=_car_overall,
+                    )
+            except Exception as _car_err:
+                self.db.rollback()  # the result is already committed - only CAR work is lost
+                logger.warning(f"CAR auto-creation hook failed: {_car_err}")
+            self.db.refresh(result)
 
         # ── Calibration DATE_ADD evaluation (fire-and-forget; never blocks save) ─
         # Fires for any template whose rules list contains a DATE_ADD rule.
