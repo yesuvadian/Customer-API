@@ -38,6 +38,7 @@ import logging
 import re
 import uuid
 from contextlib import contextmanager
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -129,6 +130,10 @@ def equipment_lock_key(equipment_id, fallback_id) -> str:
     return f"car-equipment:{equipment_id}" if equipment_id else f"car-item:{fallback_id}"
 
 
+# What _find_trigger_config returns for a rule an org switched off.
+_RULE_SWITCHED_OFF = SimpleNamespace(id=None, car_trigger=False, followups=[], is_active=False)
+
+
 def _find_trigger_config(
     db: Session,
     *,
@@ -150,7 +155,6 @@ def _find_trigger_config(
         .filter(
             CarTriggerConfig.equipment_type_id == equipment_type_id,
             CarTriggerConfig.severity == severity,
-            CarTriggerConfig.is_active.is_(True),
         )
     )
 
@@ -160,8 +164,17 @@ def _find_trigger_config(
                 CarTriggerConfig.organization_id == org_filter,
                 CarTriggerConfig.test_type_id == tt_filter,
             ).first()
-            if row:
+            if row is None:
+                continue
+            if row.is_active:
                 return row
+            if org_filter is not None:
+                # This org switched the rule off (its own rule, or its
+                # override of a global one - CAR Trigger Config's deactivate):
+                # no CAR and no follow-ups here, rather than falling through
+                # to the global rule / ALERT+CRITICAL default.
+                return _RULE_SWITCHED_OFF
+            # an inactive GLOBAL row just isn't a rule - keep looking
     return None
 
 
@@ -314,12 +327,17 @@ def _car_number(db: Session) -> str:
     db.execute(text("SELECT pg_advisory_xact_lock(hashtext('corrective_action_requests.car_number'))"))
     year = datetime.now(timezone.utc).year
     prefix = f"CAR-{year}-"
-    count = (
-        db.query(CorrectiveActionRequest)
-        .filter(CorrectiveActionRequest.car_number.like(f"{prefix}%"))
-        .count()
-    )
-    return f"{prefix}{count + 1:04d}"
+    # Highest number used this year + 1 - not count + 1, which collides with
+    # an existing number (and silently stops CARs being raised) as soon as
+    # any CAR row is ever deleted.
+    highest = 0
+    for (number,) in db.query(CorrectiveActionRequest.car_number).filter(
+        CorrectiveActionRequest.car_number.like(f"{prefix}%")
+    ):
+        tail = number[len(prefix):]
+        if tail.isdigit():
+            highest = max(highest, int(tail))
+    return f"{prefix}{highest + 1:04d}"
 
 
 def _lineage_test_request_ids(db: Session, testing_request: TestingRequest) -> list[uuid.UUID]:
@@ -344,6 +362,10 @@ def _lineage_test_request_ids(db: Session, testing_request: TestingRequest) -> l
                 TestingRequest.equipment_id == testing_request.equipment_id,
                 TestingRequest.test_type_id == testing_request.test_type_id,
                 TestingRequest.id != testing_request.id,
+                # System-raised only - a manually raised TR of the same
+                # equipment+type is its own independent request, not this
+                # TR's lineage, even if nobody's submitted it yet.
+                TestingRequest.test_request_type != "ORIGINAL",
             )
             .all()
         )
@@ -496,7 +518,12 @@ def unlinked_inflight_requests(db: Session, *, car: CorrectiveActionRequest, tes
         return []
     return (
         db.query(TestingRequest)
-        .filter(TestingRequest.id.in_(lineage), ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)))
+        .filter(
+            TestingRequest.id.in_(lineage),
+            ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)),
+            TestingRequest.status != TestingRequestStatus.draft,  # not in flight - never link a draft
+            TestingRequest.is_schedule_template.isnot(True),
+        )
         .all()
     )
 
@@ -542,7 +569,14 @@ def expecting_result_ids(db: Session, tr_ids) -> set:
         return set()
     rows = (
         db.query(TestingRequest.id, TestingRequest.is_multi_session, TestingRequest.total_sessions_planned)
-        .filter(TestingRequest.id.in_(tr_ids), ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)))
+        .filter(
+            TestingRequest.id.in_(tr_ids),
+            ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)),
+            # a never-submitted draft or a schedule-register template will
+            # never produce a result - it must not hold back a retest
+            TestingRequest.status != TestingRequestStatus.draft,
+            TestingRequest.is_schedule_template.isnot(True),
+        )
         .all()
     )
     if not rows:
@@ -630,6 +664,9 @@ def replacement_pending_request(db: Session, car: CorrectiveActionRequest) -> Op
             TestingRequest.id.in_(linked),
             Recommendation.approval_status == "pending",
             Recommendation.next_action == NextActionType.replacement,
+            # the request ended (cancelled / rejected / closed) without the
+            # recommendation being decided - nothing is waiting on it any more
+            ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)),
         )
         .first()
     )
@@ -699,6 +736,7 @@ def replacement_approval(db: Session, car: CorrectiveActionRequest) -> Optional[
 def _close(db: Session, car: CorrectiveActionRequest, note: Optional[str] = None) -> None:
     car.status = CarStatus.CLOSED
     car.closed_at = datetime.now(timezone.utc)
+    car.has_closed_once = True
     if note is not None:
         car.corrective_action = note
 
@@ -706,24 +744,30 @@ def _close(db: Session, car: CorrectiveActionRequest, note: Optional[str] = None
 def maybe_close_car(db: Session, car: CorrectiveActionRequest) -> bool:
     """Close the CAR if it's done - the ONE place a CAR closes (caller holds
     its equipment lock). Never while any linked request is still open:
-      - approved replacement (marker) and Finance approved the procurement
-        request -> CLOSED, reason replacement;
+      - approved replacement (marker, procurement request approved) ->
+        CLOSED straight away, reason replacement - the one exception to
+        "wait for every linked request": requests a person raised are left
+        to run on their own;
       - replacement awaiting CM / Finance -> stays open;
       - every failed type has a passing retest -> CLOSED, reason verified.
     Returns True when it closed. Commits."""
     if car.status not in (CarStatus.OPEN, CarStatus.REOPENED):
         return False
-    if open_linked_requests(db, car):
-        return False  # wait until every linked request is finished
     repl = replacement_approval(db, car)
     if repl is not None:
         pr_number, pr_status = repl
         if pr_status == "approved":
+            # The equipment is being replaced: close now. Its system retests
+            # were cancelled (close_cars_for_replacement); requests a person
+            # raised themselves are left to run on their own - they are no
+            # reason to keep the CAR open.
             _close(db, car, "REPLACEMENT: " + car.corrective_action[len(REPLACEMENT_APPROVED_PREFIX):])
             db.commit()
             return True
         if pr_status == "pending_finance":
             return False
+    if open_linked_requests(db, car):
+        return False  # wait until every linked request is finished
     if replacement_pending_request(db, car) is not None:
         return False
     if unresolved_test_types(db, car):
@@ -969,7 +1013,12 @@ def _corrective_work_pending(
 def _type_in_flight(db: Session, car: CorrectiveActionRequest, base: TestingRequest) -> bool:
     """Is a request of base's test type (a retest already raised, a scheduled
     test, a multi-session request with sessions left) still expecting a
-    result - linked to the CAR or on base's lineage (same equipment + type)?"""
+    result - linked to the CAR, on base's lineage (same equipment + type,
+    system-raised), or a manually raised TR of the same equipment + type
+    that's simply never been linked? A manual TR isn't pulled into the CAR's
+    lineage (it's independent, not the CAR's), but its result would still
+    cover this type, so raising a retest in parallel would just duplicate
+    it - hold back until it resolves."""
     candidates = set(_lineage_test_request_ids(db, base))
     candidates.update(
         tr_id for (tr_id,) in (
@@ -979,13 +1028,32 @@ def _type_in_flight(db: Session, car: CorrectiveActionRequest, base: TestingRequ
             .all()
         )
     )
-    return bool(expecting_result_ids(db, candidates))
+    if bool(expecting_result_ids(db, candidates)):
+        return True
+    if not base.equipment_id or not base.test_type_id:
+        return False
+    manual_ids = [
+        tr_id for (tr_id,) in (
+            db.query(TestingRequest.id)
+            .filter(
+                TestingRequest.equipment_id == base.equipment_id,
+                TestingRequest.test_type_id == base.test_type_id,
+                TestingRequest.id != base.id,
+                ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)),
+                TestingRequest.status != TestingRequestStatus.draft,
+                TestingRequest.is_schedule_template.isnot(True),
+            )
+            .all()
+        )
+    ]
+    return bool(expecting_result_ids(db, manual_ids))
 
 
 def in_flight_request_number(db: Session, car: CorrectiveActionRequest, base: TestingRequest) -> Optional[str]:
     """Request number of a request of base's test type still expecting a
-    result (the one _type_in_flight finds), for the CAR screen - None when
-    that type is waiting for a retest to be raised."""
+    result (the one _type_in_flight finds - including an unlinked manual TR
+    covering it), for the CAR screen - None when that type is waiting for a
+    retest to be raised."""
     candidates = set(_lineage_test_request_ids(db, base))
     candidates.update(
         tr_id for (tr_id,) in (
@@ -995,6 +1063,21 @@ def in_flight_request_number(db: Session, car: CorrectiveActionRequest, base: Te
             .all()
         )
     )
+    if base.equipment_id and base.test_type_id:
+        candidates.update(
+            tr_id for (tr_id,) in (
+                db.query(TestingRequest.id)
+                .filter(
+                    TestingRequest.equipment_id == base.equipment_id,
+                    TestingRequest.test_type_id == base.test_type_id,
+                    TestingRequest.id != base.id,
+                    ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)),
+                    TestingRequest.status != TestingRequestStatus.draft,
+                    TestingRequest.is_schedule_template.isnot(True),
+                )
+                .all()
+            )
+        )
     expecting = expecting_result_ids(db, candidates)
     if not expecting:
         return None
@@ -1097,7 +1180,8 @@ def _ensure_active_followup(
             new_request.test_request_type = "RETEST"
             db.commit()
 
-            tr_service.submit_request(new_request.id, modified_by=originator_id)
+            if not _submit_or_withdraw(db, tr_service, new_request, originator_id, car.car_number):
+                continue
 
             db.add(CarTestRequest(
                 car_id=car.id,
@@ -1108,6 +1192,26 @@ def _ensure_active_followup(
         except Exception as exc:
             db.rollback()
             logger.warning(f"CAR {car.car_number}: auto-retest creation failed for {base.request_number}: {exc}")
+
+
+def _submit_or_withdraw(db: Session, tr_service, new_request: TestingRequest, originator_id, label: str) -> bool:
+    """Submit an auto-created retest / follow-up into its workflow. If that
+    fails, the just-created request is closed as cancelled (with a note)
+    instead of being left as an unlinked draft that nobody can action and
+    that would hold the CAR - True when submitted."""
+    try:
+        tr_service.submit_request(new_request.id, modified_by=originator_id)
+        return True
+    except Exception as exc:
+        db.rollback()
+        tr = db.query(TestingRequest).filter(TestingRequest.id == new_request.id).first()
+        if tr is not None:
+            tr.status = TestingRequestStatus.closed
+            tr.current_status_code = "wf_cancelled"
+            tr.notes = f"{tr.notes or ''}\n[CAR] Not submitted ({exc}); withdrawn automatically.".strip()
+            db.commit()
+        logger.warning(f"{label}: {new_request.request_number} could not be submitted, withdrawn: {exc}")
+        return False
 
 
 def _latest_reported_request(db: Session, car: CorrectiveActionRequest) -> Optional[TestingRequest]:
@@ -1161,7 +1265,13 @@ def heal_idle_cars(db: Session, *, apply: bool, exclude: Optional[set] = None) -
             if car.status not in (CarStatus.OPEN, CarStatus.REOPENED):
                 entry.update(action="skip", detail=f"{car.status} meanwhile")
                 continue
-            _heal_one(db, car, entry, apply=apply, excluded=excluded)
+            try:
+                _heal_one(db, car, entry, apply=apply, excluded=excluded)
+            except Exception as exc:
+                # one bad CAR must not stop the check for every CAR after it
+                db.rollback()
+                entry.update(action="failed", detail=f"error: {exc}")
+                logger.exception(f"CAR {car.car_number}: idle check failed")
     return report
 
 
@@ -1613,7 +1723,9 @@ def _inflight_request(db: Session, *, equipment_id, test_type_id, exclude_id) ->
     """A TR for this equipment + test type (other than exclude_id) that is
     still expecting a result - reusable as the follow-up instead of raising
     a duplicate. One whose result is already in doesn't count: it can't
-    produce the follow-up's result."""
+    produce the follow-up's result. System-raised only (RETEST/FOLLOW_UP) -
+    a manually raised TR of the same equipment+type is its own independent
+    request and is never silently repurposed as a CAR follow-up."""
     if not equipment_id or not test_type_id:
         return None
     open_trs = (
@@ -1623,6 +1735,7 @@ def _inflight_request(db: Session, *, equipment_id, test_type_id, exclude_id) ->
             TestingRequest.test_type_id == test_type_id,
             TestingRequest.id != exclude_id,
             ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)),
+            TestingRequest.test_request_type != "ORIGINAL",
         )
         .all()
     )
@@ -1742,7 +1855,8 @@ def _create_followups(
             new_request.test_request_type = "RETEST" if is_retest else "FOLLOW_UP"
             db.commit()
 
-            tr_service.submit_request(new_request.id, modified_by=originator_id)
+            if not _submit_or_withdraw(db, tr_service, new_request, originator_id, label):
+                continue
 
             if car is not None:
                 db.add(CarTestRequest(
@@ -1949,7 +2063,7 @@ def cancel_open_car_requests(
                 TrWfStageInstance.wf_instance_id == instance.id,
                 TrWfStageInstance.status.in_(["in_progress", "not_started"]),
             ).update(
-                {"status": "cancelled", "completed_at": now.replace(tzinfo=None)},
+                {"status": "cancelled", "completed_at": now},
                 synchronize_session=False,
             )
             instance.current_stage_id = None
@@ -1976,6 +2090,11 @@ def void_car(db: Session, car: CorrectiveActionRequest, *, reason: str, voided_b
     follow-ups still waiting for a result are cancelled
     (cancel_open_car_requests); requests a person raised are left alone."""
     with car_lock(db, equipment_lock_key(car.equipment_id, car.id)):
+        # checked by the caller before the lock - a result may have closed it
+        # while this waited; never overwrite a closed CAR
+        db.refresh(car)
+        if car.status not in CarStatus.OPEN_STATUSES:
+            raise ValueError(f"CAR {car.car_number} is {car.status} - only an open CAR can be voided")
         car.status = CarStatus.VOIDED
         car.corrective_action = f"VOIDED: {reason.strip()}"
         car.modified_by = voided_by

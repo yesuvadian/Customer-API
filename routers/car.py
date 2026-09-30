@@ -23,6 +23,7 @@ from database import get_db
 from models import (
     CarStatus,
     CarTestRequest,
+    CategoryDetails,
     CorrectiveActionRequest,
     Equipment,
     Module,
@@ -52,6 +53,73 @@ def _user_display_name(user: Optional[User]) -> Optional[str]:
     return f"{user.firstname or ''} {user.lastname or ''}".strip() or user.email
 
 
+def _serialize_summaries(cars: list, db: Session) -> list:
+    """Batched _serialize_summary for a page of CARs (GET /car): the four
+    per-row lookups it used to run once per CAR (equipment, link count,
+    trigger request/test type, department name) each become one query for
+    the whole page instead of one per row."""
+    if not cars:
+        return []
+    car_ids = [c.id for c in cars]
+
+    equipment_ids = {c.equipment_id for c in cars if c.equipment_id}
+    equipment_by_id = (
+        {e.id: e for e in db.query(Equipment).filter(Equipment.id.in_(equipment_ids)).all()}
+        if equipment_ids else {}
+    )
+
+    link_counts = dict(
+        db.query(CarTestRequest.car_id, func.count(CarTestRequest.id))
+        .filter(CarTestRequest.car_id.in_(car_ids))
+        .group_by(CarTestRequest.car_id)
+        .all()
+    )
+
+    trigger_test_type_ids = car_service._trigger_test_type_ids(db, car_ids)
+    test_type_names = (
+        dict(
+            db.query(CategoryDetails.id, CategoryDetails.name)
+            .filter(CategoryDetails.id.in_(set(trigger_test_type_ids.values())))
+            .all()
+        )
+        if trigger_test_type_ids else {}
+    )
+
+    department_ids = {c.department_id for c in cars if c.department_id}
+    department_names = (
+        dict(
+            db.query(OrgDepartment.id, OrgDepartment.name)
+            .filter(OrgDepartment.id.in_(department_ids))
+            .all()
+        )
+        if department_ids else {}
+    )
+
+    rows = []
+    for car in cars:
+        equipment = equipment_by_id.get(car.equipment_id) if car.equipment_id else None
+        test_type_id = trigger_test_type_ids.get(car.id)
+        rows.append({
+            "id": str(car.id),
+            "car_number": car.car_number,
+            "equipment_id": str(car.equipment_id) if car.equipment_id else None,
+            "equipment_ueic": equipment.ueic if equipment else None,
+            "template_key": car.template_key,
+            "severity": car.severity,
+            "status": car.status,
+            "has_closed_once": bool(car.has_closed_once),
+            "summary": car.summary,
+            "due_date": car.due_date.isoformat() if car.due_date else None,
+            "test_request_count": link_counts.get(car.id, 0),
+            "created_at": car.created_at.isoformat() if car.created_at else None,
+            "closed_at": car.closed_at.isoformat() if car.closed_at else None,
+            "test_type_name": test_type_names.get(test_type_id) if test_type_id else None,
+            "department_id": str(car.department_id) if car.department_id else None,
+            "department_name": department_names.get(car.department_id) if car.department_id else None,
+        })
+    return rows
+
+
 def _serialize_summary(car: CorrectiveActionRequest, db: Session) -> dict:
     equipment = db.query(Equipment).filter(Equipment.id == car.equipment_id).first() if car.equipment_id else None
     link_count = db.query(CarTestRequest).filter(CarTestRequest.car_id == car.id).count()
@@ -69,6 +137,7 @@ def _serialize_summary(car: CorrectiveActionRequest, db: Session) -> dict:
         "template_key": car.template_key,
         "severity": car.severity,
         "status": car.status,
+        "has_closed_once": bool(car.has_closed_once),
         "summary": car.summary,
         "due_date": car.due_date.isoformat() if car.due_date else None,
         "test_request_count": link_count,
@@ -181,7 +250,7 @@ def car_trend(
         q = (
             db.query(day, func.count(CorrectiveActionRequest.id))
             .filter(
-                CorrectiveActionRequest.organization_id == org_id,
+                CorrectiveActionRequest.organization_id == org_id if org_id else True,
                 CorrectiveActionRequest.status != CarStatus.VOIDED,
                 date_col.isnot(None),
                 day >= max(start_day, first_week),
@@ -252,12 +321,10 @@ def list_cars(
 
     total = q.count()
     cars = q.order_by(CorrectiveActionRequest.created_at.desc()).offset(skip).limit(ps).all()
-    serialized = []
-    for c in cars:
-        row = _serialize_summary(c, db)
+    serialized = _serialize_summaries(cars, db)
+    for row, c in zip(serialized, cars):
         # badge on the CAR list (ATTENTION / IDLE) - open CARs only, a page at a time
         row["drive_state"] = _drive_state(db, c)["drive_state"] if c.status in CarStatus.OPEN_STATUSES else None
-        serialized.append(row)
 
     return {
         "items": serialized,
@@ -397,16 +464,21 @@ CAR_MODULE_PATH = "corrective-action-requests"
 
 
 def _has_car_permission(db: Session, current_user, action: str) -> bool:
-    """Mirrors the frontend AuthProvider.can('Corrective Action Requests',
-    action): super_admin always; otherwise an active role holding `action`
-    on the CAR module."""
+    """AuthProvider.can('Corrective Action Requests', action) on the server."""
+    return has_module_permission(db, current_user, CAR_MODULE_PATH, action)
+
+
+def has_module_permission(db: Session, current_user, module_path: str, action: str) -> bool:
+    """Mirrors the frontend AuthProvider.can(module, action): super_admin
+    always; otherwise an active role holding `action` (can_view / can_add /
+    can_edit / can_delete) on the module with this path."""
     if isinstance(current_user, User):
         user_id, usertype = current_user.id, current_user.usertype
     else:
         user_id, usertype = current_user.get("id"), current_user.get("usertype")
     if usertype == "super_admin":
         return True
-    module_id = db.query(Module.id).filter(Module.path == CAR_MODULE_PATH).scalar()
+    module_id = db.query(Module.id).filter(Module.path == module_path).scalar()
     if module_id is None or not user_id:
         return False
     return (
@@ -443,7 +515,10 @@ def void_car(
     if car.status not in CarStatus.OPEN_STATUSES:
         raise HTTPException(status_code=400, detail=f"Only an open CAR can be voided (this one is {car.status})")
     user_id = current_user.id if isinstance(current_user, User) else current_user.get("id")
-    car_service.void_car(db, car, reason=body.reason, voided_by=user_id)
+    try:
+        car_service.void_car(db, car, reason=body.reason, voided_by=user_id)
+    except ValueError as exc:  # closed / voided while this request waited
+        raise HTTPException(status_code=409, detail=str(exc))
     return get_car(car_id, db=db, current_user=current_user)
 
 

@@ -23,6 +23,26 @@ from database import get_db
 from models import CarTriggerConfig, CarTriggerFollowup, CategoryDetails, CategoryMaster, User
 from services.category_master_service import CategoryMasterService
 
+# Module row seeded by seed_car_trigger_config_module.py
+TRIGGER_CONFIG_MODULE_PATH = "car-trigger-config"
+
+
+def _require(db: Session, current_user, action: str) -> None:
+    """Same permission the CAR Trigger Config screen checks
+    (AuthProvider.can('CAR Trigger Config', action))."""
+    from routers.car import has_module_permission
+    if not has_module_permission(db, current_user, TRIGGER_CONFIG_MODULE_PATH, action):
+        raise HTTPException(status_code=403, detail="Your role does not have permission to change CAR trigger rules")
+
+
+def _visible(config: Optional[CarTriggerConfig], current_user) -> bool:
+    """A user sees / edits their own org's rules and the global defaults -
+    never another org's rules."""
+    if config is None:
+        return False
+    org_id = _org_id(current_user)
+    return config.organization_id is None or org_id is None or config.organization_id == org_id
+
 router = APIRouter(
     prefix="/car-trigger-config",
     tags=["car-trigger-config"],
@@ -135,7 +155,7 @@ def get_config(config_id: UUID, db: Session = Depends(get_db), current_user=Depe
         .filter(CarTriggerConfig.id == config_id)
         .first()
     )
-    if not config:
+    if not _visible(config, current_user):
         raise HTTPException(status_code=404, detail="CAR trigger config not found")
     return _serialize(config, db)
 
@@ -166,10 +186,14 @@ def create_config(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    _require(db, current_user, "can_add")
     if body.severity not in ("ALERT", "CRITICAL"):
         raise HTTPException(status_code=400, detail="severity must be ALERT or CRITICAL")
 
-    org_id = _org_id(current_user) if body.org_specific is not False else None
+    # A user who belongs to an org always writes that org's rule; only a
+    # user with no org (super_admin) can create a global default that
+    # applies to every org.
+    org_id = _org_id(current_user)
     existing = db.query(CarTriggerConfig).filter(
         CarTriggerConfig.organization_id == org_id,
         CarTriggerConfig.equipment_type_id == body.equipment_type_id,
@@ -262,8 +286,9 @@ def update_config(
     current_user=Depends(get_current_user),
 ):
     config = db.query(CarTriggerConfig).filter(CarTriggerConfig.id == config_id).first()
-    if not config:
+    if not _visible(config, current_user):
         raise HTTPException(status_code=404, detail="CAR trigger config not found")
+    _require(db, current_user, "can_edit")
     config = _own_row(db, config, current_user)  # a global row -> this org's override
 
     if body.car_trigger is not None:
@@ -292,8 +317,9 @@ def update_config(
 @router.delete("/{config_id}", summary="Deactivate a CAR trigger config rule")
 def deactivate_config(config_id: UUID, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     config = db.query(CarTriggerConfig).filter(CarTriggerConfig.id == config_id).first()
-    if not config:
+    if not _visible(config, current_user):
         raise HTTPException(status_code=404, detail="CAR trigger config not found")
+    _require(db, current_user, "can_delete")
     config = _own_row(db, config, current_user)  # deactivate for this org only
     config.is_active = False
     db.commit()

@@ -4043,6 +4043,12 @@ class CorrectiveActionRequest(Base):
     corrective_action = Column(Text, nullable=True)
 
     status = Column(String(25), default=CarStatus.OPEN, nullable=False)
+    # True once this CAR has actually been CLOSED at least once. status can
+    # go OPEN -> REOPENED without ever having been CLOSED (a follow-up/retest
+    # failing again while still open) - has_closed_once lets callers show
+    # "OPEN" instead of the misleading "REOPENED" for that case. Set only in
+    # services/car_service.py's _close(), never cleared.
+    has_closed_once = Column(Boolean, default=False, nullable=False, server_default="false")
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     due_date = Column(Date, nullable=True)
 
