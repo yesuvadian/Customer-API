@@ -8,11 +8,13 @@ TR's own workflow. This router lists CARs and shows each one's TR chain -
 who is working which TR, its status, due date and latest result. The one
 write is POST /{id}/void: an admin escape hatch for a CAR raised in error.
 """
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from auth_utils import get_current_user
@@ -53,6 +55,12 @@ def _user_display_name(user: Optional[User]) -> Optional[str]:
 def _serialize_summary(car: CorrectiveActionRequest, db: Session) -> dict:
     equipment = db.query(Equipment).filter(Equipment.id == car.equipment_id).first() if car.equipment_id else None
     link_count = db.query(CarTestRequest).filter(CarTestRequest.car_id == car.id).count()
+    # for the CAR list's "group by" chips: the test that raised it, its department
+    trig = car_service.trigger_request(db, car)
+    dept_name = (
+        db.query(OrgDepartment.name).filter(OrgDepartment.id == car.department_id).scalar()
+        if car.department_id else None
+    )
     return {
         "id": str(car.id),
         "car_number": car.car_number,
@@ -66,6 +74,9 @@ def _serialize_summary(car: CorrectiveActionRequest, db: Session) -> dict:
         "test_request_count": link_count,
         "created_at": car.created_at.isoformat() if car.created_at else None,
         "closed_at": car.closed_at.isoformat() if car.closed_at else None,
+        "test_type_name": getattr(getattr(trig, "test_type", None), "name", None) if trig else None,
+        "department_id": str(car.department_id) if car.department_id else None,
+        "department_name": dept_name,
     }
 
 
@@ -141,52 +152,62 @@ def car_trend(
     department_id: Optional[UUID] = Query(
         None, description="Scope to this department + all its descendants. Omit for org-wide."
     ),
-    weeks: int = Query(12, ge=1, le=52),
+    date_from: Optional[date] = Query(None, description="First day of the range (the CAR list's date range filter)"),
+    date_to: Optional[date] = Query(None, description="Last day of the range; defaults to today"),
+    weeks: int = Query(12, ge=1, le=52, description="Used only when date_from is not given: the last N weeks"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from datetime import datetime, timedelta, timezone
-    from sqlalchemy import func
+    """One point per week (Monday start), oldest first, across the CAR
+    list's date range - or the last `weeks` weeks when no range is given.
+    Dates are calendar days in the database's time zone, the same days the
+    list's date filter uses; the first / last week can be partial."""
+    from datetime import timedelta
 
     org_id = _org_id(current_user)
     dept_ids = get_dept_subtree_ids(db, department_id) if department_id else None
 
-    # Bucket by the Monday of each ISO week, oldest first — `weeks` full
-    # weeks back through the current (partial) week, so a CAR opened
-    # yesterday shows up in "this week" rather than being cut off.
-    now = datetime.now(timezone.utc)
-    week_start_of_now = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    range_start = week_start_of_now - timedelta(weeks=weeks - 1)
+    today = db.query(func.current_date()).scalar()
+    end_day = date_to or today
+    start_day = date_from or (end_day - timedelta(days=end_day.weekday()) - timedelta(weeks=weeks - 1))
+    if start_day > end_day:
+        start_day, end_day = end_day, start_day
+    first_week = start_day - timedelta(days=start_day.weekday())
+    n_weeks = min((end_day - first_week).days // 7 + 1, 104)  # at most two years of weekly bars
+    first_week = max(first_week, end_day - timedelta(days=end_day.weekday()) - timedelta(weeks=n_weeks - 1))
 
-    def _weekly_counts(date_col):
+    def _counts_by_week(date_col) -> dict:
+        day = func.date(date_col)
         q = (
-            db.query(
-                func.date_trunc("week", date_col).label("week"),
-                func.count(CorrectiveActionRequest.id),
-            )
+            db.query(day, func.count(CorrectiveActionRequest.id))
             .filter(
                 CorrectiveActionRequest.organization_id == org_id,
                 CorrectiveActionRequest.status != CarStatus.VOIDED,
                 date_col.isnot(None),
-                date_col >= range_start,
+                day >= max(start_day, first_week),
+                day <= end_day,
             )
         )
         if dept_ids:
             q = q.filter(CorrectiveActionRequest.department_id.in_(dept_ids))
-        return {row[0].date(): row[1] for row in q.group_by("week").all()}
+        out: dict = {}
+        for d, n in q.group_by(day).all():
+            wk = d - timedelta(days=d.weekday())
+            out[wk] = out.get(wk, 0) + n
+        return out
 
-    created_by_week = _weekly_counts(CorrectiveActionRequest.created_at)
-    closed_by_week = _weekly_counts(CorrectiveActionRequest.closed_at)
+    created_by_week = _counts_by_week(CorrectiveActionRequest.created_at)
+    closed_by_week = _counts_by_week(CorrectiveActionRequest.closed_at)
 
     points = []
-    for i in range(weeks):
-        week_start = (range_start + timedelta(weeks=i)).date()
+    for i in range(n_weeks):
+        week_start = first_week + timedelta(weeks=i)
         points.append({
             "week_start": week_start.isoformat(),
             "created_count": created_by_week.get(week_start, 0),
             "closed_count": closed_by_week.get(week_start, 0),
         })
-    return {"points": points}
+    return {"points": points, "date_from": start_day.isoformat(), "date_to": end_day.isoformat()}
 
 
 @router.get("", summary="List CARs (filterable by status/equipment/department), paginated")
@@ -197,6 +218,8 @@ def list_cars(
         None, description="Scope to this department + all its descendants (same convention as the analytics dashboards)"
     ),
     open_only: bool = False,
+    date_from: Optional[date] = Query(None, description="Raised on or after this date (inclusive)"),
+    date_to: Optional[date] = Query(None, description="Raised on or before this date (inclusive)"),
     page: int = Query(1, ge=1),
     page_size: Optional[int] = Query(None, ge=1, le=200, description=f"Defaults to CAR_PAGE_SIZE ({CAR_PAGE_SIZE})"),
     db: Session = Depends(get_db),
@@ -217,6 +240,12 @@ def list_cars(
         q = q.filter(CorrectiveActionRequest.status != CarStatus.VOIDED)  # only via status=VOIDED
     if equipment_id:
         q = q.filter(CorrectiveActionRequest.equipment_id == equipment_id)
+    # date raised, in the database's local time zone (same calendar day the
+    # screen shows)
+    if date_from:
+        q = q.filter(func.date(CorrectiveActionRequest.created_at) >= date_from)
+    if date_to:
+        q = q.filter(func.date(CorrectiveActionRequest.created_at) <= date_to)
 
     ps = page_size or CAR_PAGE_SIZE
     skip = (page - 1) * ps
@@ -341,6 +370,13 @@ def get_car(car_id: UUID, db: Session = Depends(get_db), current_user=Depends(ge
     data["test_requests"] = [_serialize_link(link, db, expecting) for link in links]
     data["active_test_request_count"] = sum(1 for t in data["test_requests"] if t["is_active"])
     data.update(_drive_state(db, car))
+    # the findings behind the summary, as tables (one per evaluated table)
+    source = db.query(TestResult).filter(TestResult.id == car.source_test_result_id).first()         if car.source_test_result_id else None
+    data["summary_tables"] = car_service.summary_tables(source.evaluation_result if source else None)
+    source_tr = source.testing_request if source is not None else None
+    data["summary_test_name"] = (
+        getattr(getattr(source_tr, "test_type", None), "name", None) or getattr(source_tr, "title", None)
+    ) if source_tr is not None else None
     # How it was closed: a passing retest, or an approved equipment replacement
     # (close_cars_for_replacement keeps the reason as "REPLACEMENT: ...")
     if car.status == CarStatus.CLOSED:

@@ -186,6 +186,57 @@ def _fmt_num(v) -> str:
     return str(v)
 
 
+def summary_tables(ev_result: Optional[dict]) -> list:
+    """The CAR's findings as tables for the CAR screen - one per table field
+    of the evaluation (e.g. "Test Results as per IS 1866:2017", "Dissolved
+    Gas Analysis Results (ppm)"), each with its out-of-range readings
+    (ALERT / CRITICAL: parameter, value, unit, breached limit, severity) and
+    its remedial actions (deduplicated). Non-table fields that aren't NORMAL
+    are grouped as "Other readings". Same source as build_car_summary, which
+    stays the plain-text version (lists, notifications)."""
+    tables, other = [], {"name": "Other readings", "rows": [], "actions": []}
+    for f in (ev_result or {}).get("fields") or []:
+        if not isinstance(f, dict):
+            continue
+        label = f.get("label") or f.get("key") or "Reading"
+        cells = (f.get("row_results") or []) + (f.get("column_results") or [])
+        if cells:
+            rows, actions = [], []
+            for c in cells:
+                if not isinstance(c, dict) or c.get("status") not in ("ALERT", "CRITICAL"):
+                    continue
+                name = c.get("row_id") or c.get("row_label") or ""
+                if c.get("column") and c.get("row_label"):
+                    name = f"{c['row_label']} {str(c['column']).replace('_', ' ')}"
+                rows.append({
+                    "parameter": name or label,
+                    "value": _fmt_num(c.get("value")) if c.get("value") is not None else None,
+                    "unit": c.get("unit"),
+                    "limit": _fmt_num(c["breach_limit"]) if c.get("breach_limit") is not None else None,
+                    "status": c.get("status"),
+                })
+                if c.get("remedial_action_text"):
+                    actions.append(c["remedial_action_text"])
+            if f.get("remedial_action_text") and f.get("status") in ("ALERT", "CRITICAL"):
+                actions.append(f["remedial_action_text"])
+            if rows or actions:
+                tables.append({"name": label, "rows": rows, "actions": list(dict.fromkeys(actions))})
+        elif f.get("status") in ("ALERT", "CRITICAL"):
+            other["rows"].append({
+                "parameter": label,
+                "value": _fmt_num(f.get("value")) if f.get("value") is not None else None,
+                "unit": f.get("unit"),
+                "limit": None,
+                "status": f.get("status"),
+            })
+            if f.get("remedial_action_text"):
+                other["actions"].append(f["remedial_action_text"])
+    if other["rows"]:
+        other["actions"] = list(dict.fromkeys(other["actions"]))
+        tables.append(other)
+    return tables
+
+
 def build_car_summary(ev_result: Optional[dict], severity: str, request_title: str = "") -> str:
     """CAR summary from the evaluation that raised it. Never empty.
 
