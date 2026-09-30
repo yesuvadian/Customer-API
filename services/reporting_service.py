@@ -94,6 +94,7 @@ _ALIAS_DEPT_LINK = {
     "wf":  "via_eq",   # repair_workflows
     "s":   "direct",   # test_request_schedules (missed_schedules_report)
     "car": "direct",   # corrective_action_requests (open_car_report)
+    "pc":  "direct",   # precommission_requests (vendor_performance_report; dept_id exposed as department_id)
 }
 
 
@@ -264,11 +265,22 @@ class ReportingService:
             self.db.commit()
 
         except Exception as exc:
+            # A failed SQL statement leaves the transaction aborted — roll it
+            # back first, or recording the failure itself raises
+            # InFailedSqlTransaction and the caller gets a bare 500 instead
+            # of the real reason.
+            self.db.rollback()
+            log = self.db.get(ReportLog, log.id) or log
             log.status        = "failed"
-            log.error_message = str(exc)
+            log.error_message = str(exc)[:2000]
             log.completed_at  = datetime.now(timezone.utc)
             self.db.commit()
-            raise
+            if isinstance(exc, (ValueError, RuntimeError)):
+                raise
+            # Database/other errors → RuntimeError, which routers/reporting.py
+            # returns as a readable 422 rather than an unhandled 500.
+            first_line = str(exc).split("\n")[0]
+            raise RuntimeError(f"Report '{defn.name}' failed: {first_line}") from exc
 
         return raw, filename, content_type
 
@@ -647,16 +659,59 @@ class ReportingService:
             clauses += f" AND tr.cts >= '{df}'"
         if dt:
             clauses += f" AND tr.cts <= '{dt}'"
+        # Outcome filter: every finished ticket has status 'closed', so the
+        # status filter alone can't tell completed / rejected / cancelled /
+        # auto-closed apart.
+        outcome_labels = {"open": "Open", "completed": "Completed", "rejected": "Rejected",
+                          "cancelled": "Cancelled", "auto_closed": "Auto-closed",
+                          "closed": "Closed"}
+        oc = (_p(p, "outcome") or "all").lower().replace("-", "_").replace(" ", "_")
+        outcome_where = f"WHERE outcome = '{outcome_labels[oc]}'" if oc in outcome_labels else ""
         sql = text(f"""
+            SELECT * FROM (
             SELECT
                 tr.request_number,
-                tr.title,
+                -- Title is optional on the request form: blank ones (or the
+                -- old "  -  Test Name" shape) fall back to the test name.
+                COALESCE(
+                    NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
+                    cd.name
+                )                   AS title,
                 tr.request_category,
                 tr.status,
+                -- Real result of a finished ticket (status is just 'closed'
+                -- for all of them): equipment-driven auto-close is marked in
+                -- rejection_reason; the rest come from the workflow's
+                -- terminal status code — same rule as the dashboard's
+                -- Rejected/Cancelled tile.
+                CASE
+                    WHEN tr.rejection_reason ILIKE 'Auto-closed%%'           THEN 'Auto-closed'
+                    WHEN tr.current_status_code = 'wf_rejected'
+                      OR tr.status::text = 'rejected'                         THEN 'Rejected'
+                    WHEN tr.current_status_code = 'wf_cancelled'             THEN 'Cancelled'
+                    WHEN tr.current_status_code = 'wf_completed'
+                      OR tr.status::text = 'completed'                        THEN 'Completed'
+                    WHEN tr.status::text = 'closed'                           THEN 'Closed'
+                    ELSE 'Open'
+                END                 AS outcome,
+                COALESCE(NULLIF(TRIM(term.comment), ''), tr.rejection_reason)
+                                    AS closure_reason,
+                CASE WHEN tr.status::text IN ('closed', 'completed', 'rejected')
+                     THEN COALESCE(term.created_at, tr.completed_at, tr.mts)::date
+                END                 AS closed_on,
+                CASE WHEN tr.status::text IN ('closed', 'completed', 'rejected')
+                     THEN COALESCE(u_c.email, u_cb.email)
+                END                 AS closed_by,
                 tr.priority,
-                tr.zone,
-                tr.ce_circle,
-                tr.ee_subdivision,
+                -- Zone → CE Circle → EE Subdivision → Substation, read top-down
+                -- from the ticket's department chain (the free-text zone /
+                -- ce_circle / ee_subdivision columns on the ticket are mostly
+                -- empty); those typed values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(h.path[3], NULLIF(tr.ee_subdivision, ''))  AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 4
+                     THEN h.path[array_length(h.path, 1)] END        AS substation,
                 tr.cts::date        AS created_date,
                 tr.due_date::date   AS due_date,
                 tr.completed_at::date AS completed_date,
@@ -671,8 +726,33 @@ class ReportingService:
             LEFT JOIN public."CategoryDetails" cd    ON cd.id   = tr.test_type_id
             LEFT JOIN public.users            u_o   ON u_o.id  = tr.originator_id
             LEFT JOIN public.users            u_t   ON u_t.id  = tr.assigned_tester_id
+            -- Last terminal workflow step: who closed it, when, and their comment.
+            LEFT JOIN LATERAL (
+                SELECT a.comment, a.created_at, a.performed_by
+                FROM   public.tr_wf_audit_logs a
+                WHERE  a.testing_request_id = tr.id AND a.is_terminal
+                ORDER  BY a.created_at DESC LIMIT 1
+            ) term ON true
+            LEFT JOIN public.users            u_c   ON u_c.id  = term.performed_by
+            LEFT JOIN public.users            u_cb  ON u_cb.id = tr.completed_by_id
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  1=1 {org} {clauses}
-            ORDER  BY tr.cts DESC
+            ) x
+            {outcome_where}
+            ORDER  BY created_date DESC
         """)
         return self._exec(sql)
 
@@ -1278,22 +1358,36 @@ class ReportingService:
         # the neighbouring column — so every cell becomes a Paragraph that
         # wraps inside its column (long unbroken values like UUIDs included).
         from xml.sax.saxutils import escape as _esc
+        from reportlab.lib.pagesizes import A3, A2
         col_count = len(headers)
-        page_width = landscape(letter)[0] - 0.8*inch  # Account for margins
-        font_size = 8 if col_count <= 8 else 7 if col_count <= 12 else 6
+        font_size = 8 if col_count <= 8 else 7
         char_w = font_size * 0.55          # average Helvetica glyph width
         pad = 10                           # left + right cell padding
         # Per column: the width it needs to show its longest single word
-        # unbroken (dates, request numbers, "Manufacturer") and the width
-        # for its longest whole value on one line. Every column gets its
-        # minimum first; leftover page width goes to the longer ones.
+        # unbroken (dates, request numbers, "Completed") and the width for
+        # its longest whole value on one line. Every column gets its minimum
+        # first; leftover page width goes to the longer ones.
         mins, naturals = [], []
         for i in range(col_count):
             cells = [str(table_data[0][i])] + [str(r[i]) for r in table_data[1:51]]
             longest_word = max((len(w) for c in cells for w in c.split()), default=4)
             longest_value = max((len(c) for c in cells), default=4)
-            mins.append(min(max(longest_word, 4), 22) * char_w + pad)
+            mins.append(min(max(longest_word, 4), 24) * char_w + pad)
             naturals.append(min(max(longest_value, 4), 60) * char_w + pad)
+        # Page size: the smallest landscape page on which every column fits
+        # its longest word. Wide reports (e.g. Testing Request Status, 22
+        # columns) squeezed onto Letter got words chopped mid-way
+        # ("Outco|me", "Devan|ahalli").
+        margins = 0.8 * inch
+        page_size = landscape(A2)
+        for candidate in (landscape(letter), landscape(A3), landscape(A2)):
+            if sum(mins) <= candidate[0] - margins:
+                page_size = candidate
+                break
+        doc.pagesize = page_size
+        doc.width  = page_size[0] - doc.leftMargin - doc.rightMargin
+        doc.height = page_size[1] - doc.topMargin - doc.bottomMargin
+        page_width = page_size[0] - margins
         if sum(naturals) <= page_width:
             scale = page_width / sum(naturals)
             col_widths = [n * scale for n in naturals]
@@ -1373,12 +1467,17 @@ def run_scheduled_reports(db_factory) -> int:
                 continue
             try:
                 svc = ReportingService(db, defn.organization_id)
-                fmt = defn.output_format if defn.output_format in ("excel", "pdf") \
-                      else "excel"
-                _raw, filename, _content_type = svc.generate(defn.id, {}, fmt)
+                # "both" → one Excel + one PDF, sent together in one email
+                # (it used to fall back to Excel only).
+                if defn.output_format == "both":
+                    fmts = ["excel", "pdf"]
+                else:
+                    fmts = [defn.output_format if defn.output_format in ("excel", "pdf") else "excel"]
+                files = [svc.generate(defn.id, {}, f)[1] for f in fmts]
+                filename = files[0]
                 count += 1
                 try:
-                    fire_report_ready(db, defn, filename)
+                    fire_report_ready(db, defn, filename, extra_filenames=files[1:])
                 except Exception as notif_exc:
                     print(f"[Reports] Notification for '{defn.name}' failed: {notif_exc}")
             except Exception as exc:
@@ -1391,7 +1490,8 @@ def run_scheduled_reports(db_factory) -> int:
 def fire_report_ready(db: Session, defn: ReportDefinition, filename: str,
                       organization_id: Optional[UUID] = None,
                       department_id: Optional[UUID] = None,
-                      event_type: Optional[str] = None) -> None:
+                      event_type: Optional[str] = None,
+                      extra_filenames: Optional[list] = None) -> None:
     """
     Notify defn.notification_event's recipients that a report just finished
     generating — opt-in per definition (no-ops if notification_event isn't
@@ -1451,6 +1551,26 @@ def fire_report_ready(db: Session, defn: ReportDefinition, filename: str,
         "format":        log.output_format or "",
     }
 
+    # "Both" (Excel + PDF): the other file(s) of the same run ride along in
+    # the same email instead of a second, separate email.
+    extras = []
+    for extra_name in (extra_filenames or []):
+        extra_log = (
+            db.query(ReportLog)
+            .filter(ReportLog.definition_id == defn.id, ReportLog.file_name == extra_name)
+            .order_by(ReportLog.completed_at.desc())
+            .first()
+        )
+        if extra_log and extra_log.status == "completed":
+            extras.append({
+                "type": "pdf" if extra_name.lower().endswith(".pdf") else "excel",
+                "var_key": "report_attachment_extra",
+                "source_type": "report_log",
+                "source_id": str(extra_log.id),
+            })
+    if extras:
+        context["_extra_attachments"] = extras
+
     # A department-scoped run (routers/reporting.py passes the runner's org +
     # department) only contains that department's rows, so it's only sent to
     # that org, with recipients limited to that department — not fanned out
@@ -1492,4 +1612,11 @@ def _is_due(defn: ReportDefinition, now: datetime) -> bool:
         return delta >= 7 * 86_400
     if defn.frequency == "monthly":
         return (now - defn.last_generated_at).days >= 28
+    # Quarterly/annual were offered in the report editor (and seeded, e.g.
+    # Equipment Failure Annual / Repairer Performance) but never matched
+    # here, so those reports were never generated on schedule at all.
+    if defn.frequency == "quarterly":
+        return (now - defn.last_generated_at).days >= 90
+    if defn.frequency == "annual":
+        return (now - defn.last_generated_at).days >= 365
     return False
