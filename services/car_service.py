@@ -1751,12 +1751,15 @@ def _create_followups(
     source_request: TestingRequest,
     created_by: Optional[uuid.UUID],
 ) -> None:
-    """Fan out CarTriggerFollowup rows into real follow-up actions — same
-    branch the "New Testing Request" form takes per selected test type:
-    test/maintenance/inspection -> TestingRequestService.create_request() +
-    submit_request(); repair_lifecycle -> RepairWorkflowService.start_workflow().
-    Best-effort per follow-up: one failing (e.g. a repair workflow already
-    active for this equipment) never blocks the others or the CAR itself.
+    """Auto-create a retest of the SAME test type that failed - never a
+    different one. A CarTriggerFollowup configured for a different test type
+    (e.g. a Tan Delta test on an oil-test rule) is intentionally not acted on
+    here: a CRITICAL/ALERT on one test type only auto-raises a retest of that
+    test type, nothing else. Only the repair_lifecycle branch is exempt (it's
+    the corrective action itself, not a measurement, and doesn't get raised
+    on its own type since it has none). Best-effort: one failing (e.g. a
+    repair workflow already active for this equipment) never blocks the
+    others or the CAR itself.
 
     car=None: the rule schedules follow-ups without raising a CAR ("Trigger
     a CAR" off). If the same equipment already has an in-flight TR of a
@@ -1767,15 +1770,22 @@ def _create_followups(
     from services.testing_request_service import TestingRequestService
     from services.repair_workflow_service import RepairWorkflowService
 
-    active_followups = [f for f in config.followups if f.is_active]
-    if not active_followups:
+    candidate_followups = [f for f in config.followups if f.is_active]
+    if not candidate_followups:
         return
 
-    followup_type_ids = [f.follow_up_test_type_id for f in active_followups]
+    followup_type_ids = [f.follow_up_test_type_id for f in candidate_followups]
     category_by_type_id = {
         row.id: row.category_type
         for row in db.query(CategoryDetails).filter(CategoryDetails.id.in_(followup_type_ids)).all()
     }
+    active_followups = [
+        f for f in candidate_followups
+        if f.follow_up_test_type_id == source_request.test_type_id
+        or category_by_type_id.get(f.follow_up_test_type_id) == "repair_lifecycle"
+    ]
+    if not active_followups:
+        return
 
     tr_service = TestingRequestService(db)
     repair_service = RepairWorkflowService(db)
