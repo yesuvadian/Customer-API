@@ -6156,9 +6156,13 @@ ORDER  BY compliance_pct ASC NULLS FIRST
             key="testing_request_status_report",
             label="Testing Request Status",
             group_name="Testing Requests",
-            description="All testing requests with current status and assignment.",
+            description="All testing requests with current status and assignment, and "
+                        "for finished ones the real outcome (Completed / Rejected / "
+                        "Cancelled / Auto-closed / Closed), closure reason, date and by whom.",
+            # outcome: open | completed | rejected | cancelled | auto_closed | closed
             parameters_schema={"date_from": "date", "date_to": "date",
-                               "status": "string", "category": "string"},
+                               "status": "string", "category": "string",
+                               "outcome": "string"},
             sort_order=50,
             org_alias="tr",
             sql_template="""
@@ -7259,40 +7263,41 @@ ORDER  BY critical_pct DESC NULLS LAST
             key="vendor_performance_report",
             label="Vendor Performance Ranking Report",
             group_name="Vendor & Repairer",
-            description="Vendor delivery timeliness and quality ranking.",
+            description="Equipment suppliers ranked by pre-commission request approval rate "
+                        "and time to decision.",
             parameters_schema={"quarter": "int", "year": "int"},
             sort_order=10,
-            org_alias="pr",
+            # procurement_requests has no vendor/decision/delivery columns
+            # (the old query referenced pr.vendor_name etc. and failed for
+            # everyone). Vendors are recorded on pre-commission requests.
+            # department_id is exposed from dept_id so department scoping
+            # (alias "pc", direct) works like every other report.
+            org_alias="pc",
             sql_template="""
 SELECT
-    pr.vendor_name,
-    COUNT(pr.id)                        AS total_orders,
-    COUNT(CASE WHEN pr.decision = 'approved' THEN 1 END) AS approved,
-    COUNT(CASE WHEN pr.decision = 'rejected' THEN 1 END) AS rejected,
+    pc.vendor_name,
+    COUNT(pc.id)                                                    AS total_requests,
+    COALESCE(SUM(pc.quantity), 0)                                   AS total_units,
+    COUNT(CASE WHEN LOWER(pc.approval_status) = 'approved' THEN 1 END) AS approved,
+    COUNT(CASE WHEN LOWER(pc.approval_status) = 'rejected' THEN 1 END) AS rejected,
+    COUNT(CASE WHEN LOWER(COALESCE(pc.approval_status, 'pending'))
+                    NOT IN ('approved', 'rejected') THEN 1 END)     AS pending,
     ROUND(
-        AVG(EXTRACT(DAY FROM pr.decision_date - pr.cts)), 1
-    )                                   AS avg_days_to_decision,
-    COUNT(CASE
-        WHEN pr.decision = 'approved'
-         AND pr.delivery_date <= pr.expected_delivery_date
-        THEN 1 END)                     AS on_time_deliveries,
-    ROUND(
-        COUNT(CASE
-            WHEN pr.decision = 'approved'
-             AND pr.delivery_date <= pr.expected_delivery_date
-            THEN 1 END)::numeric
-        / NULLIF(COUNT(CASE WHEN pr.decision = 'approved' THEN 1 END), 0)
-        * 100, 1
-    )                                   AS on_time_pct
-FROM   public.procurement_requests pr
-WHERE  EXTRACT(QUARTER FROM pr.cts)
-         = COALESCE(:quarter, EXTRACT(QUARTER FROM NOW()))
-  AND  EXTRACT(YEAR FROM pr.cts)
-         = COALESCE(:year, EXTRACT(YEAR FROM NOW()))
-  AND  pr.vendor_name IS NOT NULL
+        COUNT(CASE WHEN LOWER(pc.approval_status) = 'approved' THEN 1 END)::numeric
+        / NULLIF(COUNT(CASE WHEN LOWER(pc.approval_status) IN ('approved', 'rejected')
+                            THEN 1 END), 0) * 100, 1
+    )                                                               AS approval_pct,
+    ROUND(AVG(EXTRACT(EPOCH FROM COALESCE(pc.approved_at, pc.rejected_at) - pc.cts)
+              / 86400)::numeric, 1)                                 AS avg_days_to_decision,
+    MAX(pc.po_date)                                                 AS latest_po_date
+FROM   (SELECT p.*, p.dept_id AS department_id
+        FROM   public.precommission_requests p) pc
+WHERE  pc.vendor_name IS NOT NULL
+  AND  EXTRACT(QUARTER FROM pc.cts) = COALESCE(:quarter, EXTRACT(QUARTER FROM NOW()))
+  AND  EXTRACT(YEAR    FROM pc.cts) = COALESCE(:year,    EXTRACT(YEAR    FROM NOW()))
   {org_clause}
-GROUP  BY pr.vendor_name
-ORDER  BY on_time_pct DESC NULLS LAST
+GROUP  BY pc.vendor_name
+ORDER  BY approval_pct DESC NULLS LAST, avg_days_to_decision ASC NULLS LAST
 """),
 
         dict(

@@ -2453,6 +2453,16 @@ class NotificationService:
                                 "source_type": str(source_type),
                                 "source_id":   str(source_id),
                             })
+                # Caller-supplied extra files for the same email, e.g. the PDF
+                # copy of a report generated as "Both" (Excel + PDF) — one
+                # email with both files instead of two separate emails.
+                # Read from the caller's raw `context`, not resolved_ctx:
+                # VariableResolver.build_context str()-ifies every value, which
+                # turned this list into a string and silently dropped it.
+                if tmpl.channel == "email" and isinstance(context, dict):
+                    for extra in (context.get("_extra_attachments") or []):
+                        if isinstance(extra, dict) and extra.get("source_id"):
+                            _resolved_att_urls.append(dict(extra))
 
                 batch_log = NotificationLog(
                     organization_id=organization_id,
