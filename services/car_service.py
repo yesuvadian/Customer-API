@@ -1761,11 +1761,13 @@ def _create_followups(
     repair workflow already active for this equipment) never blocks the
     others or the CAR itself.
 
-    car=None: the rule schedules follow-ups without raising a CAR ("Trigger
-    a CAR" off). If the same equipment already has an in-flight TR of a
-    follow-up's type (a scheduled test, or one raised by an earlier result),
-    that TR is reused - linked to the CAR when there is one - instead of
-    raising a duplicate.
+    The retest is due on the CAR default for its severity (3 days CRITICAL,
+    7 days ALERT - config.py), not the rule row's due_in_days.
+
+    car=None: "Trigger a CAR" is off for this rule - a same-type follow-up is
+    raised as a plain retest with no CAR. An in-flight system retest of the
+    same type is reused instead of raising a duplicate (linked to the CAR
+    when there is one).
     """
     from services.testing_request_service import TestingRequestService
     from services.repair_workflow_service import RepairWorkflowService
@@ -1832,7 +1834,13 @@ def _create_followups(
                 logger.info(f"{label}: reusing in-flight {existing.request_number} for test_type_id={followup.follow_up_test_type_id}")
                 continue
 
-            due_date = datetime.now(timezone.utc) + timedelta(days=followup.due_in_days)
+            # Same deadline as every other retest of a CAR - the CAR default
+            # for its severity (CAR_DUE_DAYS_CRITICAL / _ALERT) - not the
+            # rule row's due_in_days, so a retest's due date never depends
+            # on whether its test happens to be listed in the rule.
+            severity = (car.severity if car is not None else config.severity) or "CRITICAL"
+            due_days = CAR_DUE_DAYS_CRITICAL if severity == "CRITICAL" else CAR_DUE_DAYS_ALERT
+            due_date = datetime.now(timezone.utc) + timedelta(days=due_days)
             new_request = tr_service.create_request(
                 {
                     "title": f"{label} follow-up: {_tr_label(source_request)}",
