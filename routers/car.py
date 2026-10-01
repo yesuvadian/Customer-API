@@ -212,6 +212,10 @@ def department_summary(
     return {"current_department": current_dept, "cards": cards}
 
 
+# A date range this short (or shorter) is charted per day, not per week.
+DAILY_TREND_MAX_DAYS = 31
+
+
 @router.get(
     "/trend",
     summary="Weekly CARs created vs. closed for a department (or org-wide) — "
@@ -227,10 +231,13 @@ def car_trend(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """One point per week (Monday start), oldest first, across the CAR
-    list's date range - or the last `weeks` weeks when no range is given.
-    Dates are calendar days in the database's time zone, the same days the
-    list's date filter uses; the first / last week can be partial."""
+    """CARs raised vs closed over the CAR list's date range, oldest first:
+    one point per DAY when a range of 31 days or less is given (bucket
+    "day"), otherwise one per WEEK (Monday start, bucket "week") - the last
+    `weeks` weeks when no range is given. Dates are calendar days in the
+    database's time zone, the same days the list's date filter uses; a
+    first / last week can be partial. Each point's "week_start" is the start
+    of its bucket (the day itself for daily points)."""
     from datetime import timedelta
 
     org_id = _org_id(current_user)
@@ -241,11 +248,17 @@ def car_trend(
     start_day = date_from or (end_day - timedelta(days=end_day.weekday()) - timedelta(weeks=weeks - 1))
     if start_day > end_day:
         start_day, end_day = end_day, start_day
-    first_week = start_day - timedelta(days=start_day.weekday())
-    n_weeks = min((end_day - first_week).days // 7 + 1, 104)  # at most two years of weekly bars
-    first_week = max(first_week, end_day - timedelta(days=end_day.weekday()) - timedelta(weeks=n_weeks - 1))
 
-    def _counts_by_week(date_col) -> dict:
+    daily = date_from is not None and (end_day - start_day).days + 1 <= DAILY_TREND_MAX_DAYS
+    if daily:
+        first_bucket, step, n_points = start_day, timedelta(days=1), (end_day - start_day).days + 1
+    else:
+        first_bucket = start_day - timedelta(days=start_day.weekday())
+        n_points = min((end_day - first_bucket).days // 7 + 1, 104)  # at most two years of weekly bars
+        first_bucket = max(first_bucket, end_day - timedelta(days=end_day.weekday()) - timedelta(weeks=n_points - 1))
+        step = timedelta(weeks=1)
+
+    def _counts(date_col) -> dict:
         day = func.date(date_col)
         q = (
             db.query(day, func.count(CorrectiveActionRequest.id))
@@ -253,7 +266,7 @@ def car_trend(
                 CorrectiveActionRequest.organization_id == org_id if org_id else True,
                 CorrectiveActionRequest.status != CarStatus.VOIDED,
                 date_col.isnot(None),
-                day >= max(start_day, first_week),
+                day >= max(start_day, first_bucket),
                 day <= end_day,
             )
         )
@@ -261,22 +274,27 @@ def car_trend(
             q = q.filter(CorrectiveActionRequest.department_id.in_(dept_ids))
         out: dict = {}
         for d, n in q.group_by(day).all():
-            wk = d - timedelta(days=d.weekday())
-            out[wk] = out.get(wk, 0) + n
+            key = d if daily else d - timedelta(days=d.weekday())
+            out[key] = out.get(key, 0) + n
         return out
 
-    created_by_week = _counts_by_week(CorrectiveActionRequest.created_at)
-    closed_by_week = _counts_by_week(CorrectiveActionRequest.closed_at)
+    created = _counts(CorrectiveActionRequest.created_at)
+    closed = _counts(CorrectiveActionRequest.closed_at)
 
     points = []
-    for i in range(n_weeks):
-        week_start = first_week + timedelta(weeks=i)
+    for i in range(n_points):
+        bucket_start = first_bucket + step * i
         points.append({
-            "week_start": week_start.isoformat(),
-            "created_count": created_by_week.get(week_start, 0),
-            "closed_count": closed_by_week.get(week_start, 0),
+            "week_start": bucket_start.isoformat(),
+            "created_count": created.get(bucket_start, 0),
+            "closed_count": closed.get(bucket_start, 0),
         })
-    return {"points": points, "date_from": start_day.isoformat(), "date_to": end_day.isoformat()}
+    return {
+        "points": points,
+        "bucket": "day" if daily else "week",
+        "date_from": start_day.isoformat(),
+        "date_to": end_day.isoformat(),
+    }
 
 
 @router.get("", summary="List CARs (filterable by status/equipment/department), paginated")
