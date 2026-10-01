@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, text
+from sqlalchemy import and_, func, or_, text
 from models import TestResult
 from datetime import datetime, timedelta
 from utils.sequence_locks import TESTING_REQUEST_NUMBER_LOCK
@@ -548,7 +548,8 @@ class TestingRequestService:
                 completed_wf_ids = (
                     self.db.query(TrWfInstance.testing_request_id)
                     .filter(
-                        TrWfInstance.status.in_(["completed", "terminated"])
+                        TrWfInstance.status.in_(["completed", "terminated"]),
+                TrWfInstance.testing_request_id.isnot(None),  # NOT IN + NULL matches nothing
                     )
                     .scalar_subquery()
                 )
@@ -592,7 +593,8 @@ class TestingRequestService:
 
                 if _include_wf:
                     completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
-                        TrWfInstance.status.in_(["completed", "terminated"])
+                        TrWfInstance.status.in_(["completed", "terminated"]),
+                TrWfInstance.testing_request_id.isnot(None),  # NOT IN + NULL matches nothing
                     ).scalar_subquery()
                     query = query.filter(
                         or_(
@@ -608,7 +610,10 @@ class TestingRequestService:
             # (routers/testing_requests.py _enrich), which already treats a
             # cancelled workflow instance as closed.
             wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
-                TrWfInstance.status.in_(["completed", "terminated", "cancelled"])
+                TrWfInstance.status.in_(["completed", "terminated", "cancelled"]),
+                # NOT IN (..., NULL) matches nothing in SQL - one instance
+                # with no request id would empty the whole "Open" list
+                TrWfInstance.testing_request_id.isnot(None),
             ).scalar_subquery()
             if is_closed:
                 closed_conds = [
@@ -635,7 +640,8 @@ class TestingRequestService:
 
         if wf_active is not None:
             active_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
-                TrWfInstance.status == "active"
+                TrWfInstance.status == "active",
+                TrWfInstance.testing_request_id.isnot(None),  # NOT IN + NULL matches nothing
             ).scalar_subquery()
             if wf_active:
                 query = query.filter(TestingRequest.id.in_(active_wf_ids))
@@ -700,9 +706,30 @@ class TestingRequestService:
                         )
                     )
 
-                query = query.filter(
-                    TestingRequest.id.in_(subquery.subquery())
-                )
+                if is_closed is None:
+                    # "All": a request not tested yet (a new request, a
+                    # freshly raised CAR retest...) has no result to date it
+                    # by - keep it when it was CREATED in the range, rather
+                    # than dropping every untested request from "All".
+                    created_in_range = []
+                    if date_from:
+                        created_in_range.append(
+                            TestingRequest.cts >= datetime.combine(date_from, datetime.min.time())
+                        )
+                    if date_to:
+                        created_in_range.append(
+                            TestingRequest.cts < datetime.combine(date_to + timedelta(days=1), datetime.min.time())
+                        )
+                    untested = ~TestingRequest.id.in_(self.db.query(TestResult.testing_request_id).subquery())
+                    query = query.filter(or_(
+                        TestingRequest.id.in_(subquery.subquery()),
+                        and_(untested, *created_in_range),
+                    ))
+                else:
+                    # "Closed": by when the test was performed
+                    query = query.filter(
+                        TestingRequest.id.in_(subquery.subquery())
+                    )
 
             # Open (not yet tested) -> use CTS
             else:
@@ -1058,7 +1085,8 @@ class TestingRequestService:
 
             elif status_filter == "closed":
                 completed_wf_ids2 = self.db.query(TrWfInstance.testing_request_id).filter(
-                    TrWfInstance.status.in_(["completed", "terminated"])
+                    TrWfInstance.status.in_(["completed", "terminated"]),
+                TrWfInstance.testing_request_id.isnot(None),  # NOT IN + NULL matches nothing
                 ).scalar_subquery()
                 query = query.filter(
                     or_(
@@ -1474,7 +1502,8 @@ class TestingRequestService:
             # /breakdown tiles (which use this same complement logic).
             from services.dashboard_service import CLOSED_STATUSES as _LEGACY_CLOSED_STATUSES
             wf_done_ids = self.db.query(TrWfInstance.testing_request_id).filter(
-                TrWfInstance.status.in_(["completed", "terminated"])
+                TrWfInstance.status.in_(["completed", "terminated"]),
+                TrWfInstance.testing_request_id.isnot(None),  # NOT IN + NULL matches nothing
             ).scalar_subquery()
 
             open_count = (
@@ -1934,7 +1963,8 @@ class TestingRequestService:
                 pass
         if is_closed is not None:
             completed_wf_ids = self.db.query(TrWfInstance.testing_request_id).filter(
-                TrWfInstance.status.in_(["completed", "terminated"])
+                TrWfInstance.status.in_(["completed", "terminated"]),
+                TrWfInstance.testing_request_id.isnot(None),  # NOT IN + NULL matches nothing
             ).scalar_subquery()
             if is_closed:
                 query = query.filter(
