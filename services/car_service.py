@@ -1599,8 +1599,9 @@ def _process_evaluation_for_car(
     existing_car = find_open_car_for_lineage(db, testing_request)
     if not triggers and not existing_car:
         # "Trigger a CAR" is off for this severity, but the rule may still
-        # schedule follow-up actions (e.g. ALERT -> a follow-up oil test in
-        # 30 days) - raise them as plain TRs, no CAR (design doc 5 and 8).
+        # list a follow-up of this same test (raised as a plain retest, no
+        # CAR, due on the CAR default) or a repair workflow (started).
+        # Follow-ups of other tests are not used (_create_followups).
         if not replacement and config is not None and any(f.is_active for f in config.followups):
             _create_followups(db, car=None, config=config, source_request=testing_request, created_by=created_by)
         return None
@@ -1645,8 +1646,9 @@ def _process_evaluation_for_car(
             existing_car.status = CarStatus.REOPENED
         # Escalation: a CAR raised on ALERT whose chain has now come back
         # CRITICAL is handled as a CRITICAL one from here on - CRITICAL
-        # severity, the CRITICAL due date (never later than it already is),
-        # and the CRITICAL rule's follow-up actions (below).
+        # severity, the CRITICAL due date (never later than it already is)
+        # for the CAR and its open retests, and the CRITICAL rule's
+        # follow-ups (below).
         escalated = (
             evaluation_overall == "CRITICAL"
             and (existing_car.severity or "").upper() == "ALERT"
@@ -1654,9 +1656,31 @@ def _process_evaluation_for_car(
         )
         if escalated:
             existing_car.severity = "CRITICAL"
-            critical_due = (datetime.now(timezone.utc) + timedelta(days=CAR_DUE_DAYS_CRITICAL)).date()
+            critical_deadline = datetime.now(timezone.utc) + timedelta(days=CAR_DUE_DAYS_CRITICAL)
+            critical_due = critical_deadline.date()
             if existing_car.due_date is None or existing_car.due_date > critical_due:
                 existing_car.due_date = critical_due
+            # The retest already running was raised on the ALERT deadline -
+            # bring it forward too, or the CAR would be due before the only
+            # request that can close it.
+            linked_ids = [
+                tr_id for (tr_id,) in db.query(CarTestRequest.test_request_id)
+                .filter(CarTestRequest.car_id == existing_car.id).all()
+            ]
+            if linked_ids:
+                open_retests = db.query(TestingRequest).filter(
+                    TestingRequest.id.in_(linked_ids),
+                    TestingRequest.test_request_type.in_(["RETEST", "FOLLOW_UP"]),
+                    ~TestingRequest.status.in_(list(_TERMINAL_TR_STATUSES)),
+                ).all()
+                # only those still waiting for a result - one already tested
+                # (e.g. the retest that just came back CRITICAL, now awaiting
+                # approval) keeps its date, or slow approval would make it
+                # count as overdue
+                waiting = expecting_result_ids(db, [t.id for t in open_retests])
+                for tr in open_retests:
+                    if tr.id in waiting and (tr.due_date is None or tr.due_date > critical_deadline):
+                        tr.due_date = critical_deadline
             logger.info(
                 f"CAR {existing_car.car_number}: escalated ALERT -> CRITICAL by "
                 f"{testing_request.request_number or testing_request.id}"
@@ -1664,10 +1688,10 @@ def _process_evaluation_for_car(
         db.commit()
         if escalated:
             _fire_car_notification(db, event_type="car_escalated", car=existing_car)
-            # the CRITICAL rule's follow-ups (e.g. oil + tan delta in 1 day);
-            # _create_followups reuses a request of that type already in
-            # flight, so nothing is duplicated. Not while replacing the
-            # equipment.
+            # the CRITICAL rule's follow-ups: a retest of this same test (the
+            # one already in flight is reused, so nothing is duplicated) or
+            # a repair workflow; other tests are not used. Not while
+            # replacing the equipment.
             if not replacement and config is not None and any(f.is_active for f in config.followups):
                 _create_followups(
                     db, car=existing_car, config=config, source_request=testing_request, created_by=created_by
