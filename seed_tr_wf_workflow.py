@@ -160,6 +160,7 @@ def _get_or_create_status(session, wf, code, name, seq, color,
 def _get_or_create_stage(
     session, wf, status, name, code, seq,
     show_recommendation=False, is_result_stage=False,
+    default_duration_days=None,
 ):
     # NOTE: use_l2_route / is_role_scoped are no longer seeded — routing
     # re-run and queue role-scoping are derived at runtime from the routing
@@ -181,6 +182,8 @@ def _get_or_create_stage(
             is_active=True,
             show_recommendation=show_recommendation,
             is_result_stage=is_result_stage,
+            # Only set on a NEW stage -- an admin's later value is kept.
+            default_duration_days=default_duration_days,
         )
         session.add(s)
         session.flush()
@@ -417,10 +420,14 @@ def seed_tr_wf_workflow(session, org=None):
     # Routing/scoping behavior is derived from the routing rules seeded below
     # (entry rules resolve at instantiation; queue scoping applies wherever a
     # stage's roles intersect the resolved roles) — no per-stage flags needed.
-    sg_l2    = _get_or_create_stage(session, wf_normal, st_l2_pending, "L2 Approval & Route",  "l2_approve_route",  1)
-    sg_l3a   = _get_or_create_stage(session, wf_normal, st_l3_pending, "L3 Tester Assignment", "l3_assign_tester",  2)
-    sg_l4    = _get_or_create_stage(session, wf_normal, st_testing,    "L4 Test Execution",    "l4_test_execution", 3)
-    sg_l3rev = _get_or_create_stage(session, wf_normal, st_review,     "L3 Result Review",     "l3_review_result",  4, show_recommendation=True, is_result_stage=True)
+    # 2 days per stage = the UI's default (TrWfProvider.defaultStageDueHours):
+    # these add up to a new Test Request's default Due Date and are each
+    # stage's SLA. Same as backfill_standard_test_wf_stage_duration.py.
+    STD_STAGE_DAYS = 2
+    sg_l2    = _get_or_create_stage(session, wf_normal, st_l2_pending, "L2 Approval & Route",  "l2_approve_route",  1, default_duration_days=STD_STAGE_DAYS)
+    sg_l3a   = _get_or_create_stage(session, wf_normal, st_l3_pending, "L3 Tester Assignment", "l3_assign_tester",  2, default_duration_days=STD_STAGE_DAYS)
+    sg_l4    = _get_or_create_stage(session, wf_normal, st_testing,    "L4 Test Execution",    "l4_test_execution", 3, default_duration_days=STD_STAGE_DAYS)
+    sg_l3rev = _get_or_create_stage(session, wf_normal, st_review,     "L3 Result Review",     "l3_review_result",  4, show_recommendation=True, is_result_stage=True, default_duration_days=STD_STAGE_DAYS)
     session.flush()
 
     # ── Stage roles ───────────────────────────────────────────────────────────

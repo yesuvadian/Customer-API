@@ -329,9 +329,14 @@ scheduler.add_job(
 
 
 # Overdue & due-reminder check (runs daily at 07:00 UTC)
-def _check_schedule_notifications():
+def _check_schedule_notifications(only_request_ids=None):
     """
     Fully config-driven scheduler job.
+
+    only_request_ids: manual run (run_notification_check.py) limited to these
+    TestingRequest ids -- evaluates only them in Pass 1 / Pass 4 and skips
+    the org-wide passes (recurring summaries, schedule-missed). None = the
+    normal scheduled run over everything.
 
     Reads every active NotificationScheduleRule row and evaluates each open TR.
 
@@ -393,12 +398,16 @@ def _check_schedule_notifications():
             else:
                 org_rules[rule.organization_id][key] = rule
 
-        # All statuses that represent an "open" test request
+        # All statuses that represent an "open" test request.
+        # pending_assignment = a tr_wf request past L2 (waiting for / in
+        # L3 tester assignment and L4 test execution) -- without it those
+        # requests never got a due-date reminder or overdue alert.
         open_statuses = (
             TestingRequestStatus.submitted,
             TestingRequestStatus.assigned,
             TestingRequestStatus.accepted,
             TestingRequestStatus.in_progress,
+            TestingRequestStatus.pending_assignment,
         )
 
         # Load all open TRs (with and without due_date for status_transition rules)
@@ -407,6 +416,8 @@ def _check_schedule_notifications():
             .filter(TestingRequest.status.in_(open_statuses))
             .all()
         )
+        if only_request_ids:
+            requests = [r for r in requests if r.id in only_request_ids]
 
         fired_total = 0
 
@@ -677,7 +688,7 @@ def _check_schedule_notifications():
         #
         recurring_rules = [r for r in all_rules if r.trigger_type == "recurring"]
 
-        if recurring_rules:
+        if recurring_rules and not only_request_ids:
             from collections import defaultdict as _ddict
             from models import NotificationLog
             from datetime import datetime as _dt
@@ -773,6 +784,8 @@ def _check_schedule_notifications():
                 )
                 .all()
             )
+            if only_request_ids:
+                overdue_schedules = []
 
             # Build set of schedule_ids that already have a success log after next_run_date
             executed_ids: set = set()
@@ -886,6 +899,11 @@ def _check_schedule_notifications():
                 )
                 .all()
             )
+            if only_request_ids:
+                stage_instances = [
+                    si for si in stage_instances
+                    if si.wf_instance and si.wf_instance.testing_request_id in only_request_ids
+                ]
 
             now4 = _dt4.utcnow()
 
@@ -992,7 +1010,8 @@ scheduler.add_job(
 # One-shot per breach, not a repeating digest: sla_breach_notified_at is set
 # the moment a stage is flagged, so a still-open, still-breached instance is
 # never re-notified on a later 15-minute pass.
-def _check_review_sla_breaches():
+def _check_review_sla_breaches(only_request_ids=None):
+    """only_request_ids: same manual-run filter as _check_schedule_notifications."""
     db = BackgroundSessionLocal()
     try:
         from models import TrWfStageInstance, TrWfStage, TrWfStageRole
@@ -1017,6 +1036,11 @@ def _check_review_sla_breaches():
             )
             .all()
         )
+        if only_request_ids:
+            candidates = [
+                si for si in candidates
+                if si.wf_instance and si.wf_instance.testing_request_id in only_request_ids
+            ]
 
         notified = 0
         nsvc = NotificationService(db)
@@ -1382,11 +1406,13 @@ def _run_monthly_mis_report():
         prev_month_start = datetime(prev_year, prev_month, 1, tzinfo=_tz.utc)
         report_month = prev_month_start.strftime("%B %Y")
 
+        # Same open set as _check_schedule_notifications.
         open_statuses = [
             TestingRequestStatus.submitted,
             TestingRequestStatus.assigned,
             TestingRequestStatus.accepted,
             TestingRequestStatus.in_progress,
+            TestingRequestStatus.pending_assignment,
         ]
 
         orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
