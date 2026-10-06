@@ -155,7 +155,7 @@ class UserSecurityService(UTCDateTimeMixin):
     @classmethod
     def update_otp(cls, db: Session, user_id: str, otp_code: str):
         user_sec = cls.get_user_security(db, user_id)
-        otp_expiry = cls._make_aware(otp_expiry)
+        otp_expiry = cls._utc_now() + timedelta(minutes=cls.OTP_VALIDITY_MINUTES)
         user_sec.otp_code = otp_code
         user_sec.otp_expiry = otp_expiry
         user_sec.otp_attempts = 0
