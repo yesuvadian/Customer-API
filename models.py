@@ -5926,6 +5926,74 @@ class EquipmentConditionBandThreshold(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class EquipmentExpectedLife(Base):
+    """Admin-configurable expected service life (years) per equipment type
+    for the AI Graph Dashboard's life-left / ageing / life-stage numbers.
+    Replaces the previously hardcoded _TYPE_LIFE dict in
+    routers/ai_graph.py's _expected_life.
+
+    Row semantics: `match_pattern` is a case-insensitive substring of the
+    equipment type's CategoryMaster name; active rows are tried in ascending
+    `sort_order` (then id) and the FIRST match wins — same as the old dict's
+    insertion-order iteration. No match falls back to
+    AgeingConfig.default_expected_life_years. No org scoping, matching
+    every other table of this shape in this file.
+    """
+    __tablename__ = "equipment_expected_life"
+    __table_args__ = (
+        UniqueConstraint("match_pattern", name="uq_equipment_expected_life_pattern"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    match_pattern       = Column(String(100), nullable=False)   # e.g. "power transformer"
+    expected_life_years = Column(Numeric(6, 2), nullable=False)  # > 0
+    sort_order          = Column(Integer, nullable=False, default=0)  # lower = tried first
+    is_active           = Column(Boolean, default=True)
+    notes               = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AgeingConfig(Base):
+    """Single-row (global, not org-scoped) settings for the AI Graph
+    Dashboard's ageing calculations, replacing constants previously
+    hardcoded in routers/ai_graph.py:
+
+      - default_expected_life_years: _DEFAULT_LIFE (used when no
+        EquipmentExpectedLife row matches the equipment type).
+      - life_stage_mid / life_stage_near_end / life_stage_overdue: the
+        age / expected_life cutoffs /grouped buckets equipment into
+        (>= overdue -> overdue, >= near_end -> near_end, >= mid -> mid_life,
+        else early). Invariant (enforced by the API): 0 < mid < near_end <= overdue.
+      - benchmark_*: the /ageing radar's reference polygon (0-100 each).
+
+    Only the first row (lowest id) is ever read; the API upserts it.
+    """
+    __tablename__ = "ageing_config"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    default_expected_life_years = Column(Numeric(6, 2), nullable=False, default=30)
+    life_stage_mid              = Column(Numeric(6, 3), nullable=False, default=0.5)
+    life_stage_near_end         = Column(Numeric(6, 3), nullable=False, default=0.8)
+    life_stage_overdue          = Column(Numeric(6, 3), nullable=False, default=1.0)
+    benchmark_aging_rate        = Column(Numeric(5, 2), nullable=False, default=30)
+    benchmark_volatility        = Column(Numeric(5, 2), nullable=False, default=25)
+    benchmark_life_left_risk    = Column(Numeric(5, 2), nullable=False, default=35)
+    benchmark_thermal_stress    = Column(Numeric(5, 2), nullable=False, default=25)
+    benchmark_load_factor       = Column(Numeric(5, 2), nullable=False, default=30)
+    notes = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 # Equipment columns that are NEVER offered as a DQI "this field must be
 # present" check, even though nullable — either they're not user-facing
 # nameplate data (id/FKs, the nameplate_data JSONB blob, the status enum,

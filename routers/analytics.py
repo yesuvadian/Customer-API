@@ -26,6 +26,7 @@ Drill-down chain:
 """
 
 import uuid
+import threading
 import re
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -62,7 +63,6 @@ from models import (
 from services.condition_recommendation_service import evaluate_for_equipment
 from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words, accepted_test_result_ids
 from category_labels import RiskLevelColors
-from utils.common_service import get_user_dept_scope
 
 logger = logging.getLogger(__name__)
 
@@ -403,38 +403,45 @@ def _lab_only_scores(eq_ids: list, db: Session) -> dict:
     return out
 
 
-def _build_dept_rollup(equipment_list: list, scope_dept_id, db) -> dict:
-    """Return {child_dept_id: count} rollup for a list of equipment objects."""
+def _build_dept_rollup(equipment_list: list, scope_dept_id, db, org_id=None) -> dict:
+    """Return {child_dept_id: count} rollup for a list of equipment objects:
+    each equipment counted under the direct child of scope_dept_id (or the
+    organization's root department when no scope) that contains it.
+
+    Loads the organization's department tree in ONE query and walks parents
+    in Python - previously one subtree query per child/root, and with no
+    scope it walked the root departments of every organization."""
     counts: dict = {}
     if not equipment_list:
         return counts
-    if scope_dept_id:
-        children = db.query(OrgDepartment.id).filter(
-            OrgDepartment.parent_department_id == scope_dept_id).all()
-        child_ids = [r[0] for r in children]
-        dept_to_child: dict = {}
-        for cid in child_ids:
-            for did in _collect_department_ids(cid, db):
-                dept_to_child[did] = cid
-        for eq in equipment_list:
-            if eq.department_id:
-                cid = dept_to_child.get(eq.department_id)
-                if cid:
-                    ck = str(cid)
-                    counts[ck] = counts.get(ck, 0) + 1
-    else:
-        roots = db.query(OrgDepartment.id).filter(
-            OrgDepartment.parent_department_id.is_(None)).all()
-        dept_to_root: dict = {}
-        for (rid,) in roots:
-            for did in _collect_department_ids(rid, db):
-                dept_to_root[did] = rid
-        for eq in equipment_list:
-            if eq.department_id:
-                rid = dept_to_root.get(eq.department_id)
-                if rid:
-                    rk = str(rid)
-                    counts[rk] = counts.get(rk, 0) + 1
+    q = db.query(OrgDepartment.id, OrgDepartment.parent_department_id)
+    if org_id:
+        q = q.filter(OrgDepartment.organization_id == org_id)
+    parent_of = {d_id: p_id for d_id, p_id in q.all()}
+
+    def _bucket(dept_id):
+        seen = set()
+        cur = dept_id
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            parent = parent_of.get(cur, "missing")
+            if parent == "missing":
+                return None              # not in this organization's tree
+            if parent == scope_dept_id:  # scope None: parent None = a root
+                return cur
+            cur = parent
+        return None
+
+    cache: dict = {}
+    for eq in equipment_list:
+        if not eq.department_id:
+            continue
+        if eq.department_id not in cache:
+            cache[eq.department_id] = _bucket(eq.department_id)
+        b = cache[eq.department_id]
+        if b is not None:
+            k = str(b)
+            counts[k] = counts.get(k, 0) + 1
     return counts
 
 
@@ -460,8 +467,7 @@ def get_asset_breakdown(
       - dept_equipment_counts: { "<dept-id>": 120, ... }  (direct children)
       - total             : total equipment count in scope
     """
-    org_id   = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
-    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+    org_id, dept_ids = _resolve_dashboard_scope(db, user, department_id)
 
     # Resolve Testing Kit category IDs to exclude from asset counts
     testkit_type_ids = {
@@ -496,7 +502,10 @@ def get_asset_breakdown(
         retired_q = retired_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
         retired_q = retired_q.filter(Equipment.department_id.in_(dept_ids))
-    retired_eq: list[Equipment] = retired_q.all()
+    # Testing Kits aren't substation assets here either (and the Year-of-
+    # failure drill-down, /dashboard/equipment, never lists them).
+    retired_eq: list[Equipment] = [
+        e for e in retired_q.all() if e.equipment_type_id not in testkit_type_ids]
 
     # Bulk-fetch type names
     type_ids = list({e.equipment_type_id for e in all_eq if e.equipment_type_id})
@@ -518,7 +527,9 @@ def get_asset_breakdown(
     # the equipment list and the modal do, or this endpoint's group rollups
     # (e.g. a "Power Transformer" row's Critical/Healthy counts) disagree
     # with the individual equipment rows shown underneath it.
-    lab_map = _lab_only_scores(eq_ids_all, db)
+    # Retired equipment too, for the Year-of-failure health split (it was
+    # always all "untested" because these had no lab score).
+    lab_map = _lab_only_scores(eq_ids_all + [e.id for e in retired_eq], db)
     lab_ea_map = {
         eq_id: SimpleNamespace(health_score=score, risk_level=risk)
         for eq_id, (score, risk, _findings) in lab_map.items()
@@ -624,13 +635,13 @@ def get_asset_breakdown(
     # this endpoint's looser "any completed test in range + any
     # EquipmentAnalytics row ever" check.
     dated_ta_map: dict = {}
-    if _date_filter_active and eq_id_set:
+    if _date_filter_active and test_count_id_set:
         coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
         ta_q = (
             db.query(TestAnalytics, coalesced.label("eff_date"))
             .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
             .filter(
-                TestAnalytics.equipment_id.in_(eq_id_set),
+                TestAnalytics.equipment_id.in_(test_count_id_set),
                 TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
                 # This endpoint is AI Analytics-specific - exclude the same
                 # TA&QC/Failure Registry/cumulative-counter test types the
@@ -761,19 +772,29 @@ def get_asset_breakdown(
         tc = eq_test_counts.get(str(eq.id), 0)
         by_failure_year_tests[yr] = by_failure_year_tests.get(yr, 0) + (1 if tc > 0 else 0)
         by_failure_year_test_events[yr] = by_failure_year_test_events.get(yr, 0) + tc
-        _add_health(by_failure_year_h[yr], eq.id, (not _date_filter_active) or tc > 0)
+        # Same source rule as active equipment above: the in-range lab test
+        # when a date range is set, else the all-time lab score.
+        rsrc = dated_ta_map.get(eq.id) if _date_filter_active else lab_ea_map.get(eq.id)
+        if _date_filter_active and rsrc is not None and rsrc.health_score is None:
+            rsrc = None
+        _add_health(by_failure_year_h[yr], eq.id,
+                    (not _date_filter_active) or rsrc is not None, source=rsrc)
 
     # ── Hierarchical dept_equipment_counts: rollup per direct child of scope ──
-    dept_counts = _build_dept_rollup(all_eq, department_id, db)
+    dept_counts = _build_dept_rollup(all_eq, department_id, db, org_id)
 
     def _sort(d: dict) -> dict:
         return dict(sorted(d.items(), key=lambda x: -x[1]))
 
     return {
+        # Active risk bands (highest threshold first) - the client colours
+        # avg-health values with the same admin-configured cutoffs the
+        # critical/high/medium/low counts here were classified with.
+        "risk_bands":               [{"threshold": t, "label": l} for t, l in _load_risk_bands(db)],
         "total":                    len(all_eq),
         "testkit_total":            len(testkit_eq),
         "added_this_month":         added_this_month,
-        "dept_testkit_counts":      _build_dept_rollup(testkit_eq, department_id, db),
+        "dept_testkit_counts":      _build_dept_rollup(testkit_eq, department_id, db, org_id),
         "by_voltage_class":         _sort(by_voltage),
         "by_voltage_class_health":  {k: _finalise(v) for k, v in by_voltage_h.items()},
         "by_type":                  _sort(by_type),
@@ -833,14 +854,9 @@ def get_analytics_dashboard(
       - department_scores  : one-level child breakdown (for drill-down)
     """
     # ── 1. Resolve equipment IDs in scope ────────────────────────────────────
-    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
-    _user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
-    is_admin, user_dept_id = get_user_dept_scope(db, _user_id, org_id) if _user_id else (True, None)
-    # An explicit department_id (already drilled in) always wins; otherwise a
-    # dept-scoped (e.g. substation-level) user is confined to their own
-    # subtree so this dashboard never defaults to org-wide data for them.
-    effective_department_id = department_id or (None if is_admin else user_dept_id)
-    dept_ids = _collect_department_ids(effective_department_id, db) if effective_department_id else None
+    # A dept-scoped (e.g. substation-level) user is confined to their own
+    # subtree, both by default and when drilling in (see _resolve_dashboard_scope).
+    org_id, dept_ids = _resolve_dashboard_scope(db, user, department_id)
 
     # Testing Kits are excluded from /asset-breakdown's equipment scope (they
     # aren't real substation assets), but this endpoint's KPI scope had no
@@ -864,13 +880,25 @@ def get_analytics_dashboard(
             testkit_scope_q = testkit_scope_q.filter(Equipment.department_id.in_(dept_ids))
         testkit_eq_ids = {row[0] for row in testkit_scope_q.all()}
 
-    eq_query = db.query(EquipmentAnalytics)
+    # Scoped by the equipment's CURRENT organization/department - the
+    # denormalized EquipmentAnalytics columns lag a move until the next
+    # recompute (the department cards and AI Graph already use Equipment).
+    eq_query = db.query(EquipmentAnalytics).join(
+        Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
     if org_id:
-        eq_query = eq_query.filter(EquipmentAnalytics.organization_id == org_id)
+        eq_query = eq_query.filter(Equipment.organization_id == org_id)
     if dept_ids:
-        eq_query = eq_query.filter(EquipmentAnalytics.department_id.in_(dept_ids))
+        eq_query = eq_query.filter(Equipment.department_id.in_(dept_ids))
+    # Retired equipment keeps its EquipmentAnalytics row after retirement;
+    # exclude it like /asset-breakdown and /dashboard/equipment do, so the
+    # risk tiles and the Risk Equipment list count the same assets.
+    _retired_q = db.query(Equipment.id).filter(Equipment.status == "retired")
+    if org_id:
+        _retired_q = _retired_q.filter(Equipment.organization_id == org_id)
+    retired_eq_ids = {row[0] for row in _retired_q.all()}
     all_ea: list[EquipmentAnalytics] = [
-        ea for ea in eq_query.all() if ea.equipment_id not in testkit_eq_ids
+        ea for ea in eq_query.all()
+        if ea.equipment_id not in testkit_eq_ids and ea.equipment_id not in retired_eq_ids
     ]
 
     # ── 2. KPI summary ───────────────────────────────────────────────────────
@@ -884,7 +912,11 @@ def get_analytics_dashboard(
     if dept_ids:
         _scope_eq_q = _scope_eq_q.filter(Equipment.department_id.in_(dept_ids))
     if testkit_type_ids:
-        _scope_eq_q = _scope_eq_q.filter(~Equipment.equipment_type_id.in_(testkit_type_ids))
+        # NULL type is a real (untyped) asset, not a Testing Kit - keep it,
+        # same as /asset-breakdown and the department cards.
+        _scope_eq_q = _scope_eq_q.filter(
+            (Equipment.equipment_type_id == None)  # noqa: E711
+            | ~Equipment.equipment_type_id.in_(testkit_type_ids))
     all_scope_eq_ids: set = {row[0] for row in _scope_eq_q.all()}
     # Use scope IDs for all test queries so untested equipment is accounted for
     all_eq_ids = list(all_scope_eq_ids) if all_scope_eq_ids else ea_eq_ids
@@ -1065,10 +1097,10 @@ def get_analytics_dashboard(
     for src in risk_sources:
         risk_counts[src.risk_level or "Unknown"] = risk_counts.get(src.risk_level or "Unknown", 0) + 1
 
-    total = len(risk_sources)
-    avg_score = round(
-        sum(float(src.health_score) for src in risk_sources if src.health_score is not None) / total, 1
-    ) if total else None
+    # Average over scored rows only - dividing by every row let reset/unscored
+    # EquipmentAnalytics rows (health_score NULL) drag the fleet average down.
+    _scored = [float(src.health_score) for src in risk_sources if src.health_score is not None]
+    avg_score = round(sum(_scored) / len(_scored), 1) if _scored else None
 
     # ── 3. Hierarchy node ───────────────────────────────────────────────────
     ha_node = None
@@ -1136,7 +1168,10 @@ def get_analytics_dashboard(
                 ParameterAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         .order_by(ParameterAnalytics.calculated_at.desc())
     )
-    if dept_ids:
+    # Scope to the same equipment as the KPIs - by organization at the org
+    # root too, not only when a department is selected (otherwise the root
+    # view returned the latest anomalies of every organization).
+    if dept_ids or org_id:
         anom_query = anom_query.filter(ParameterAnalytics.equipment_id.in_(
             [ea.equipment_id for ea in all_ea]
         ))
@@ -1181,21 +1216,25 @@ def get_analytics_dashboard(
         # Fetch ALL actual child OrgDepartments (includes zones/depts with 0 tests)
         all_child_depts = (
             db.query(OrgDepartment)
-            .filter(OrgDepartment.parent_department_id == department_id)
+            .filter(OrgDepartment.parent_department_id == department_id,
+                    OrgDepartment.is_active.isnot(False))
             .all()
         )
-    elif not is_admin and user_dept_id:
-        # Dept-scoped user's root view — just their own department (mirrors
-        # the root_id behavior in /testing_requests/department_hierarchy),
-        # never the org's full list of top-level zones they can't access.
+    elif _user_root_dept_ids(db, user):
+        # Dept-scoped user's root view — the department(s) they're attached
+        # to (same set the tiles above are scoped to, see
+        # _user_allowed_dept_ids), never the org's full list of top-level
+        # zones they can't access. One card per attached department, so the
+        # cards add up to the tiles for users with several departments.
+        _roots = _user_root_dept_ids(db, user)
         child_ha_rows = (
             db.query(HierarchyAnalytics)
-            .filter(HierarchyAnalytics.department_id == user_dept_id)
+            .filter(HierarchyAnalytics.department_id.in_(_roots))
             .all()
         )
         all_child_depts = (
             db.query(OrgDepartment)
-            .filter(OrgDepartment.id == user_dept_id)
+            .filter(OrgDepartment.id.in_(_roots))
             .all()
         )
     else:
@@ -1212,6 +1251,7 @@ def get_analytics_dashboard(
             .filter(
                 OrgDepartment.parent_department_id.is_(None),
                 OrgDepartment.organization_id == _scope_org_id,
+                OrgDepartment.is_active.isnot(False),
             )
             .all()
         ) if _scope_org_id else []
@@ -1229,6 +1269,7 @@ def get_analytics_dashboard(
     # then each department's own subtree total is summed in Python.
     child_test_counts: dict = {}
     child_eq_counts: dict = {}
+    child_risk: dict = {}
     if all_child_dept_ids:
         from sqlalchemy import text
 
@@ -1276,14 +1317,22 @@ def get_analytics_dashboard(
         # multiple rows and get counted more than once, so this could
         # disagree with kpi_summary.total_tests (which does use DISTINCT)
         # for the same underlying requests.
+        # Same equipment scope as the KPI "Total tests": no Testing Kits,
+        # no retired equipment - otherwise the cards' test counts didn't add
+        # up to the KPI total.
         tc_grouped_q = (
             db.query(Equipment.department_id, func.count(func.distinct(TestingRequest.id)))
             .join(Equipment, Equipment.id == TestingRequest.equipment_id)
             .filter(
                 Equipment.department_id.in_(all_descendant_ids),
+                Equipment.status != "retired",
                 TestingRequest.status.in_(("completed", "closed")),
             )
         )
+        if testkit_type_ids:
+            tc_grouped_q = tc_grouped_q.filter(
+                (Equipment.equipment_type_id == None)  # noqa: E711
+                | ~Equipment.equipment_type_id.in_(testkit_type_ids))
         tc_grouped_q = _apply_tested_at_filter(tc_grouped_q, date_from, date_to)
         tc_grouped_q = tc_grouped_q.group_by(Equipment.department_id)
 
@@ -1293,8 +1342,12 @@ def get_analytics_dashboard(
                 Equipment.department_id.in_(all_descendant_ids),
                 Equipment.status != "retired",
             )
-            .group_by(Equipment.department_id)
         )
+        if testkit_type_ids:
+            eq_grouped_q = eq_grouped_q.filter(
+                (Equipment.equipment_type_id == None)  # noqa: E711
+                | ~Equipment.equipment_type_id.in_(testkit_type_ids))
+        eq_grouped_q = eq_grouped_q.group_by(Equipment.department_id)
 
         child_test_counts = {str(cid): 0 for cid in all_child_dept_ids}
         for dept_id, cnt in tc_grouped_q.all():
@@ -1310,21 +1363,48 @@ def get_analytics_dashboard(
                 key = str(root_id)
                 child_eq_counts[key] = child_eq_counts.get(key, 0) + cnt
 
+        # Risk counts + avg health per child, from the SAME risk_sources as
+        # the KPI tiles (all-time EquipmentAnalytics, or the latest in-range
+        # test when a date range is set) - HierarchyAnalytics is all-time and
+        # only refreshed on recompute, so the cards ignored the date filter
+        # and could disagree with the tiles.
+        _src_eq_ids = [src.equipment_id for src in risk_sources]
+        _eq_dept = {
+            eid: did for eid, did in db.query(Equipment.id, Equipment.department_id)
+            .filter(Equipment.id.in_(_src_eq_ids)).all()
+        } if _src_eq_ids else {}
+        for src in risk_sources:
+            did = _eq_dept.get(src.equipment_id)
+            root_id = descendant_to_root.get(_as_uuid(did)) if did else None
+            if root_id is None:
+                continue
+            agg = child_risk.setdefault(str(root_id), {
+                "Critical": 0, "High": 0, "Medium": 0, "Low": 0, "scores": []})
+            lvl = src.risk_level or "Unknown"
+            agg[lvl] = agg.get(lvl, 0) + 1
+            if src.health_score is not None:
+                agg["scores"].append(float(src.health_score))
+
     department_scores = []
     for d in all_child_depts:
         ha = ha_map.get(d.id)
-        eq_count = ha.equipment_count if ha else child_eq_counts.get(str(d.id), 0)
+        risk = child_risk.get(str(d.id), {})
+        scores = risk.get("scores") or []
+        avg = round(mean(scores), 1) if scores else None
         department_scores.append({
             "department_id":      str(d.id),
             "department_name":    d.name,
             "level_type":         ha.level_type if ha else None,
-            "health_score":       float(ha.health_score) if ha and ha.health_score is not None else None,
-            "risk_level":         ha.risk_level if ha else None,
-            "equipment_count":    eq_count,
-            "equipment_critical": ha.equipment_critical if ha else 0,
-            "equipment_high":     ha.equipment_high if ha else 0,
+            "health_score":       avg,
+            "risk_level":         _risk_from_score(avg, [], db) if avg is not None else None,
+            # Real assets only (no Testing Kits / retired), same as the tiles.
+            "equipment_count":    child_eq_counts.get(str(d.id), 0),
+            "equipment_critical": risk.get("Critical", 0),
+            "equipment_high":     risk.get("High", 0),
+            "equipment_medium":   risk.get("Medium", 0),
+            "equipment_low":      risk.get("Low", 0),
             "test_count":         child_test_counts.get(str(d.id), 0),
-            "has_analytics":      ha is not None,
+            "has_analytics":      bool(scores),
         })
 
     return {
@@ -1368,6 +1448,7 @@ def run_test_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    _assert_test_result_access(db, user, test_result_id)
     from models import TestResult as _TR
     from services.evaluation_service import EvaluationService
 
@@ -1406,6 +1487,7 @@ def run_equipment_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    _assert_equipment_access(db, user, equipment_id)
     engine = AnalyticsEngine(db)
     ea = engine.run_for_equipment(equipment_id)
     if not ea:
@@ -1419,72 +1501,216 @@ def run_equipment_analytics(
     }
 
 
-@router.post("/recompute-all", summary="Recompute analytics for every test result (admin)")
+# In-process recompute jobs ({job_id: state}). The API runs a single
+# uvicorn worker by design (Dockerfile: in-process APScheduler), so polling
+# the status endpoint always reaches the process running the job.
+_RECOMPUTE_JOBS: dict = {}
+_RECOMPUTE_LOCK = threading.Lock()
+
+
+def _run_recompute_job(job_id: str, org_id) -> None:
+    """Body of /recompute-all, on a background thread with its own session -
+    rescoring a whole organization inside one HTTP request timed out."""
+    from database import BackgroundSessionLocal
+    from models import TestResult, TestingRequest, TestingRequestStatus, TrWfInstance
+    from models import EquipmentAnalytics as _EA
+
+    job = _RECOMPUTE_JOBS[job_id]
+    # Background pool - a long job must not hold a web-request connection.
+    db = BackgroundSessionLocal()
+    try:
+        _SKIP_STATUSES = {
+            TestingRequestStatus.draft,
+            TestingRequestStatus.submitted,
+            TestingRequestStatus.assigned,
+            TestingRequestStatus.accepted,
+            TestingRequestStatus.in_progress,
+        }
+        # IDs of TRs that are wf-active (not yet completed)
+        wf_active_ids = {
+            row.testing_request_id
+            for row in db.query(TrWfInstance.testing_request_id).filter(
+                TrWfInstance.status == "active"
+            ).all()
+        }
+        _res_q = (
+            db.query(TestResult.id)
+            .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
+            .filter(TestingRequest.status.notin_(_SKIP_STATUSES))
+        )
+        if org_id:
+            # organization_id is nullable on TestResult/TestingRequest for
+            # legacy rows - fall back to the equipment's organization.
+            _res_q = (
+                _res_q.outerjoin(Equipment, Equipment.id == TestingRequest.equipment_id)
+                .filter((TestResult.organization_id == org_id)
+                        | (TestingRequest.organization_id == org_id)
+                        | (Equipment.organization_id == org_id))
+            )
+        if wf_active_ids:
+            _res_q = _res_q.filter(TestResult.testing_request_id.notin_(wf_active_ids))
+        result_ids = [r[0] for r in _res_q.all()]
+
+        _ea_q = db.query(_EA.equipment_id)
+        if org_id:
+            _ea_q = _ea_q.join(Equipment, Equipment.id == _EA.equipment_id).filter(
+                Equipment.organization_id == org_id)
+        ea_ids = [r[0] for r in _ea_q.all()]
+        job["total"] = len(result_ids) + len(ea_ids)
+
+        engine = AnalyticsEngine(db)
+        # Each item in its own SAVEPOINT: the engine only flushes, so a plain
+        # rollback after one failure would also discard the batch of earlier,
+        # successful (not yet committed) rescorings.
+        for i, rid in enumerate(result_ids, 1):
+            sp = db.begin_nested()
+            try:
+                engine.run_for_test(rid)
+                sp.commit()
+                job["recomputed"] += 1
+            except Exception as exc:
+                sp.rollback()
+                job["failed"] += 1
+                logger.warning("recompute_all: failed for %s: %s", rid, exc)
+            job["processed"] += 1
+            if i % 200 == 0:
+                db.commit()
+        # Second pass: re-aggregate EVERY equipment that has a health row.
+        # The loop above only reaches equipment with an eligible result, so
+        # a stale EquipmentAnalytics row with no accepted result behind it
+        # (e.g. its only request was rejected / cancelled / reopened) kept
+        # its old score. run_for_equipment() resets such rows.
+        for i, eq_id in enumerate(ea_ids, 1):
+            sp = db.begin_nested()
+            try:
+                engine.run_for_equipment(eq_id)
+                sp.commit()
+            except Exception as exc:
+                sp.rollback()
+                job["failed"] += 1
+                logger.warning("recompute_all: equipment re-aggregation failed for %s: %s", eq_id, exc)
+            job["processed"] += 1
+            if i % 200 == 0:
+                db.commit()
+        db.commit()
+        _drill_cache_clear()  # cached drill-down rows hold the old scores
+        job["status"] = "done"
+    except Exception as exc:  # pragma: no cover - surfaced through the status endpoint
+        db.rollback()
+        logger.exception("recompute_all job %s failed", job_id)
+        job["status"] = "error"
+        job["error"] = str(exc)
+    finally:
+        job["finished_at"] = datetime.now(timezone.utc).isoformat()
+        db.close()
+
+
+@router.post("/recompute-all", status_code=202,
+             summary="Start recomputing analytics for every test result (admin, background job)")
 def recompute_all_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
-    """Re-runs score_test + equipment aggregation for every submitted TestResult in the DB.
-    Skips results whose testing request is still in draft/in-progress/assigned state.
-    Use after changing the scoring formula to backfill historical scores."""
-    from models import TestResult, TestingRequest, TestingRequestStatus, TrWfInstance
-    from sqlalchemy import or_
+    """Starts a background re-run of score_test + equipment aggregation for
+    every submitted TestResult (skipping requests still in draft/in-progress/
+    assigned or with an active workflow). Returns {job_id, status}; poll
+    GET /recompute-all/{job_id} for progress. Starting while a job for the
+    same scope is still running returns that job instead of a second one."""
+    from auth_utils import has_org_admin_role
+    from routers.car import has_module_permission
 
-    _SKIP_STATUSES = {
-        TestingRequestStatus.draft,
-        TestingRequestStatus.submitted,
-        TestingRequestStatus.assigned,
-        TestingRequestStatus.accepted,
-        TestingRequestStatus.in_progress,
-    }
+    # Same people who can change the thresholds this recompute applies: an
+    # org admin, or a role with edit rights on the Threshold Config module
+    # (the page's "Recompute All" button).
+    _uid = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not _uid or not (has_org_admin_role(_uid, db)
+                        or has_module_permission(db, user, "threshold_config", "can_edit")):
+        raise HTTPException(status_code=403,
+                            detail="Requires org admin or Threshold Config edit permission")
+    # Only a platform super admin recomputes every organization; anyone else
+    # recomputes their own, so one tenant can't trigger the whole platform's
+    # rescoring.
+    _usertype = user.get("usertype") if isinstance(user, dict) else getattr(user, "usertype", None)
+    org_id = None if _usertype == "super_admin" else _user_org_id(user)
+    if org_id is None and _usertype != "super_admin":
+        # No organization to scope to - never fall through to "all orgs".
+        raise HTTPException(status_code=403, detail="No organization to recompute")
 
-    # Collect IDs of TRs that are wf-active (not yet completed)
-    wf_active_ids = {
-        row.testing_request_id
-        for row in db.query(TrWfInstance.testing_request_id).filter(
-            TrWfInstance.status == "active"
-        ).all()
-    }
+    with _RECOMPUTE_LOCK:
+        # Keep finished jobs for an hour (for late status polls), then drop them.
+        _now = datetime.now(timezone.utc)
+        for _jid in [k for k, j in _RECOMPUTE_JOBS.items()
+                     if j.get("finished_at") and (_now - datetime.fromisoformat(j["finished_at"])).total_seconds() > 3600]:
+            _RECOMPUTE_JOBS.pop(_jid, None)
+        for jid, j in _RECOMPUTE_JOBS.items():
+            if j["status"] == "running" and j["org_id"] == (str(org_id) if org_id else None):
+                return {"job_id": jid, **j}
+        job_id = uuid.uuid4().hex
+        _RECOMPUTE_JOBS[job_id] = {
+            "status": "running", "org_id": str(org_id) if org_id else None,
+            "total": None, "processed": 0, "recomputed": 0, "failed": 0,
+            "error": None, "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+        }
+    threading.Thread(target=_run_recompute_job, args=(job_id, org_id),
+                     name=f"recompute-{job_id[:8]}", daemon=True).start()
+    return {"job_id": job_id, **_RECOMPUTE_JOBS[job_id]}
 
-    results = db.query(TestResult).all()
-    # Filter: only run on results whose TR is in a terminal/submitted state
-    results = [
-        r for r in results
-        if r.testing_request
-        and r.testing_request.status not in _SKIP_STATUSES
-        and r.testing_request_id not in wf_active_ids
-    ]
-    engine  = AnalyticsEngine(db)
-    done, failed = 0, 0
-    for tr in results:
-        try:
-            engine.run_for_test(tr.id)
-            done += 1
-        except Exception as exc:
-            failed += 1
-            logger.warning("recompute_all: failed for %s: %s", tr.id, exc)
-    # Second pass: re-aggregate EVERY equipment that has a health row.
-    # The loop above only reaches equipment with an eligible result, so
-    # a stale EquipmentAnalytics row with no accepted result behind it
-    # (e.g. its only request was rejected / cancelled / reopened) kept
-    # its old score - the dashboards showed HEALTH 0 while the Test
-    # Results dialog was empty. run_for_equipment() resets such rows.
-    from models import EquipmentAnalytics as _EA
-    for (eq_id,) in db.query(_EA.equipment_id).all():
-        try:
-            engine.run_for_equipment(eq_id)
-        except Exception as exc:
-            failed += 1
-            logger.warning("recompute_all: equipment re-aggregation failed for %s: %s", eq_id, exc)
-    db.commit()
-    return {"status": "ok", "recomputed": done, "failed": failed}
+
+@router.get("/recompute-all/{job_id}", summary="Progress of a recompute-all job")
+def get_recompute_job(
+    job_id: str,
+    user: dict = Depends(get_current_user),
+):
+    job = _RECOMPUTE_JOBS.get(job_id)
+    org_id = _user_org_id(user)
+    _usertype = user.get("usertype") if isinstance(user, dict) else getattr(user, "usertype", None)
+    if not job or (_usertype != "super_admin" and job["org_id"] != (str(org_id) if org_id else None)):
+        raise HTTPException(status_code=404, detail="Recompute job not found")
+    return {"job_id": job_id, **job}
+
+
+# Short-lived cache of /dashboard/equipment's full sorted row list, keyed by
+# scope + filters (see get_dashboard_equipment). Single uvicorn worker, so a
+# process-local dict is shared by every request.
+_DRILL_CACHE: dict = {}
+_DRILL_CACHE_TTL = 120  # seconds
+_DRILL_CACHE_MAX = 64
+
+
+# Sync endpoints run on a thread pool - every access goes through the lock
+# (evicting iterates the dict, which a concurrent insert would break).
+_DRILL_CACHE_LOCK = threading.Lock()
+
+
+def _drill_cache_get(key):
+    with _DRILL_CACHE_LOCK:
+        hit = _DRILL_CACHE.get(key)
+    if hit and (datetime.now(timezone.utc) - hit[0]).total_seconds() < _DRILL_CACHE_TTL:
+        return hit[1]
+    return None
+
+
+def _drill_cache_put(key, rows) -> None:
+    with _DRILL_CACHE_LOCK:
+        if len(_DRILL_CACHE) >= _DRILL_CACHE_MAX:
+            oldest = min(_DRILL_CACHE, key=lambda k: _DRILL_CACHE[k][0])
+            _DRILL_CACHE.pop(oldest, None)
+        _DRILL_CACHE[key] = (datetime.now(timezone.utc), rows)
+
+
+def _drill_cache_clear() -> None:
+    with _DRILL_CACHE_LOCK:
+        _DRILL_CACHE.clear()
 
 
 @router.get("/dashboard/equipment", summary="Paginated equipment list for dashboard")
 def get_dashboard_equipment(
     department_id:    Optional[uuid.UUID] = Query(None),
     page:             int                 = Query(1, ge=1),
-    page_size:        int                 = Query(20, ge=1, le=100),
+    # Up to 1000 so the Risk Equipment sheet gets its whole list in one
+    # request (it used to page 100 at a time, recomputing the scope per page).
+    page_size:        int                 = Query(20, ge=1, le=1000),
     search:           Optional[str]       = Query(None, description="Filter by UEIC (partial match)"),
     date_from:        Optional[date]      = Query(None),
     date_to:          Optional[date]      = Query(None),
@@ -1495,6 +1721,11 @@ def get_dashboard_equipment(
     make_model:       Optional[str]       = Query(None, description="Filter by manufacturer + model combined, as returned by by_make_model"),
     commission_year:  Optional[int]       = Query(None, description="Filter by commissioned year"),
     failure_year:     Optional[int]       = Query(None, description="Filter by retired/failure year"),
+    replacement_year: Optional[int]       = Query(None, description="Filter by year replaced (commissioned year of the replacing equipment)"),
+    commission_unknown:  bool             = Query(False, description="Only equipment with no commissioned date"),
+    failure_unknown:     bool             = Query(False, description="Only retired equipment with no retired date"),
+    replacement_unknown: bool             = Query(False, description="Only replacement equipment with no commissioned date"),
+    capacity_mva:     Optional[str]       = Query(None, description="Filter by capacity bucket, as returned by by_capacity_mva (e.g. '10-50 MVA', 'Unknown')"),
     risk_level:       Optional[str]       = Query(None, description="Filter by risk level: Critical, High, Medium, Low"),
     tested_only:      bool                = Query(False, description="If true, exclude equipment with no analytics data"),
     db:               Session             = Depends(get_vendor_db),
@@ -1504,7 +1735,30 @@ def get_dashboard_equipment(
     Returns all equipment in scope (worst health first), paginated.
     Equipment with no analytics appear at the end with null scores.
     """
-    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+    org_id, dept_ids = _resolve_dashboard_scope(db, user, department_id)
+
+    # The whole sorted list is computed per request (scores for the entire
+    # scope), so "Load more" (page > 1) re-ran the full fleet computation for
+    # every page. Page 1 always computes fresh and caches the full list for a
+    # short time; later pages of the same query slice that cached list.
+    _cache_key = (
+        str(org_id), tuple(sorted(str(d) for d in dept_ids)) if dept_ids is not None else None,
+        search, date_from, date_to, voltage_class, equipment_type, manufacturer,
+        model_number, make_model, commission_year, failure_year, replacement_year,
+        commission_unknown, failure_unknown, replacement_unknown, capacity_mva,
+        risk_level, tested_only,
+    )
+    if page > 1:
+        _hit = _drill_cache_get(_cache_key)
+        if _hit is not None:
+            _start = (page - 1) * page_size
+            return {
+                "total":     len(_hit),
+                "page":      page,
+                "page_size": page_size,
+                "has_more":  _start + page_size < len(_hit),
+                "items":     _hit[_start: _start + page_size],
+            }
 
     # All equipment in scope - ordered so the base list is deterministic:
     # the final sort below (by risk/score) is a stable Python sort, so ties
@@ -1515,10 +1769,22 @@ def get_dashboard_equipment(
     # the page-1 and page-2 calls - showing one equipment twice and skipping
     # another.
     eq_q = db.query(Equipment).order_by(Equipment.id)
+    if org_id:
+        eq_q = eq_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
         eq_q = eq_q.filter(Equipment.department_id.in_(dept_ids))
+    # Same asset scope as /asset-breakdown and the KPI tiles: Testing Kits are
+    # never listed, and retired equipment only appears for the Year-of-failure
+    # drill (which asks for it explicitly via failure_year).
+    _testkit_ids = [c.id for c in db.query(CategoryMaster.id)
+                    .filter(CategoryMaster.name.ilike("%testing kit%")).all() if c.id]
+    if _testkit_ids:
+        eq_q = eq_q.filter((Equipment.equipment_type_id == None) | ~Equipment.equipment_type_id.in_(_testkit_ids))  # noqa: E711
+    if not failure_year and not failure_unknown:
+        eq_q = eq_q.filter(Equipment.status != "retired")
     if search:
-        eq_q = eq_q.filter(Equipment.ueic.ilike(f"%{search}%"))
+        _esc = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        eq_q = eq_q.filter(Equipment.ueic.ilike(f"%{_esc}%", escape="\\"))
     if voltage_class:
         if voltage_class.lower() == "unknown":
             eq_q = eq_q.filter((Equipment.voltage_class == None) | (Equipment.voltage_class == ""))
@@ -1537,11 +1803,33 @@ def get_dashboard_equipment(
     if commission_year:
         from sqlalchemy import extract
         eq_q = eq_q.filter(extract("year", Equipment.commissioned_date) == commission_year)
+    elif commission_unknown:
+        eq_q = eq_q.filter(Equipment.commissioned_date == None)  # noqa: E711
     if failure_year:
         from sqlalchemy import extract as _extract
         eq_q = eq_q.filter(Equipment.status == "retired")
         eq_q = eq_q.filter(_extract("year", Equipment.retired_date) == failure_year)
+    elif failure_unknown:
+        eq_q = eq_q.filter(Equipment.status == "retired", Equipment.retired_date == None)  # noqa: E711
     all_eq: list[Equipment] = eq_q.all()
+
+    # Year replaced = year the replacing equipment was commissioned, same
+    # definition /asset-breakdown's by_replacement_year uses (an equipment
+    # whose replaces_equipment_id is set is the replacement).
+    if replacement_year or replacement_unknown:
+        def _repl_year(e: Equipment):
+            if not getattr(e, "replaces_equipment_id", None):
+                return False, None
+            d = e.commissioned_date
+            return True, (d.year if d else None)
+        _filtered = []
+        for e in all_eq:
+            is_repl, yr = _repl_year(e)
+            if not is_repl:
+                continue
+            if (replacement_year and yr == replacement_year) or (replacement_unknown and yr is None):
+                _filtered.append(e)
+        all_eq = _filtered
 
     # make_model is a derived key (manufacturer + model_number), not a raw
     # column, so it can't be pushed into the SQL filter above - re-derive it
@@ -1553,6 +1841,12 @@ def get_dashboard_equipment(
             mdl = (e.model_number or "").strip()
             return f"{mk} {mdl}".strip() if mdl else mk
         all_eq = [e for e in all_eq if _make_model_key(e) == make_model]
+
+    # capacity bucket is derived from the latest nameplate/test data, same
+    # helper /asset-breakdown's by_capacity_mva uses.
+    if capacity_mva:
+        _cap = _eq_capacity_map([e.id for e in all_eq], db)
+        all_eq = [e for e in all_eq if _capacity_bucket(_cap.get(e.id)) == capacity_mva]
 
     # Apply equipment_type filter after type_map is built (done below)
     _filter_equipment_type = equipment_type
@@ -1576,7 +1870,38 @@ def get_dashboard_equipment(
     # -> (score, risk_level, critical_findings); an equipment whose only
     # tests are excluded types gets (None, "Unknown", []) here, same as a
     # genuinely untested one.
-    lab_map = _lab_only_scores(eq_ids, db)
+    _dated_lab = bool((date_from or date_to) and not risk_level and eq_ids)
+    lab_map = {} if _dated_lab else _lab_only_scores(eq_ids, db)
+
+    # With a date range (and no risk filter) the summary table classifies a
+    # group's equipment by its latest in-range LAB test (/asset-breakdown's
+    # dated_ta_map) - the drill-down rows must show that same snapshot, not
+    # the all-time lab score, or a row's badge contradicts its group's count.
+    if _dated_lab:
+        _c = func.coalesce(TestResult.tested_at, TestResult.cts)
+        _lq = (
+            db.query(TestAnalytics, _c.label("eff_date"))
+            .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
+            .filter(TestAnalytics.equipment_id.in_(eq_ids),
+                    TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
+                    TestAnalytics.template_key.notin_(_NON_LAB_TEMPLATE_KEYS),
+                    TestResult.test_category.is_(None))
+        )
+        if date_from:
+            _lq = _lq.filter(_c >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            _lq = _lq.filter(_c < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        _lb: dict = {}
+        for ta, eff in _lq.all():
+            if eff is None:
+                continue
+            cur = _lb.get(ta.equipment_id)
+            if cur is None or eff > cur[1]:
+                _lb[ta.equipment_id] = (ta, eff)
+        lab_map = {
+            eid: (float(ta.health_score), ta.risk_level or "Unknown", ta.critical_findings or [])
+            for eid, (ta, _e) in _lb.items() if ta.health_score is not None
+        }
 
     # Exclude untested equipment when caller requests it (AI Analytics)
     if tested_only:
@@ -1589,9 +1914,39 @@ def get_dashboard_equipment(
     # Registry submissions; filtering here by the lab-only definition instead
     # silently dropped equipment that's Critical only because of one of
     # those (e.g. "16 Critical" on the tile but only 3 rows in this list).
+    # With a date range the KPI tile classifies each equipment by its latest
+    # accepted TestAnalytics *in range* (see /dashboard's dated_ta_map), so
+    # the list must too - otherwise the tile and this list disagree.
+    dated_risk_map: dict = {}
+    if risk_level and (date_from or date_to) and all_eq:
+        _coal = func.coalesce(TestResult.tested_at, TestResult.cts)
+        _dq = (
+            db.query(TestAnalytics, _coal.label("eff_date"))
+            .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
+            .filter(TestAnalytics.equipment_id.in_([e.id for e in all_eq]),
+                    TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
+        )
+        if date_from:
+            _dq = _dq.filter(_coal >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            _dq = _dq.filter(_coal < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        _best: dict = {}
+        for ta, eff in _dq.all():
+            if eff is None:
+                continue
+            cur = _best.get(ta.equipment_id)
+            if cur is None or eff > cur[1]:
+                _best[ta.equipment_id] = (ta, eff)
+        # Same pick as the KPI: the latest in-range test, dropped if unscored.
+        dated_risk_map = {k: v[0] for k, v in _best.items() if v[0].health_score is not None}
+
     if risk_level:
-        all_eq = [e for e in all_eq
-                  if (ea_map[e.id].risk_level if e.id in ea_map else "Unknown") == risk_level]
+        if date_from or date_to:
+            all_eq = [e for e in all_eq
+                      if e.id in dated_risk_map and dated_risk_map[e.id].risk_level == risk_level]
+        else:
+            all_eq = [e for e in all_eq
+                      if (ea_map[e.id].risk_level if e.id in ea_map else "Unknown") == risk_level]
 
     eq_ids = [e.id for e in all_eq]
 
@@ -1659,6 +2014,10 @@ def get_dashboard_equipment(
     # TA&QC-only-critical equipment. Unfiltered listing keeps the lab-only
     # figures, which match the equipment-detail modal's chip row.
     def _eff_score_risk_findings(eq_id):
+        if risk_level and eq_id in dated_risk_map:
+            ta = dated_risk_map[eq_id]
+            return (float(ta.health_score) if ta.health_score is not None else None,
+                    ta.risk_level, (ta.critical_findings or []))
         if risk_level:
             ea = ea_map.get(eq_id)
             if ea:
@@ -1680,10 +2039,11 @@ def get_dashboard_equipment(
     sorted_eq = sorted(all_eq, key=_sort_key)
     total = len(sorted_eq)
     start = (page - 1) * page_size
-    page_eq = sorted_eq[start: start + page_size]
 
+    # Rows for the whole list (cheap next to the queries above), cached for
+    # the following pages - see _cache_key.
     items = []
-    for eq in page_eq:
+    for eq in sorted_eq:
         ea = ea_map.get(eq.id)
         eff_score, eff_risk, eff_findings = _eff_score_risk_findings(eq.id)
         # Build plain-English reason from the same findings shown in
@@ -1735,15 +2095,17 @@ def get_dashboard_equipment(
             "manufacturer":            eq.manufacturer,
             "model_number":            eq.model_number,
             "commissioned_date":       eq.commissioned_date.isoformat() if eq.commissioned_date else None,
+            "commissioned_year":       eq.commissioned_date.year if eq.commissioned_date else None,
             "retired_date":            eq.retired_date.isoformat() if getattr(eq, "retired_date", None) else None,
         })
 
+    _drill_cache_put(_cache_key, items)
     return {
         "total":     total,
         "page":      page,
         "page_size": page_size,
         "has_more":  start + page_size < total,
-        "items":     items,
+        "items":     items[start: start + page_size],
     }
 
 
@@ -1757,6 +2119,7 @@ def get_department_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    _resolve_dashboard_scope(db, user, department_id)
     row = (
         db.query(HierarchyAnalytics)
         .filter(HierarchyAnalytics.department_id == department_id)
@@ -1774,6 +2137,7 @@ def get_department_tree(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    _resolve_dashboard_scope(db, user, department_id)
     root     = db.query(HierarchyAnalytics).filter(HierarchyAnalytics.department_id == department_id).first()
     root_dept = db.get(OrgDepartment, department_id)
 
@@ -1822,6 +2186,7 @@ def get_department_equipment(
       - health_score, risk_level, condition_summary from EquipmentAnalytics
       - links.analytics, links.tests, links.parameters
     """
+    _resolve_dashboard_scope(db, user, department_id)
     dept_ids = _collect_department_ids(department_id, db) if include_sub_departments else {department_id}
 
     equipment_rows = (
@@ -1875,8 +2240,9 @@ def get_condition_risk_matrix(
     same health band — that's the whole point of the matrix over a single
     health map.
     """
-    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
-    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+    # Same server-side scope as the AI dashboards: own organization, and a
+    # department-scoped user only within their departments.
+    org_id, dept_ids = _resolve_dashboard_scope(db, user, department_id)
 
     equipment_q = db.query(Equipment).filter(Equipment.status != "retired")
     if org_id:
@@ -2043,8 +2409,9 @@ def get_deterioration_watch_list(
     transformer with 3 historical readings per parameter first showed up
     here with 8 flagged parameters, none of them real.
     """
-    org_id = user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
-    dept_ids = _collect_department_ids(department_id, db) if department_id else None
+    # Same server-side scope as the AI dashboards: own organization, and a
+    # department-scoped user only within their departments.
+    org_id, dept_ids = _resolve_dashboard_scope(db, user, department_id)
 
     equipment_q = db.query(Equipment).filter(Equipment.status != "retired")
     if org_id:
@@ -2409,6 +2776,7 @@ def review_deterioration_advisory(
     Quick Test Request flow; the Flutter side opens that existing dialog
     rather than a second request-creation path being built here.
     """
+    _assert_equipment_access(db, user, body.equipment_id)
     if body.disposition == "dismiss" and not (body.note and body.note.strip()):
         raise HTTPException(status_code=422, detail="note is required when dismissing an advisory")
 
@@ -2523,6 +2891,7 @@ def get_equipment_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    _assert_equipment_access(db, user, equipment_id)
     ea  = db.query(EquipmentAnalytics).filter(EquipmentAnalytics.equipment_id == equipment_id).first()
     if not ea:
         raise HTTPException(status_code=404, detail="No analytics available for this equipment")
@@ -2549,6 +2918,7 @@ def get_equipment_test_history(
       - template_key, tested_at, health_score, risk_level, critical_findings
       - links.analytics, links.raw
     """
+    _assert_equipment_access(db, user, equipment_id)
     # Same accepted-results rule as EquipmentAnalytics - see
     # services.analytics_engine.accepted_test_result_ids.
     _closed_result_ids = accepted_test_result_ids(db)
@@ -2589,6 +2959,7 @@ def get_equipment_test_types(
     with AI narrative fields (condition_summary, trend_summary, critical_findings,
     recommendations) so the dashboard can show per-test-type AI analysis.
     """
+    _assert_equipment_access(db, user, equipment_id)
     # Latest row per template_key. Order by tested_at (the actual test date),
     # not calculated_at (when it was last recomputed) - a bulk recompute
     # processes test results in arbitrary DB order, not chronological, so
@@ -2673,6 +3044,7 @@ def get_parameter_analytics(
     (not calculated_at, which is write time and can lag behind ingestion/
     recompute order) and keeping only the first row seen per group.
     """
+    _assert_equipment_access(db, user, equipment_id)
     from sqlalchemy.orm import aliased
     TR = aliased(TestResult)
     q = (
@@ -2771,6 +3143,7 @@ def get_parameter_history(
         }
       }
     """
+    _assert_equipment_access(db, user, equipment_id)
     # Trend always shows full history — the date filter controls the equipment list,
     # not the time-series chart. date_from / date_to are accepted but ignored here.
     #
@@ -2923,6 +3296,7 @@ def get_test_analytics(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    _assert_test_result_access(db, user, test_result_id)
     row = db.query(TestAnalytics).filter(TestAnalytics.test_result_id == test_result_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Analytics not yet computed for this test result")
@@ -2945,6 +3319,7 @@ def get_test_analytics_with_raw(
     This is the terminal drill-down: the user sees both the computed insights
     and the underlying measurements side-by-side.
     """
+    _assert_test_result_access(db, user, test_result_id)
     row = db.query(TestAnalytics).filter(TestAnalytics.test_result_id == test_result_id).first()
     tr  = db.get(TestResult, test_result_id)
 
@@ -3016,6 +3391,136 @@ def _collect_department_ids(root_id: uuid.UUID, db: Session) -> set:
     return semantics (root's own id included), just one round-trip."""
     from utils.common_service import get_dept_subtree_ids
     return set(get_dept_subtree_ids(db, root_id))
+
+
+def _user_org_id(user):
+    return user.get("organization_id") if isinstance(user, dict) else getattr(user, "organization_id", None)
+
+
+def _user_allowed_dept_ids(db: Session, user) -> Optional[set]:
+    """Departments a non-org-admin user may read, or None for no restriction
+    (org admin, or a user attached to no department at all).
+
+    The union of the subtrees of EVERY department the user is attached to -
+    each active OrgUserRole.department_id plus User.department_id. The
+    Flutter dashboards send /me's department_id (roles[0] or the profile
+    department), while get_user_dept_scope picks one role's department, so
+    keying on a single department 403'd users whose role and profile
+    departments differ. Each attached department is included itself even
+    when inactive (the subtree CTE skips inactive roots), so the set is never
+    empty for a department-scoped user - an empty set read as "whole org".
+
+    Cached on the request's session: the access checks call this repeatedly."""
+    cache = db.info.setdefault("_dashboard_allowed_depts", {})
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if user_id in cache:
+        return cache[user_id]
+    from auth_utils import has_org_admin_role
+    from models import OrgUserRole, User as _User
+    usertype = user.get("usertype") if isinstance(user, dict) else getattr(user, "usertype", None)
+    if not user_id or usertype == "super_admin" or has_org_admin_role(user_id, db):
+        cache[user_id] = None
+        return None
+    roots = {
+        r[0] for r in db.query(OrgUserRole.department_id).filter(
+            OrgUserRole.user_id == user_id,
+            OrgUserRole.is_active.is_(True),
+            OrgUserRole.department_id.isnot(None),
+        ).all()
+    }
+    profile_dept = db.query(_User.department_id).filter(_User.id == user_id).scalar()
+    if profile_dept:
+        roots.add(profile_dept)
+    if not roots:
+        cache[user_id] = None
+        return None
+    db.info.setdefault("_dashboard_dept_roots", {})[user_id] = roots
+    allowed: set = set(roots)
+    for root in roots:
+        allowed |= _collect_department_ids(root, db)
+    cache[user_id] = allowed
+    return allowed
+
+
+def _user_root_dept_ids(db: Session, user) -> Optional[set]:
+    """The departments a department-scoped user is attached to (their scope
+    roots, see _user_allowed_dept_ids), or None for an unrestricted user."""
+    if _user_allowed_dept_ids(db, user) is None:
+        return None
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    return db.info.get("_dashboard_dept_roots", {}).get(user_id)
+
+
+def _resolve_dashboard_scope(db: Session, user, department_id: Optional[uuid.UUID]):
+    """(org_id, dept_ids) a dashboard query may read, enforced server-side.
+
+    - The requested department must belong to the caller's organization.
+    - A department-scoped (non org-admin) user is confined to the departments
+      they're attached to (see _user_allowed_dept_ids): no department_id
+      means all of those, and a department_id outside them is a 403 - the
+      breadcrumb only offers nodes inside them.
+    dept_ids is None when the scope is the whole organization."""
+    org_id = _user_org_id(user)
+
+    if department_id and org_id:
+        owned = db.query(OrgDepartment.id).filter(
+            OrgDepartment.id == department_id,
+            OrgDepartment.organization_id == org_id,
+        ).first()
+        if not owned:
+            raise HTTPException(status_code=404, detail="Department not found")
+
+    allowed = _user_allowed_dept_ids(db, user)
+    if allowed is not None:
+        if department_id is None:
+            return org_id, allowed
+        if department_id not in allowed:
+            raise HTTPException(status_code=403, detail="Department outside your scope")
+
+    if not department_id:
+        return org_id, None
+    # Include the node itself even if inactive (the CTE skips inactive roots).
+    return org_id, ({department_id} | _collect_department_ids(department_id, db))
+
+
+def _assert_equipment_access(db: Session, user, equipment_id: uuid.UUID) -> None:
+    """404 unless the equipment belongs to the caller's organization.
+
+    Organization only - not the department subtree: single-equipment reads
+    are opened by workflow actors (testers, reviewers, approvers, TA&QC,
+    Comparison View) on equipment outside their own department, and those
+    screens went blank when this also required the department. The
+    dashboards' LIST endpoints still enforce the department scope
+    (_resolve_dashboard_scope)."""
+    eq_org = db.query(Equipment.organization_id).filter(Equipment.id == equipment_id).scalar()
+    org_id = _user_org_id(user)
+    exists = db.query(Equipment.id).filter(Equipment.id == equipment_id).first()
+    if not exists or (org_id and eq_org != org_id):
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
+
+def _assert_test_result_access(db: Session, user, test_result_id: uuid.UUID) -> None:
+    """404 unless the test result's equipment passes _assert_equipment_access
+    (falls back to the result's / request's organization when it has none)."""
+    row = (
+        db.query(TestResult.organization_id, TestingRequest.organization_id,
+                 TestingRequest.equipment_id)
+        .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
+        .filter(TestResult.id == test_result_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Test result not found")
+    tr_org, req_org, eq_id = row
+    if eq_id:
+        try:
+            _assert_equipment_access(db, user, eq_id)
+        except HTTPException:
+            raise HTTPException(status_code=404, detail="Test result not found")
+        return
+    org_id = _user_org_id(user)
+    if org_id and (tr_org or req_org) and (tr_org or req_org) != org_id:
+        raise HTTPException(status_code=404, detail="Test result not found")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3361,4 +3866,5 @@ def get_equipment_recommendations(
     db:   Session = Depends(get_vendor_db),
     user: dict    = Depends(get_current_user),
 ):
+    _assert_equipment_access(db, user, equipment_id)
     return evaluate_for_equipment(db, equipment_id)
