@@ -412,15 +412,15 @@ class TestingService:
                         if term_status:
                             _term_code = term_status.status_code
                     if not _term_code:
-                        # Fallback: last status in the WF definition by sequence
-                        _last_s = (
-                            self.db.query(_TrWfStatus)
-                            .filter(_TrWfStatus.wf_definition_id == instance.wf_definition_id)
-                            .order_by(_TrWfStatus.sequence.desc())
-                            .first()
+                        # No end status configured - one that matches the
+                        # action (never "Cancelled" for a complete)
+                        from services.tr_workflow_routing_service import fallback_terminal_status
+                        _fallback = fallback_terminal_status(
+                            self.db, instance.wf_definition_id,
+                            action_code=complete_t.action_code, is_rejection=bool(complete_t.is_rejection),
                         )
-                        if _last_s:
-                            _term_code = _last_s.status_code
+                        if _fallback:
+                            _term_code = _fallback.status_code
                     if _term_code:
                         _from_stage_id = instance.current_stage_id
                         _from_code = instance.current_status_code

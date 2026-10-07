@@ -148,6 +148,43 @@ class WorkflowConfigError(HTTPException):
         )
 
 
+def fallback_terminal_status(db, wf_definition_id, *, action_code: Optional[str], is_rejection: bool):
+    """End status for a terminal transition that has none configured
+    (terminal_status_id NULL). It used to be "the workflow's last status by
+    sequence" - for the Standard Test Workflow that is wf_cancelled, so every
+    request completed by such a "complete" was labelled Cancelled. Now it
+    matches the action:
+      - a rejection        -> the workflow's reject status,
+      - a cancel action    -> its cancel status,
+      - anything else      -> its completed / closed / commissioned status,
+                              never a cancel or reject one.
+    Falls back to the last non-cancel/non-reject status, then to the last
+    status, so a workflow with unusual codes still gets something."""
+    statuses = (
+        db.query(TrWfStatus)
+        .filter(TrWfStatus.wf_definition_id == wf_definition_id)
+        .order_by(TrWfStatus.sequence.desc())
+        .all()
+    )
+    if not statuses:
+        return None
+
+    def has(st, *words):
+        code = (st.status_code or "").lower()
+        return any(w in code for w in words)
+
+    action = (action_code or "").lower()
+    if is_rejection:
+        wanted = [s for s in statuses if has(s, "reject")]
+    elif "cancel" in action:
+        wanted = [s for s in statuses if has(s, "cancel")]
+    else:
+        wanted = [s for s in statuses if has(s, "complete", "closed", "commission")]
+        if not wanted:
+            wanted = [s for s in statuses if not has(s, "cancel", "reject")]
+    return (wanted or statuses)[0]
+
+
 class WorkflowRoutingService:
     """
     Core engine for the tr_wf_* workflow system.
@@ -511,16 +548,15 @@ class WorkflowRoutingService:
                     terminal_status_code = ts.status_code
                     terminal_status_name = ts.status_name
             if not terminal_status_code:
-                # Fallback: last TrWfStatus (by sequence) for this definition
-                _last = (
-                    self.db.query(TrWfStatus)
-                    .filter(TrWfStatus.wf_definition_id == instance.wf_definition_id)
-                    .order_by(TrWfStatus.sequence.desc())
-                    .first()
+                # No end status configured on this transition - pick one that
+                # matches the action (see fallback_terminal_status)
+                _fallback = fallback_terminal_status(
+                    self.db, instance.wf_definition_id,
+                    action_code=action_code, is_rejection=bool(transition.is_rejection),
                 )
-                if _last:
-                    terminal_status_code = _last.status_code
-                    terminal_status_name = _last.status_name
+                if _fallback:
+                    terminal_status_code = _fallback.status_code
+                    terminal_status_name = _fallback.status_name
 
         # Close current stage instance
         current_stage_inst: Optional[TrWfStageInstance] = (

@@ -16,6 +16,13 @@ Data Quality Index rule toggles:
                                             is_scheduled), org-scoped via the
                                             equipment it belongs to — unlike
                                             the global lookup tables above.
+    /threshold-config/expected-life      -> EquipmentExpectedLife (AI Graph
+                                            Dashboard expected service life
+                                            per equipment-type keyword)
+    /threshold-config/ageing-config      -> AgeingConfig, global singleton
+                                            (GET/PUT): default expected life,
+                                            life-stage cutoffs, ageing radar
+                                            benchmark — see alter_ageing_config.py
 
 These replace the previously hardcoded _RISK_BANDS / _SCORE / _CONDITION
 constants in services/analytics_engine.py, the _condition_from_score
@@ -33,16 +40,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
 from models import (
+    AgeingConfig,
     DqiRuleConfig,
     Equipment,
     EquipmentCalibrationConfig,
     EquipmentConditionBandThreshold,
+    EquipmentExpectedLife,
     EquipmentHealthBandThreshold,
     FailureCohortThresholdConfig,
     ParameterConditionScore,
@@ -899,3 +909,315 @@ def delete_calibration_config(
     if cfg:
         db.delete(cfg)
         db.commit()
+
+
+# ── Expected life + ageing settings (AI Graph Dashboard — routers/ai_graph.py's
+#    _load_expected_life / _load_ageing_config) ───────────────────────────────
+# Replace the previously hardcoded _TYPE_LIFE / _DEFAULT_LIFE, the /grouped
+# life-stage cutoffs and the /ageing radar benchmark. Both tables are global
+# (not org-scoped), like the band/score tables above. Created + seeded by
+# alter_ageing_config.py; until it's run these endpoints answer 503 with that
+# hint (ai_graph.py itself keeps working on its hardcoded fallbacks meanwhile).
+
+_AGEING_SETUP_HINT = (
+    "Ageing configuration tables don't exist yet -- run alter_ageing_config.py"
+)
+
+# Same values alter_ageing_config.py seeds / ai_graph.py falls back to.
+_AGEING_DEFAULTS = dict(
+    default_expected_life_years=30.0,
+    life_stage_mid=0.5,
+    life_stage_near_end=0.8,
+    life_stage_overdue=1.0,
+    benchmark_aging_rate=30.0,
+    benchmark_volatility=25.0,
+    benchmark_life_left_risk=35.0,
+    benchmark_thermal_stress=25.0,
+    benchmark_load_factor=30.0,
+)
+_BENCHMARK_FIELDS = (
+    "benchmark_aging_rate", "benchmark_volatility", "benchmark_life_left_risk",
+    "benchmark_thermal_stress", "benchmark_load_factor",
+)
+
+
+def _ageing_table_missing(db: Session) -> HTTPException:
+    db.rollback()
+    return HTTPException(status_code=503, detail=_AGEING_SETUP_HINT)
+
+
+class ExpectedLifeCreate(BaseModel):
+    match_pattern: str
+    expected_life_years: float
+    sort_order: int = 0
+    is_active: bool = True
+    notes: Optional[str] = None
+
+
+class ExpectedLifeUpdate(BaseModel):
+    match_pattern: Optional[str] = None
+    expected_life_years: Optional[float] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class ExpectedLifeResponse(BaseModel):
+    id: int
+    match_pattern: str
+    expected_life_years: float
+    sort_order: int
+    is_active: bool
+    notes: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class AgeingConfigUpdate(BaseModel):
+    default_expected_life_years: Optional[float] = None
+    life_stage_mid: Optional[float] = None
+    life_stage_near_end: Optional[float] = None
+    life_stage_overdue: Optional[float] = None
+    benchmark_aging_rate: Optional[float] = None
+    benchmark_volatility: Optional[float] = None
+    benchmark_life_left_risk: Optional[float] = None
+    benchmark_thermal_stress: Optional[float] = None
+    benchmark_load_factor: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class AgeingConfigResponse(BaseModel):
+    default_expected_life_years: float
+    life_stage_mid: float
+    life_stage_near_end: float
+    life_stage_overdue: float
+    benchmark_aging_rate: float
+    benchmark_volatility: float
+    benchmark_life_left_risk: float
+    benchmark_thermal_stress: float
+    benchmark_load_factor: float
+    notes: Optional[str] = None
+    # False = no row saved yet; the values shown are the built-in defaults
+    # ai_graph.py is currently using (same idea as is_org_override above).
+    is_configured: bool
+
+
+def _validate_life_years(v: float, what: str = "Expected life") -> None:
+    if not (0 < v <= 1000):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{what} must be greater than 0 (and at most 1000 years)",
+        )
+
+
+def _clean_pattern(v: Optional[str]) -> str:
+    v = (v or "").strip()
+    if not v:
+        raise HTTPException(status_code=422, detail="Match pattern is required")
+    if len(v) > 100:
+        raise HTTPException(status_code=422, detail="Match pattern must be at most 100 characters")
+    return v
+
+
+def _pattern_taken(db: Session, pattern: str, exclude_id: Optional[int] = None) -> bool:
+    # Case-insensitive, since matching against the equipment type name is.
+    q = db.query(EquipmentExpectedLife).filter(
+        func.lower(EquipmentExpectedLife.match_pattern) == pattern.lower()
+    )
+    if exclude_id is not None:
+        q = q.filter(EquipmentExpectedLife.id != exclude_id)
+    return q.first() is not None
+
+
+@router.get("/expected-life", response_model=List[ExpectedLifeResponse])
+def list_expected_life(db: Session = Depends(get_db)):
+    """Rules in match order — the first active rule whose pattern is a
+    substring of the equipment type name wins (see ai_graph._expected_life)."""
+    try:
+        return (
+            db.query(EquipmentExpectedLife)
+            .order_by(EquipmentExpectedLife.sort_order.asc(), EquipmentExpectedLife.id.asc())
+            .all()
+        )
+    except ProgrammingError:
+        raise _ageing_table_missing(db)
+
+
+@router.post(
+    "/expected-life",
+    response_model=ExpectedLifeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_expected_life(
+    payload: ExpectedLifeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    pattern = _clean_pattern(payload.match_pattern)
+    _validate_life_years(payload.expected_life_years)
+    try:
+        taken = _pattern_taken(db, pattern)
+    except ProgrammingError:
+        raise _ageing_table_missing(db)
+    if taken:
+        raise HTTPException(status_code=409, detail="A rule with this match pattern already exists")
+
+    row = EquipmentExpectedLife(
+        match_pattern=pattern,
+        expected_life_years=payload.expected_life_years,
+        sort_order=payload.sort_order,
+        is_active=payload.is_active,
+        notes=payload.notes,
+        created_by=current_user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Same race as create_dqi_rule: the .first() check isn't atomic.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A rule with this match pattern already exists")
+    db.refresh(row)
+    return row
+
+
+# PATCH like the other tables' row updates; PUT accepted too (same partial
+# semantics) for callers that prefer it.
+@router.api_route(
+    "/expected-life/{rule_id}",
+    methods=["PUT", "PATCH"],
+    response_model=ExpectedLifeResponse,
+)
+def update_expected_life(
+    rule_id: int,
+    payload: ExpectedLifeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        row = db.query(EquipmentExpectedLife).filter(EquipmentExpectedLife.id == rule_id).first()
+    except ProgrammingError:
+        raise _ageing_table_missing(db)
+    if not row:
+        raise HTTPException(status_code=404, detail="Expected life rule not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "match_pattern" in data:
+        data["match_pattern"] = _clean_pattern(data["match_pattern"])
+        if _pattern_taken(db, data["match_pattern"], exclude_id=rule_id):
+            raise HTTPException(status_code=409, detail="A rule with this match pattern already exists")
+    if "expected_life_years" in data:
+        if data["expected_life_years"] is None:
+            raise HTTPException(status_code=422, detail="Expected life is required")
+        _validate_life_years(data["expected_life_years"])
+    for nn in ("sort_order", "is_active"):
+        if nn in data and data[nn] is None:
+            data.pop(nn)
+    for field, value in data.items():
+        setattr(row, field, value)
+    row.modified_by = current_user.id
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A rule with this match pattern already exists")
+    db.refresh(row)
+    return row
+
+
+@router.delete("/expected-life/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_expected_life(rule_id: int, db: Session = Depends(get_db)):
+    try:
+        row = db.query(EquipmentExpectedLife).filter(EquipmentExpectedLife.id == rule_id).first()
+    except ProgrammingError:
+        raise _ageing_table_missing(db)
+    if not row:
+        raise HTTPException(status_code=404, detail="Expected life rule not found")
+    db.delete(row)
+    db.commit()
+
+
+def _ageing_response(row: Optional[AgeingConfig]) -> AgeingConfigResponse:
+    if row is None:
+        return AgeingConfigResponse(**_AGEING_DEFAULTS, notes=None, is_configured=False)
+    return AgeingConfigResponse(
+        **{k: float(getattr(row, k)) for k in _AGEING_DEFAULTS},
+        notes=row.notes,
+        is_configured=True,
+    )
+
+
+@router.get("/ageing-config", response_model=AgeingConfigResponse)
+def get_ageing_config(db: Session = Depends(get_db)):
+    try:
+        row = db.query(AgeingConfig).order_by(AgeingConfig.id.asc()).first()
+    except ProgrammingError:
+        raise _ageing_table_missing(db)
+    return _ageing_response(row)
+
+
+@router.put("/ageing-config", response_model=AgeingConfigResponse)
+def update_ageing_config(
+    payload: AgeingConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Partial update of the single global row (created on first save from
+    the built-in defaults — get-or-create, like update_failure_cohort_thresholds).
+    Validated on the MERGED values, so e.g. raising only near_end above the
+    stored overdue cutoff is rejected."""
+    try:
+        row = db.query(AgeingConfig).order_by(AgeingConfig.id.asc()).first()
+    except ProgrammingError:
+        raise _ageing_table_missing(db)
+
+    current = (
+        {k: float(getattr(row, k)) for k in _AGEING_DEFAULTS} if row else dict(_AGEING_DEFAULTS)
+    )
+    data = payload.model_dump(exclude_unset=True)
+    notes_set = "notes" in data
+    notes = data.pop("notes", None)
+    for k, v in data.items():
+        if v is None:
+            raise HTTPException(status_code=422, detail=f"{k} cannot be empty")
+    merged = {**current, **data}
+
+    _validate_life_years(merged["default_expected_life_years"], "Default expected life")
+    # Columns are Numeric(6,3): validate the values as they'll be stored,
+    # or e.g. 0.7999 < 0.8 passes and then both save as 0.800.
+    for _k in ("life_stage_mid", "life_stage_near_end", "life_stage_overdue"):
+        merged[_k] = round(float(merged[_k]), 3)
+        if _k in data:
+            data[_k] = merged[_k]
+    mid = merged["life_stage_mid"]
+    near_end = merged["life_stage_near_end"]
+    overdue = merged["life_stage_overdue"]
+    if not (0 < mid < near_end <= overdue):
+        raise HTTPException(
+            status_code=422,
+            detail="Life-stage cutoffs must satisfy 0 < Mid-life < Near end <= Overdue",
+        )
+    if overdue > 10:
+        raise HTTPException(
+            status_code=422,
+            detail="Overdue cutoff must be at most 10 (1000% of expected life)",
+        )
+    for k in _BENCHMARK_FIELDS:
+        if not (0 <= merged[k] <= 100):
+            raise HTTPException(
+                status_code=422, detail="Radar benchmark values must be between 0 and 100")
+
+    if row is None:
+        row = AgeingConfig(created_by=current_user.id)
+        db.add(row)
+    for k, v in merged.items():
+        setattr(row, k, v)
+    if notes_set:
+        row.notes = notes
+    row.modified_by = current_user.id
+
+    db.commit()
+    db.refresh(row)
+    return _ageing_response(row)

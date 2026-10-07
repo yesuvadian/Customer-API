@@ -23,6 +23,7 @@ from database import get_db
 from models import (
     CarStatus,
     CarTestRequest,
+    CategoryDetails,
     CorrectiveActionRequest,
     Equipment,
     Module,
@@ -52,6 +53,73 @@ def _user_display_name(user: Optional[User]) -> Optional[str]:
     return f"{user.firstname or ''} {user.lastname or ''}".strip() or user.email
 
 
+def _serialize_summaries(cars: list, db: Session) -> list:
+    """Batched _serialize_summary for a page of CARs (GET /car): the four
+    per-row lookups it used to run once per CAR (equipment, link count,
+    trigger request/test type, department name) each become one query for
+    the whole page instead of one per row."""
+    if not cars:
+        return []
+    car_ids = [c.id for c in cars]
+
+    equipment_ids = {c.equipment_id for c in cars if c.equipment_id}
+    equipment_by_id = (
+        {e.id: e for e in db.query(Equipment).filter(Equipment.id.in_(equipment_ids)).all()}
+        if equipment_ids else {}
+    )
+
+    link_counts = dict(
+        db.query(CarTestRequest.car_id, func.count(CarTestRequest.id))
+        .filter(CarTestRequest.car_id.in_(car_ids))
+        .group_by(CarTestRequest.car_id)
+        .all()
+    )
+
+    trigger_test_type_ids = car_service._trigger_test_type_ids(db, car_ids)
+    test_type_names = (
+        dict(
+            db.query(CategoryDetails.id, CategoryDetails.name)
+            .filter(CategoryDetails.id.in_(set(trigger_test_type_ids.values())))
+            .all()
+        )
+        if trigger_test_type_ids else {}
+    )
+
+    department_ids = {c.department_id for c in cars if c.department_id}
+    department_names = (
+        dict(
+            db.query(OrgDepartment.id, OrgDepartment.name)
+            .filter(OrgDepartment.id.in_(department_ids))
+            .all()
+        )
+        if department_ids else {}
+    )
+
+    rows = []
+    for car in cars:
+        equipment = equipment_by_id.get(car.equipment_id) if car.equipment_id else None
+        test_type_id = trigger_test_type_ids.get(car.id)
+        rows.append({
+            "id": str(car.id),
+            "car_number": car.car_number,
+            "equipment_id": str(car.equipment_id) if car.equipment_id else None,
+            "equipment_ueic": equipment.ueic if equipment else None,
+            "template_key": car.template_key,
+            "severity": car.severity,
+            "status": car.status,
+            "has_closed_once": bool(car.has_closed_once),
+            "summary": car.summary,
+            "due_date": car.due_date.isoformat() if car.due_date else None,
+            "test_request_count": link_counts.get(car.id, 0),
+            "created_at": car.created_at.isoformat() if car.created_at else None,
+            "closed_at": car.closed_at.isoformat() if car.closed_at else None,
+            "test_type_name": test_type_names.get(test_type_id) if test_type_id else None,
+            "department_id": str(car.department_id) if car.department_id else None,
+            "department_name": department_names.get(car.department_id) if car.department_id else None,
+        })
+    return rows
+
+
 def _serialize_summary(car: CorrectiveActionRequest, db: Session) -> dict:
     equipment = db.query(Equipment).filter(Equipment.id == car.equipment_id).first() if car.equipment_id else None
     link_count = db.query(CarTestRequest).filter(CarTestRequest.car_id == car.id).count()
@@ -69,6 +137,7 @@ def _serialize_summary(car: CorrectiveActionRequest, db: Session) -> dict:
         "template_key": car.template_key,
         "severity": car.severity,
         "status": car.status,
+        "has_closed_once": bool(car.has_closed_once),
         "summary": car.summary,
         "due_date": car.due_date.isoformat() if car.due_date else None,
         "test_request_count": link_count,
@@ -143,6 +212,10 @@ def department_summary(
     return {"current_department": current_dept, "cards": cards}
 
 
+# A date range this short (or shorter) is charted per day, not per week.
+DAILY_TREND_MAX_DAYS = 31
+
+
 @router.get(
     "/trend",
     summary="Weekly CARs created vs. closed for a department (or org-wide) — "
@@ -158,10 +231,13 @@ def car_trend(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """One point per week (Monday start), oldest first, across the CAR
-    list's date range - or the last `weeks` weeks when no range is given.
-    Dates are calendar days in the database's time zone, the same days the
-    list's date filter uses; the first / last week can be partial."""
+    """CARs raised vs closed over the CAR list's date range, oldest first:
+    one point per DAY when a range of 31 days or less is given (bucket
+    "day"), otherwise one per WEEK (Monday start, bucket "week") - the last
+    `weeks` weeks when no range is given. Dates are calendar days in the
+    database's time zone, the same days the list's date filter uses; a
+    first / last week can be partial. Each point's "week_start" is the start
+    of its bucket (the day itself for daily points)."""
     from datetime import timedelta
 
     org_id = _org_id(current_user)
@@ -172,19 +248,25 @@ def car_trend(
     start_day = date_from or (end_day - timedelta(days=end_day.weekday()) - timedelta(weeks=weeks - 1))
     if start_day > end_day:
         start_day, end_day = end_day, start_day
-    first_week = start_day - timedelta(days=start_day.weekday())
-    n_weeks = min((end_day - first_week).days // 7 + 1, 104)  # at most two years of weekly bars
-    first_week = max(first_week, end_day - timedelta(days=end_day.weekday()) - timedelta(weeks=n_weeks - 1))
 
-    def _counts_by_week(date_col) -> dict:
+    daily = date_from is not None and (end_day - start_day).days + 1 <= DAILY_TREND_MAX_DAYS
+    if daily:
+        first_bucket, step, n_points = start_day, timedelta(days=1), (end_day - start_day).days + 1
+    else:
+        first_bucket = start_day - timedelta(days=start_day.weekday())
+        n_points = min((end_day - first_bucket).days // 7 + 1, 104)  # at most two years of weekly bars
+        first_bucket = max(first_bucket, end_day - timedelta(days=end_day.weekday()) - timedelta(weeks=n_points - 1))
+        step = timedelta(weeks=1)
+
+    def _counts(date_col) -> dict:
         day = func.date(date_col)
         q = (
             db.query(day, func.count(CorrectiveActionRequest.id))
             .filter(
-                CorrectiveActionRequest.organization_id == org_id,
+                CorrectiveActionRequest.organization_id == org_id if org_id else True,
                 CorrectiveActionRequest.status != CarStatus.VOIDED,
                 date_col.isnot(None),
-                day >= max(start_day, first_week),
+                day >= max(start_day, first_bucket),
                 day <= end_day,
             )
         )
@@ -192,22 +274,27 @@ def car_trend(
             q = q.filter(CorrectiveActionRequest.department_id.in_(dept_ids))
         out: dict = {}
         for d, n in q.group_by(day).all():
-            wk = d - timedelta(days=d.weekday())
-            out[wk] = out.get(wk, 0) + n
+            key = d if daily else d - timedelta(days=d.weekday())
+            out[key] = out.get(key, 0) + n
         return out
 
-    created_by_week = _counts_by_week(CorrectiveActionRequest.created_at)
-    closed_by_week = _counts_by_week(CorrectiveActionRequest.closed_at)
+    created = _counts(CorrectiveActionRequest.created_at)
+    closed = _counts(CorrectiveActionRequest.closed_at)
 
     points = []
-    for i in range(n_weeks):
-        week_start = first_week + timedelta(weeks=i)
+    for i in range(n_points):
+        bucket_start = first_bucket + step * i
         points.append({
-            "week_start": week_start.isoformat(),
-            "created_count": created_by_week.get(week_start, 0),
-            "closed_count": closed_by_week.get(week_start, 0),
+            "week_start": bucket_start.isoformat(),
+            "created_count": created.get(bucket_start, 0),
+            "closed_count": closed.get(bucket_start, 0),
         })
-    return {"points": points, "date_from": start_day.isoformat(), "date_to": end_day.isoformat()}
+    return {
+        "points": points,
+        "bucket": "day" if daily else "week",
+        "date_from": start_day.isoformat(),
+        "date_to": end_day.isoformat(),
+    }
 
 
 @router.get("", summary="List CARs (filterable by status/equipment/department), paginated")
@@ -252,12 +339,10 @@ def list_cars(
 
     total = q.count()
     cars = q.order_by(CorrectiveActionRequest.created_at.desc()).offset(skip).limit(ps).all()
-    serialized = []
-    for c in cars:
-        row = _serialize_summary(c, db)
+    serialized = _serialize_summaries(cars, db)
+    for row, c in zip(serialized, cars):
         # badge on the CAR list (ATTENTION / IDLE) - open CARs only, a page at a time
         row["drive_state"] = _drive_state(db, c)["drive_state"] if c.status in CarStatus.OPEN_STATUSES else None
-        serialized.append(row)
 
     return {
         "items": serialized,
@@ -397,16 +482,21 @@ CAR_MODULE_PATH = "corrective-action-requests"
 
 
 def _has_car_permission(db: Session, current_user, action: str) -> bool:
-    """Mirrors the frontend AuthProvider.can('Corrective Action Requests',
-    action): super_admin always; otherwise an active role holding `action`
-    on the CAR module."""
+    """AuthProvider.can('Corrective Action Requests', action) on the server."""
+    return has_module_permission(db, current_user, CAR_MODULE_PATH, action)
+
+
+def has_module_permission(db: Session, current_user, module_path: str, action: str) -> bool:
+    """Mirrors the frontend AuthProvider.can(module, action): super_admin
+    always; otherwise an active role holding `action` (can_view / can_add /
+    can_edit / can_delete) on the module with this path."""
     if isinstance(current_user, User):
         user_id, usertype = current_user.id, current_user.usertype
     else:
         user_id, usertype = current_user.get("id"), current_user.get("usertype")
     if usertype == "super_admin":
         return True
-    module_id = db.query(Module.id).filter(Module.path == CAR_MODULE_PATH).scalar()
+    module_id = db.query(Module.id).filter(Module.path == module_path).scalar()
     if module_id is None or not user_id:
         return False
     return (
@@ -443,7 +533,10 @@ def void_car(
     if car.status not in CarStatus.OPEN_STATUSES:
         raise HTTPException(status_code=400, detail=f"Only an open CAR can be voided (this one is {car.status})")
     user_id = current_user.id if isinstance(current_user, User) else current_user.get("id")
-    car_service.void_car(db, car, reason=body.reason, voided_by=user_id)
+    try:
+        car_service.void_car(db, car, reason=body.reason, voided_by=user_id)
+    except ValueError as exc:  # closed / voided while this request waited
+        raise HTTPException(status_code=409, detail=str(exc))
     return get_car(car_id, db=db, current_user=current_user)
 
 
