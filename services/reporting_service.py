@@ -76,6 +76,59 @@ def _org_clause(org_id, alias: str = "tr") -> str:
     return f" AND {alias}.organization_id = '{org_id}'" if org_id else ""
 
 
+# What an empty cell MEANS, per column — shown in the Excel/PDF instead of a
+# blank, so every column reads as information ("Not tested") rather than a
+# gap. Display only: the data itself is never changed. Columns not listed
+# fall back to "Not recorded".
+_NO_VALUE_LABELS = {
+    # never happened yet
+    "last_tested_at": "Not tested", "last_test_name": "Not tested",
+    "last_result": "Not tested", "tested_at": "Not tested",
+    "before_test_date": "No test before", "before_health_score": "No test before",
+    "after_test_date": "No test after yet", "after_health_score": "No test after yet",
+    "pre_repair_result": "No pre-repair test", "pre_repair_tested_at": "No pre-repair test",
+    "post_repair_result": "No post-repair test", "post_repair_tested_at": "No post-repair test",
+    "last_run_date": "Never run", "completed_date": "Not completed",
+    "completed_at": "Not completed", "due_date": "No due date",
+    "review_disposition": "Not reviewed", "days_pending_review": "Reviewed",
+    "accelerating_gases": "None",
+    "assigned_to": "Not assigned", "assigned_tester": "Not assigned",
+    "approved_by": "Pending approval", "approved_date": "Pending approval",
+    "approval_notes": "No notes", "evaluation_overall": "Not evaluated",
+    "oldest_open_days": "All closed", "improvement_pct": "n/a (baseline 0)",
+    "current_stage": "Not started", "resolution_outcome": "Pending",
+    "linked_workflow_status": "No workflow", "linked_workflow_id": "No workflow",
+    "days_to_breach": "No breach predicted", "breach_threshold": "No threshold",
+    "current_value": "No reading", "unit": "-",
+    "ch4_rate_ppm_per_month": "First reading", "c2h4_rate_ppm_per_month": "First reading",
+    "c2h2_rate_ppm_per_month": "First reading",
+    "substation": "Subdivision level", "ueic": "All equipment of type",
+    "test_type": "Not specified", "priority": "Not set",
+    "current_health_score": "Not analysed", "current_risk_level": "Not analysed",
+    "current_condition": "Not analysed", "last_test_date": "Not tested",
+    "templates_tested": "No results", "is_failure_event": "No",
+    "zone": "No department", "ce_circle": "No department", "ee_subdivision": "No department",
+    "avg_days_to_complete": "No completed tests", "overall_result": "Not evaluated",
+}
+
+
+def _display_blank(key: str, val, row: dict):
+    """Value to show for `key` in a rendered report: `val` itself unless it's
+    empty, else what the blank means (see _NO_VALUE_LABELS)."""
+    if val not in (None, "") and not (isinstance(val, (list, dict)) and not val):
+        return val
+    if key in ("closure_reason", "closed_on", "closed_by"):
+        return "Still open" if row.get("outcome") == "Open" else (
+            "No reason given" if key == "closure_reason" else
+            "System (auto-closed)" if key == "closed_by" and row.get("outcome") == "Auto-closed"
+            else "Not recorded")
+    # Substation blank because there's no department at all (not because
+    # the item sits directly under a subdivision).
+    if key == "substation" and row.get("zone") in (None, "") and row.get("ee_subdivision") in (None, ""):
+        return "No department"
+    return _NO_VALUE_LABELS.get(key, "Not recorded")
+
+
 # How each report query alias reaches a department, for department-scoped
 # users (see ReportingService._scope). Aliases are the ones the built-in
 # queries and the ReportQueryKey.sql_template rows use:
@@ -432,9 +485,18 @@ class ReportingService:
                     NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
                     cd.name
                 )                                         AS title,
-                tr.zone,
-                tr.ce_circle,
-                tr.ee_subdivision,
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 tr.status,
                 tr.priority,
                 tr.due_date::date                         AS due_date,
@@ -444,8 +506,22 @@ class ReportingService:
                 cd.name                                   AS test_type
             FROM   public.testing_requests tr
             LEFT JOIN public.equipment        e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster"  cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster"  cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public."CategoryDetails" cd ON cd.id = tr.test_type_id
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  tr.request_category = 'test'
               AND  tr.due_date IS NOT NULL
               AND  tr.due_date < NOW()
@@ -476,8 +552,18 @@ class ReportingService:
                 tr.request_number,
                 e.ueic,
                 cm.name                                 AS equipment_type,
-                tr.zone,
-                tr.ee_subdivision,
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 res.test_name,
                 res.evaluation_result->>'overall'       AS severity,
                 res.tested_at,
@@ -485,8 +571,22 @@ class ReportingService:
             FROM   public.test_results res
             JOIN   public.testing_requests  tr ON tr.id  = res.testing_request_id
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.users           u  ON u.id  = res.tested_by
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  res.evaluation_result IS NOT NULL
               {sev_clause} {org} {extra}
             ORDER  BY res.tested_at DESC
@@ -526,13 +626,37 @@ class ReportingService:
                 )                                    AS voltage_ratio,
                 res.evaluation_result->>'overall'   AS condition,
                 res.tested_at                       AS last_tested_at,
-                tr.zone,
-                tr.ee_subdivision
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the equipment's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation
             FROM   public.test_results res
             JOIN   public.testing_requests  tr ON tr.id = res.testing_request_id
             JOIN   public.equipment         e  ON e.id  = tr.equipment_id
             LEFT JOIN public.org_departments d  ON d.id  = e.department_id
             LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT dp.name, dp.parent_department_id, 1 AS depth
+                    FROM   public.org_departments dp
+                    WHERE  dp.id = e.department_id
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  res.evaluation_result IS NOT NULL
               AND  res.evaluation_result->>'overall' IN ('CRITICAL','ALERT')
               {org}
@@ -552,19 +676,43 @@ class ReportingService:
                 tr.total_sessions_planned,
                 tr.requested_date::date             AS requested_date,
                 tr.due_date::date                   AS due_date,
-                tr.zone,
-                tr.ee_subdivision,
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 COUNT(ts.id)                        AS sessions_completed
             FROM   public.testing_requests tr
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.test_sessions   ts
                    ON ts.testing_request_id = tr.id AND ts.status = 'completed'
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  tr.request_category = 'repair_lifecycle'
               AND  tr.status IN ('submitted','assigned','accepted','in_progress',
                                  'test_submitted','under_approval')
               {org}
-            GROUP  BY tr.id, e.ueic, cm.name
+            GROUP  BY tr.id, e.ueic, cm.name, h.path
             ORDER  BY tr.cts DESC
         """)
         return self._exec(sql)
@@ -575,9 +723,23 @@ class ReportingService:
         sql = text(f"""
             SELECT
                 tr.request_number,
-                tr.title,
-                tr.zone,
-                tr.ee_subdivision,
+                -- Blank titles (optional on the form) fall back to the test name.
+                COALESCE(
+                    NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
+                    cd_t.name
+                )                                         AS title,
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 tr.status,
                 tr.due_date::date                         AS due_date,
                 ('{today}'::date - tr.due_date::date)     AS days_overdue,
@@ -585,7 +747,22 @@ class ReportingService:
                 cm.name                                   AS equipment_type
             FROM   public.testing_requests tr
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
+            LEFT JOIN public."CategoryDetails" cd_t ON cd_t.id = tr.test_type_id
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  tr.request_category = 'maintenance'
               AND  tr.due_date IS NOT NULL
               AND  tr.due_date < NOW()
@@ -636,7 +813,7 @@ class ReportingService:
             FROM   public.recommendations rec
             JOIN   public.testing_requests  tr ON tr.id  = rec.testing_request_id
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.users           u  ON u.id  = rec.submitted_by
             WHERE  rec.approval_status = 'pending'
               {org}
@@ -703,15 +880,22 @@ class ReportingService:
                      THEN COALESCE(u_c.email, u_cb.email)
                 END                 AS closed_by,
                 tr.priority,
-                -- Zone → CE Circle → EE Subdivision → Substation, read top-down
-                -- from the ticket's department chain (the free-text zone /
-                -- ce_circle / ee_subdivision columns on the ticket are mostly
-                -- empty); those typed values are only the fallback.
+                -- Zone → CE Circle → SE Division → EE Subdivision → Substation,
+                -- read top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                -- Depth-aware: a 5-level chain (zone/circle/division/
+                -- subdivision/substation) fills every column; a 4-level one
+                -- (no SE Division level, as in KPTCL's Bangalore Zone) leaves
+                -- SE Division blank instead of shifting every level down one.
                 COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
                 COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
-                COALESCE(h.path[3], NULLIF(tr.ee_subdivision, ''))  AS ee_subdivision,
-                CASE WHEN array_length(h.path, 1) >= 4
-                     THEN h.path[array_length(h.path, 1)] END        AS substation,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 tr.cts::date        AS created_date,
                 tr.due_date::date   AS due_date,
                 tr.completed_at::date AS completed_date,
@@ -722,7 +906,7 @@ class ReportingService:
                 u_t.email           AS assigned_tester
             FROM   public.testing_requests tr
             LEFT JOIN public.equipment        e     ON e.id    = tr.equipment_id
-            LEFT JOIN public."CategoryMaster"  cm    ON cm.id   = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster"  cm    ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public."CategoryDetails" cd    ON cd.id   = tr.test_type_id
             LEFT JOIN public.users            u_o   ON u_o.id  = tr.originator_id
             LEFT JOIN public.users            u_t   ON u_t.id  = tr.assigned_tester_id
@@ -777,16 +961,43 @@ class ReportingService:
                 res.template_key,
                 res.overall_result,
                 res.evaluation_result->>'overall'       AS evaluation_overall,
-                res.pass_fail,
                 res.tested_at,
                 u.email                                 AS tested_by,
-                tr.zone,
-                tr.ee_subdivision
+                -- Zone → CE Circle → SE Division → EE Subdivision → Substation,
+                -- read top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                -- Depth-aware: a 5-level chain (zone/circle/division/
+                -- subdivision/substation) fills every column; a 4-level one
+                -- (no SE Division level, as in KPTCL's Bangalore Zone) leaves
+                -- SE Division blank instead of shifting every level down one.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation
             FROM   public.test_results res
             JOIN   public.testing_requests  tr ON tr.id  = res.testing_request_id
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.users           u  ON u.id  = res.tested_by
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  1=1 {org} {clauses}
             ORDER  BY res.tested_at DESC
             LIMIT  1000
@@ -815,7 +1026,7 @@ class ReportingService:
             FROM   public.recommendations rec
             JOIN   public.testing_requests  tr  ON tr.id   = rec.testing_request_id
             LEFT JOIN public.equipment       e   ON e.id   = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm  ON cm.id  = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm  ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.users           u_s ON u_s.id = rec.submitted_by
             LEFT JOIN public.users           u_a ON u_a.id = rec.approved_by
             WHERE  1=1 {org} {clauses}
@@ -829,7 +1040,10 @@ class ReportingService:
         sql = text(f"""
             SELECT
                 d.name                              AS substation,
-                tr_agg.zone,
+                -- Read top-down from the equipment's own department chain,
+                -- not tr_agg.zone (an arbitrary linked ticket's free-text
+                -- zone field, mostly empty and not reliably grouped anyway).
+                h.path[1]                           AS zone,
                 COUNT(DISTINCT e.id)                AS total_equipment,
                 COUNT(DISTINCT CASE
                     WHEN latest_tr.completed_at >= NOW() - INTERVAL '{period_days} days'
@@ -846,7 +1060,6 @@ class ReportingService:
                     WHEN latest_res.condition = 'ALERT'    THEN e.id END) AS alert_count
             FROM   public.equipment e
             LEFT JOIN public.org_departments  d      ON d.id = e.department_id
-            LEFT JOIN public.testing_requests tr_agg ON tr_agg.equipment_id = e.id
             LEFT JOIN LATERAL (
                 SELECT completed_at FROM public.testing_requests
                 WHERE  equipment_id = e.id AND status = 'completed'
@@ -859,8 +1072,22 @@ class ReportingService:
                 WHERE  req.equipment_id = e.id AND res.evaluation_result IS NOT NULL
                 ORDER  BY res.tested_at DESC LIMIT 1
             ) latest_res ON true
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT dp.name, dp.parent_department_id, 1 AS depth
+                    FROM   public.org_departments dp
+                    WHERE  dp.id = e.department_id
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  e.status = 'active' {org}
-            GROUP  BY d.name, tr_agg.zone
+            GROUP  BY d.name, h.path[1]
             ORDER  BY compliance_pct ASC NULLS FIRST
         """)
         return self._exec(sql)
@@ -879,14 +1106,21 @@ class ReportingService:
                 u.email                                 AS tester_email,
                 TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')) AS tester_name,
                 COUNT(tr.id)                            AS total_assigned,
-                COUNT(CASE WHEN tr.status='completed'   THEN 1 END) AS completed,
-                COUNT(CASE WHEN tr.status='in_progress' THEN 1 END) AS in_progress,
-                COUNT(CASE WHEN tr.status='rejected'    THEN 1 END) AS rejected,
+                -- Finished tickets are status 'closed' with the real outcome
+                -- in current_status_code (wf_completed / wf_rejected), so
+                -- status='completed' alone matched nothing and the average
+                -- was always blank.
+                COUNT(CASE WHEN tr.status::text = 'completed'
+                             OR tr.current_status_code = 'wf_completed' THEN 1 END) AS completed,
+                COUNT(CASE WHEN tr.status::text = 'in_progress' THEN 1 END)          AS in_progress,
+                COUNT(CASE WHEN tr.status::text = 'rejected'
+                             OR tr.current_status_code = 'wf_rejected' THEN 1 END)  AS rejected,
                 ROUND(AVG(CASE
-                    WHEN tr.status='completed' AND tr.completed_at IS NOT NULL
-                         AND tr.assigned_at IS NOT NULL
-                    THEN EXTRACT(EPOCH FROM (tr.completed_at - tr.assigned_at)) / 86400.0
-                END), 1)                                AS avg_days_to_complete
+                    WHEN (tr.status::text = 'completed' OR tr.current_status_code = 'wf_completed')
+                         AND tr.completed_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (tr.completed_at
+                                             - COALESCE(tr.assigned_at, tr.cts))) / 86400.0
+                END)::numeric, 1)                       AS avg_days_to_complete
             FROM   public.testing_requests tr
             JOIN   public.users u ON u.id = tr.assigned_tester_id
             WHERE  tr.assigned_tester_id IS NOT NULL
@@ -1049,6 +1283,57 @@ class ReportingService:
         allowed = set(self.dept_ids) if self.dept_ids else None
         dept_names = {str(d.id): d.name for d in self.db.query(OrgDepartment).all()}
         today = date.today()
+
+        # The analytics engine stores no unit for table-row parameters
+        # (SFRA correlation rows, C/tanδ winding rows, DGA zone…), so the
+        # Unit column was always empty for them.
+        from test_templates import TEST_TEMPLATES
+
+        def _column_units(node, out):
+            if isinstance(node, dict):
+                if node.get("key") and node.get("unit"):
+                    out.setdefault((node["key"]), node["unit"])
+                for v in node.values():
+                    _column_units(v, out)
+            elif isinstance(node, list):
+                for v in node:
+                    _column_units(v, out)
+            return out
+
+        template_units = {}
+
+        def _unit_for(prm):
+            if prm.get("unit"):
+                return prm["unit"]
+            key = prm.get("parameter_key") or ""
+            tkey = prm.get("template_key") or ""
+            if tkey not in template_units:
+                template_units[tkey] = _column_units(TEST_TEMPLATES.get(tkey, {}), {})
+            col = key.split(".")[-1]
+            if col in template_units[tkey]:
+                return template_units[tkey][col]
+            label = (prm.get("parameter_label") or "").lower()
+            if "%" in label:
+                return "%"
+            if "correlation" in key.lower() or "correlation" in label:
+                return "Coefficient (0–1)"
+            if "duval" in key.lower() or "duval" in label:
+                return "Zone (category)"
+            return None
+        # Duval is a zone, not a number. Report the one gas share (% of
+        # CH4+C2H4+C2H2) that decides the zone, against the boundary at which
+        # the sample enters that zone, so it reads like the numeric rows.
+        def _duval_numeric(prm):
+            z = prm["zone"]
+            c2h2, c2h4 = prm.get("pct_c2h2"), prm.get("pct_c2h4")
+            if z in ("PD", "D1", "D2", "DT"):
+                gas, val = "C2H2", c2h2
+                thr = {"PD": 1, "D1": 4, "D2": 13}.get(z, 4 if (c2h2 or 0) < 13 else 13)
+            else:
+                gas, val = "C2H4", c2h4
+                thr = {"T1": 20, "T2": 20, "T3": 50}[z]
+            return val, thr, f"% {gas} share (Zone {z})"
+
         rows = []
         for eq in result.get("equipment", []):
             dept = str(eq.get("department_id")) if eq.get("department_id") else None
@@ -1067,10 +1352,10 @@ class ReportingService:
                     "risk_level":         eq.get("risk_level"),
                     "health_score":       eq.get("health_score"),
                     "parameter":          prm.get("parameter_label"),
-                    "current_value":      prm.get("current_value"),
-                    "unit":               prm.get("unit"),
-                    "breach_threshold":   prm.get("breach_threshold"),
-                    "days_to_breach":     prm.get("days_to_breach"),
+                    "current_value":      _duval_numeric(prm)[0] if prm.get("zone") else prm.get("current_value"),
+                    "unit":               _duval_numeric(prm)[2] if prm.get("zone") else _unit_for(prm),
+                    "breach_threshold":   _duval_numeric(prm)[1] if prm.get("zone") else prm.get("breach_threshold"),
+                    "days_to_breach":     0 if prm.get("zone") and prm.get("days_to_breach") is None else prm.get("days_to_breach"),
                     "last_tested":        tested[:10] if tested else None,
                     "reviewed":           "Yes" if prm.get("is_reviewed") else "No",
                     "days_pending_review": None if prm.get("is_reviewed") else pending,
@@ -1247,7 +1532,7 @@ class ReportingService:
         for ri, row in enumerate(rows, 4):
             fill = alt_fill if ri % 2 == 0 else None
             for ci, key in enumerate(headers, 1):
-                val = row.get(key)
+                val = _display_blank(key, row.get(key), row)
                 if isinstance(val, datetime):
                     val = val.replace(tzinfo=None)
                 elif val is not None and not isinstance(
@@ -1340,7 +1625,7 @@ class ReportingService:
         for row in rows:
             row_data = []
             for h in headers:
-                val = row.get(h)
+                val = _display_blank(h, row.get(h), row)
                 # Format dates
                 if isinstance(val, datetime):
                     val = val.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")

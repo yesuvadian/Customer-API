@@ -13,6 +13,8 @@ For dev/demo databases only — not for production.
   TA&QC Observation Compliance Report  TA&QC inspection + one open
                                        observation this month
   Procurement Pipeline                 procurement request
+  Maintenance Effectiveness Index      two failure tickets with a completed PM
+                                       Workflow, between two scored tests
   Open Corrective Actions (CAR)        two CARs on a CRITICAL test result —
                                        one OPEN (not due), one ASSIGNED and
                                        overdue
@@ -43,8 +45,16 @@ FR_NUMBER = f"FR-SAMPLE-{LAST_YEAR}-0001"
 WF_NUMBER = f"RW-SAMPLE-{LAST_YEAR}-0001"
 INSP_NUMBER = "TAQC-SAMPLE-0001"
 OBS_NUMBER = "OBS-SAMPLE-0001"
+# TA&QC Observation Compliance only covers the CURRENT month, so a fixed
+# sample goes stale when the month changes — this set is keyed by month and
+# re-running the script in a new month adds that month's observations.
+MONTH_TAG = date.today().strftime("%Y%m")
+INSP_MONTH_NUMBER = f"TAQC-SAMPLE-{MONTH_TAG}"
 PR_NUMBER = "PR-SAMPLE-0001"
 CAR_NUMBERS = ("CAR-SAMPLE-0001", "CAR-SAMPLE-0002")
+PM_NUMBERS = ("FR-SAMPLE-PM-0001", "FR-SAMPLE-PM-0002")
+PC_NUMBERS = ("PC-SAMPLE-0001", "PC-SAMPLE-0002", "PC-SAMPLE-0003")
+POST_REPAIR_TR = "TR-SAMPLE-POSTREPAIR-0001"
 
 
 def _one(db, sql, **kw):
@@ -63,9 +73,24 @@ def _existing(db):
         "failure":  _one(db, "SELECT id FROM public.testing_requests WHERE request_number=:n", n=FR_NUMBER),
         "workflow": _one(db, "SELECT id FROM public.repair_workflows WHERE workflow_number=:n", n=WF_NUMBER),
         "taqc":     _one(db, "SELECT id FROM public.taqc_annual_inspections WHERE inspection_number=:n", n=INSP_NUMBER),
+        "taqc_month": _one(db, "SELECT id FROM public.taqc_annual_inspections WHERE inspection_number=:n",
+                           n=INSP_MONTH_NUMBER),
         "procure":  _one(db, "SELECT id FROM public.procurement_requests WHERE procurement_number=:n", n=PR_NUMBER),
         "car":      _one(db, "SELECT id FROM public.corrective_action_requests WHERE car_number=:n",
                          n=CAR_NUMBERS[0]),
+        "pm":       _one(db, "SELECT id FROM public.testing_requests WHERE request_number=:n",
+                         n=PM_NUMBERS[0]),
+        "vendor":   _one(db, "SELECT id FROM public.precommission_requests WHERE request_number=:n",
+                         n=PC_NUMBERS[0]),
+        "postrep":  _one(db, "SELECT id FROM public.testing_requests WHERE request_number=:n",
+                         n=POST_REPAIR_TR),
+        # result-review stages added to the sample PM tickets' workflows this month
+        "review":   _one(db, """SELECT si.id FROM public.tr_wf_stage_instances si
+                                JOIN public.tr_wf_instances wi ON wi.id = si.wf_instance_id
+                                JOIN public.testing_requests tr ON tr.id = wi.testing_request_id
+                                WHERE tr.request_number = ANY(:n)
+                                  AND date_trunc('month', si.completed_at) = date_trunc('month', NOW())""",
+                         n=list(PM_NUMBERS)),
     }
 
 
@@ -135,6 +160,48 @@ def add(db, org):
                  tgt=date.today() + timedelta(days=30), u=user_id, c=now))
         print(f"  [OK] TA&QC inspection {INSP_NUMBER} + observation {OBS_NUMBER} (this month)")
 
+    if not have["taqc_month"]:
+        # Department of the most recent CRITICAL result's equipment (the same
+        # substation the CAR samples use), else the sample transformer's.
+        row = _one(db, """
+            SELECT e.department_id FROM public.test_results res
+            JOIN public.testing_requests tr ON tr.id = res.testing_request_id
+            JOIN public.equipment e ON e.id = tr.equipment_id
+            WHERE tr.organization_id = :o AND res.evaluation_result->>'overall' = 'CRITICAL'
+              AND e.department_id IS NOT NULL
+            ORDER BY res.tested_at DESC NULLS LAST LIMIT 1""", o=org)
+        m_dept = row[0] if row else dept_id
+        cats = {name: cid for cid, name in db.execute(text("""
+            SELECT MIN(id), name FROM public."CategoryDetails"
+            WHERE category_type = 'inspection' GROUP BY name""")).all()}
+        insp_id = uuid.uuid4()
+        db.execute(text("""
+            INSERT INTO public.taqc_annual_inspections
+              (id, inspection_number, organization_id, department_id, inspection_date,
+               inspected_by, remarks, created_by, cts, mts)
+            VALUES (:id, :n, :o, :d, :dt, :u, '[SAMPLE] Monthly TA&QC inspection', :u, :c, :c)"""),
+            dict(id=insp_id, n=INSP_MONTH_NUMBER, o=org, d=m_dept, dt=date.today(), u=user_id, c=now))
+        obs = [
+            ("Electrical Safety", "open",   "high",
+             "[SAMPLE] Earthing strip corroded at transformer bay — replace"),
+            ("Electrical Safety", "closed", "medium",
+             "[SAMPLE] Danger board missing on isolator — fixed"),
+            ("Fire Safety",       "closed", "low",
+             "[SAMPLE] Fire extinguisher refill overdue — refilled"),
+        ]
+        for i, (cat_name, stage, sev, desc) in enumerate(obs, 1):
+            cat_id = cats.get(cat_name) or cat[0]
+            db.execute(text("""
+                INSERT INTO public.taqc_observations
+                  (id, inspection_id, observation_number, category_detail_id, severity,
+                   target_compliance_date, observation_description, current_stage_code,
+                   created_by, is_overdue, cts, mts)
+                VALUES (:id, :i, :n, :cat, :sev, :tgt, :desc, :st, :u, false, :c, :c)"""),
+                dict(id=uuid.uuid4(), i=insp_id, n=f"OBS-SAMPLE-{MONTH_TAG}-{i}", cat=cat_id,
+                     sev=sev, tgt=date.today() + timedelta(days=30), desc=desc, st=stage,
+                     u=user_id, c=now))
+        print(f"  [OK] TA&QC inspection {INSP_MONTH_NUMBER} + 3 observations (1 open, 2 closed) for {date.today():%B %Y}")
+
     if not have["procure"]:
         db.execute(text("""
             INSERT INTO public.procurement_requests
@@ -188,16 +255,207 @@ def add(db, org):
         if not crit:
             print("  [SKIP] no CRITICAL test results in this org to raise sample CARs on")
 
+    if not have["pm"]:
+        # Maintenance Effectiveness Index: failure tickets whose PM Workflow
+        # reached pm_completed, on equipment with a scored test (test_analytics
+        # .health_score) before AND after the completion time. The completion
+        # time is placed between two real scored tests of that equipment.
+        pm_def = _one(db, "SELECT id FROM public.tr_wf_definitions "
+                          "WHERE name='PM Workflow' AND is_active ORDER BY created_at LIMIT 1")
+        cands = db.execute(text("""
+            SELECT e.id, e.ueic, e.department_id, ta.tested_at
+            FROM   public.test_analytics ta
+            JOIN   public.equipment e ON e.id = ta.equipment_id
+            WHERE  e.organization_id = :o AND e.department_id IS NOT NULL
+              AND  ta.health_score IS NOT NULL
+            ORDER  BY e.id, ta.tested_at"""), {"o": org}).all()
+        by_eq = {}
+        for eq_id, ueic, dept, tested in cands:
+            by_eq.setdefault(eq_id, (ueic, dept, []))[2].append(tested)
+        # Equipment with at least two scored tests on different days; complete
+        # the maintenance halfway between its last two distinct test days.
+        picks = []
+        for eq_id, (ueic, dept, times) in by_eq.items():
+            days = sorted({t.date(): t for t in times}.values())
+            if len(days) >= 2:
+                before, after = days[-2], days[-1]
+                picks.append((eq_id, ueic, dept, before + (after - before) / 2))
+            if len(picks) == 2:
+                break
+        if not pm_def or not picks:
+            print("  [SKIP] no PM Workflow / equipment with two scored tests for Maintenance Effectiveness")
+        for (eq_id, ueic, dept, done_at), number in zip(picks, PM_NUMBERS):
+            tr_new = uuid.uuid4()
+            db.execute(text("""
+                INSERT INTO public.testing_requests
+                  (id, request_number, title, request_category, status, originator_id,
+                   organization_id, department_id, equipment_id, form_data,
+                   is_cumulative, is_calibration, is_schedule_template, cts, mts)
+                VALUES (:id, :n, :t, 'failure_registry', 'closed', :u,
+                        :o, :d, :e, CAST(:fd AS jsonb), false, false, false, :c, :done)"""),
+                dict(id=tr_new, n=number, t=f"[SAMPLE] PM after failure - {ueic}", u=user_id,
+                     o=org, d=dept, e=eq_id, fd='{"failure_category": "Performance deterioration"}',
+                     c=done_at - timedelta(days=5), done=done_at))
+            db.execute(text("""
+                INSERT INTO public.tr_wf_instances
+                  (id, wf_definition_id, testing_request_id, entity_type, entity_id, org_id,
+                   current_status_code, status, started_at, completed_at, created_by,
+                   created_at, modified_at)
+                VALUES (:id, :wd, :tr, 'testing_request', :tr, :o,
+                        'pm_completed', 'completed', :s, :done, :u, :s, :done)"""),
+                dict(id=uuid.uuid4(), wd=pm_def[0], tr=tr_new, o=org,
+                     s=done_at - timedelta(days=5), done=done_at, u=user_id))
+            print(f"  [OK] PM-completed failure ticket {number} on {ueic} (maintenance done {done_at:%Y-%m-%d %H:%M})")
+    db.flush()
+
+    _add_report_extras(db, org, user_id, now, _existing(db))
     db.commit()
+
+
+def _add_report_extras(db, org, user_id, now, have):
+    """Vendor Ranking, Result Review Compliance (this month), Post-Repair
+    Evaluation, Transformer Repair Status and Failure Resolution samples."""
+    # Power transformer with real test history from before LAST_YEAR-06-01,
+    # to hang the repair / post-repair samples on.
+    tr_eq = _one(db, """
+        SELECT e.id, e.ueic, e.department_id, e.equipment_type_id
+        FROM   public.equipment e
+        JOIN   public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+        JOIN   public.testing_requests tr ON tr.equipment_id = e.id
+        JOIN   public.test_results res ON res.testing_request_id = tr.id
+        WHERE  e.organization_id = :o AND cm.name ILIKE '%power transformer%'
+          AND  res.tested_at < :cut
+        GROUP  BY e.id ORDER BY COUNT(res.id) DESC LIMIT 1""",
+        o=org, cut=datetime(LAST_YEAR, 6, 1))
+
+    # Vendor Performance Ranking: pre-commission requests this quarter
+    if not have["vendor"] and tr_eq:
+        start = now.replace(hour=0, minute=5, second=0, microsecond=0)
+        vendors = [
+            ("ABB India Ltd",      "approved", 2),
+            ("ABB India Ltd",      "approved", 1),
+            ("Siemens Energy Ltd", "rejected", 1),
+        ]
+        for (vendor, st, qty), number in zip(vendors, PC_NUMBERS):
+            ok = st == "approved"
+            db.execute(text("""
+                INSERT INTO public.precommission_requests
+                  (id, request_number, organization_id, equipment_type_id, vendor_name,
+                   purchase_order_number, po_date, rated_mva, voltage_class, quantity,
+                   approval_status, approved_by, approved_at, rejected_by, rejected_at,
+                   dept_id, created_by, cts, mts)
+                VALUES (:id, :n, :o, :t, :v, :po, :pod, '100', '220', :q, :st,
+                        :ab, :aa, :rb, :ra, :d, :u, :c, :c)"""),
+                dict(id=uuid.uuid4(), n=number, o=org, t=tr_eq[3], v=vendor,
+                     po="PO-SAMPLE-" + number[-4:], pod=start.date(), q=qty, st=st,
+                     ab=user_id if ok else None, aa=now if ok else None,
+                     rb=None if ok else user_id, ra=None if ok else now,
+                     d=tr_eq[2], u=user_id, c=start))
+        print("  [OK] 3 sample pre-commission requests (ABB approved x2, Siemens rejected) this quarter")
+
+    # Result Review Compliance: two closed result reviews this month
+    if not have["review"]:
+        stage = _one(db, """SELECT id, COALESCE(default_duration_hours, default_duration_days * 24)
+                            FROM public.tr_wf_stages
+                            WHERE is_result_stage AND name ILIKE '%result review%'
+                              AND COALESCE(default_duration_hours, default_duration_days * 24) IS NOT NULL
+                            LIMIT 1""")
+        insts = db.execute(text("""SELECT wi.id FROM public.tr_wf_instances wi
+                                   JOIN public.testing_requests tr ON tr.id = wi.testing_request_id
+                                   WHERE tr.request_number = ANY(:n) ORDER BY tr.request_number"""),
+                           {"n": list(PM_NUMBERS)}).scalars().all()
+        if stage and insts:
+            sla_h = float(stage[1])
+            done = now - timedelta(minutes=30)
+            # one reviewed within the SLA, one that overran it
+            for inst, hours in zip(insts, (sla_h * 0.5, sla_h * 1.5)):
+                db.execute(text("""
+                    INSERT INTO public.tr_wf_stage_instances
+                      (id, wf_instance_id, stage_id, status, started_at, completed_at)
+                    VALUES (:id, :wi, :st, 'completed', :s, :c)"""),
+                    dict(id=uuid.uuid4(), wi=inst, st=stage[0],
+                         s=done - timedelta(hours=hours), c=done))
+            print(f"  [OK] 2 closed result reviews this month (1 within the {sla_h:g}h SLA, 1 breached)")
+
+    # Post-Repair Evaluation / Transformer Repair Status / Failure Resolution
+    wf = _one(db, "SELECT id FROM public.repair_workflows WHERE workflow_number=:n", n=WF_NUMBER)
+    if wf and tr_eq and not have["postrep"]:
+        wf_id = wf[0]
+        started = datetime(LAST_YEAR, 6, 1, 9, 0)
+        finished = datetime(LAST_YEAR, 6, 20, 17, 0)
+        stages = db.execute(text("""
+            SELECT sd.id FROM public.repair_stage_definitions sd
+            WHERE  sd.workflow_definition_id = (
+                     SELECT workflow_definition_id FROM public.repair_stage_definitions
+                     WHERE name = 'Failure Reporting' LIMIT 1)
+            ORDER  BY sd.sequence""")).scalars().all()
+        fr = _one(db, "SELECT id FROM public.testing_requests WHERE request_number=:n", n=FR_NUMBER)
+        db.execute(text("""
+            UPDATE public.repair_workflows
+            SET    equipment_id = :e, created_at = :s, completed_at = :f,
+                   current_stage_id = :cs, source_failure_id = :fr
+            WHERE  id = :id"""),
+            dict(e=tr_eq[0], s=started, f=finished, cs=stages[-1] if stages else None,
+                 fr=fr[0] if fr else None, id=wf_id))
+        step = (finished - started) / max(len(stages), 1)
+        for i, sid in enumerate(stages):
+            db.execute(text("""
+                INSERT INTO public.repair_stage_instances
+                  (id, workflow_id, stage_id, status, started_at, completed_at, created_at)
+                VALUES (:id, :w, :s, 'completed', :a, :b, :a)"""),
+                dict(id=uuid.uuid4(), w=wf_id, s=sid, a=started + step * i, b=started + step * (i + 1)))
+        post_tr = uuid.uuid4()
+        tested = finished + timedelta(days=10)
+        db.execute(text("""
+            INSERT INTO public.testing_requests
+              (id, request_number, title, request_category, status, current_status_code,
+               originator_id, organization_id, department_id, equipment_id, equipment_type_id,
+               surveillance_workflow_id, is_cumulative, is_calibration, is_schedule_template,
+               completed_at, cts, mts)
+            VALUES (:id, :n, '[SAMPLE] Post-repair surveillance test', 'test', 'closed',
+                    'wf_completed', :u, :o, :d, :e, :t, :w, false, false, false, :c, :c, :c)"""),
+            dict(id=post_tr, n=POST_REPAIR_TR, u=user_id, o=org, d=tr_eq[2], e=tr_eq[0],
+                 t=tr_eq[3], w=wf_id, c=tested))
+        db.execute(text("""
+            INSERT INTO public.test_results
+              (id, testing_request_id, test_name, template_key, organization_id,
+               evaluation_result, tested_at, tested_by)
+            VALUES (:id, :tr, 'Post-repair SFRA', 'sfra_routine', :o,
+                    CAST(:ev AS jsonb), :c, :u)"""),
+            dict(id=uuid.uuid4(), tr=post_tr, o=org, c=tested, u=user_id,
+                 ev='{"overall": "NORMAL", "fields": []}'))
+        print(f"  [OK] sample repair moved to {tr_eq[1]} with {len(stages)} completed stages, "
+              f"linked to {FR_NUMBER}, plus post-repair surveillance test {POST_REPAIR_TR}")
 
 
 def remove(db):
     have = _existing(db)
-    if have["taqc"]:
-        db.execute(text("DELETE FROM public.taqc_observations WHERE inspection_id=:i"), {"i": have["taqc"][0]})
-        db.execute(text("DELETE FROM public.taqc_annual_inspections WHERE id=:i"), {"i": have["taqc"][0]})
+    # Every TA&QC sample (the fixed one and each month's set).
+    db.execute(text("""DELETE FROM public.taqc_observations WHERE inspection_id IN
+                       (SELECT id FROM public.taqc_annual_inspections
+                        WHERE inspection_number LIKE 'TAQC-SAMPLE-%')"""))
+    db.execute(text("DELETE FROM public.taqc_annual_inspections WHERE inspection_number LIKE 'TAQC-SAMPLE-%'"))
     db.execute(text("DELETE FROM public.corrective_action_requests WHERE car_number = ANY(:n)"),
                {"n": list(CAR_NUMBERS)})
+    db.execute(text("DELETE FROM public.precommission_requests WHERE request_number = ANY(:n)"),
+               {"n": list(PC_NUMBERS)})
+    db.execute(text("""DELETE FROM public.test_results WHERE testing_request_id IN
+                       (SELECT id FROM public.testing_requests WHERE request_number = :n)"""),
+               {"n": POST_REPAIR_TR})
+    db.execute(text("DELETE FROM public.testing_requests WHERE request_number = :n"), {"n": POST_REPAIR_TR})
+    db.execute(text("""DELETE FROM public.repair_stage_instances WHERE workflow_id IN
+                       (SELECT id FROM public.repair_workflows WHERE workflow_number = :n)"""),
+               {"n": WF_NUMBER})
+    db.execute(text("""DELETE FROM public.tr_wf_stage_instances WHERE wf_instance_id IN
+                       (SELECT wi.id FROM public.tr_wf_instances wi
+                        JOIN public.testing_requests tr ON tr.id = wi.testing_request_id
+                        WHERE tr.request_number = ANY(:n))"""),
+               {"n": list(PM_NUMBERS)})
+    db.execute(text("""DELETE FROM public.tr_wf_instances WHERE testing_request_id IN
+                       (SELECT id FROM public.testing_requests WHERE request_number = ANY(:n))"""),
+               {"n": list(PM_NUMBERS)})
+    db.execute(text("DELETE FROM public.testing_requests WHERE request_number = ANY(:n)"),
+               {"n": list(PM_NUMBERS)})
     if have["procure"]:
         db.execute(text("DELETE FROM public.procurement_requests WHERE id=:i"), {"i": have["procure"][0]})
     if have["workflow"]:

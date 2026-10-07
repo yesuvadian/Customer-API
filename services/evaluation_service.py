@@ -141,12 +141,84 @@ class EvaluationService:
                         overall_rank = rank
                     field_results.append(result)
 
+        # A test with no threshold values configured anywhere can't be
+        # assessed, so it must not pass silently as NORMAL — flag it CRITICAL.
+        if not EvaluationService.has_threshold_values(template_data):
+            return EvaluationService._no_threshold_result()
+
         overall_labels = [NORMAL, ALERT, CRITICAL]
         return {
             "overall": overall_labels[overall_rank],
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
             "fields": field_results,
         }
+
+    @staticmethod
+    def _no_threshold_result() -> dict:
+        return {
+            "overall": CRITICAL,
+            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "no_threshold_values": True,
+            "fields": [{
+                "key": "_no_threshold_values",
+                "label": "Threshold configuration",
+                "type": "config",
+                "value": None,
+                "status": CRITICAL,
+                "remedial_action_text": (
+                    "No threshold values are configured for this test, so the "
+                    "results cannot be assessed. Configure thresholds for this "
+                    "test template and re-evaluate."
+                ),
+            }],
+        }
+
+    @staticmethod
+    def has_threshold_values(template_data: dict) -> bool:
+        """True when any field in the template carries at least one usable
+        threshold value (number limits, table/column evaluation, THRESHOLD
+        bands, dropdown severities, date or cross-session evaluation)."""
+        _limit_keys = ("normal_min", "normal_max", "alert_min", "alert_max",
+                       "critical_below", "critical_above")
+
+        def _has_limits(ev: dict) -> bool:
+            return any(_f(ev.get(k)) is not None for k in _limit_keys)
+
+        for section in (template_data or {}).get("sections", []):
+            for field in section.get("fields", []):
+                ev = field.get("evaluation") or {}
+                if ev.get("enabled") and _has_limits(ev):
+                    return True
+
+                tev = field.get("table_evaluation") or {}
+                if tev.get("enabled") and (
+                    _f(tev.get("aggregate_threshold")) is not None
+                    or any(_has_limits(c or {})
+                           for c in (tev.get("column_evaluations") or {}).values())
+                ):
+                    return True
+
+                for col in field.get("columns", []):
+                    if col.get("column_evaluation"):
+                        return True
+                    rule = col.get("rule") or {}
+                    if (col.get("type") == "calculated"
+                            and rule.get("type") == "THRESHOLD"
+                            and (rule.get("config") or {}).get("thresholds")):
+                        return True
+
+                dev = field.get("dropdown_evaluation") or {}
+                if dev.get("enabled") and dev.get("value_severities"):
+                    return True
+
+                dtev = field.get("date_evaluation") or {}
+                if dtev.get("enabled"):
+                    return True
+
+                csev = field.get("cross_session_evaluation") or {}
+                if csev.get("enabled"):
+                    return True
+        return False
 
     # ─── Field-type specific evaluators ──────────────────────────────────────
 
@@ -1147,7 +1219,7 @@ class EvaluationService:
         """Convenience: resolve template then evaluate."""
         tpl = EvaluationService.get_template_data(template_key, db, org_id=org_id)
         if not tpl:
-            return {"overall": NORMAL, "evaluated_at": datetime.now(timezone.utc).isoformat(), "fields": []}
+            return EvaluationService._no_threshold_result()
         return EvaluationService.evaluate_test_data(tpl, test_data, db)
 
 

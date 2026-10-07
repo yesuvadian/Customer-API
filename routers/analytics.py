@@ -2308,6 +2308,9 @@ def get_deterioration_watch_list(
             "tested_at":             latest.tested_at.isoformat() if latest.tested_at else None,
             "zone":                  zone,
             "zone_meaning":          duval["meaning"],
+            "pct_ch4":               duval["pct_ch4"],
+            "pct_c2h4":              duval["pct_c2h4"],
+            "pct_c2h2":              duval["pct_c2h2"],
             "severity_tier":         severity_tier,
         })
 

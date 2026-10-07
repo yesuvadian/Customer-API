@@ -6520,7 +6520,7 @@ WITH fleet AS (
             ELSE '>20 years'
         END                  AS age_band,
         COUNT(DISTINCT e.id) AS fleet_unit_count,
-        COUNT(DISTINCT e.id) FILTER (WHERE ea.risk_level = 'CRITICAL')
+        COUNT(DISTINCT e.id) FILTER (WHERE TRIM(LOWER(ea.risk_level)) = 'critical')
                              AS units_currently_critical
     FROM   public.equipment e
     LEFT JOIN public."CategoryMaster"    cm ON cm.id = e.equipment_type_id
@@ -6602,6 +6602,7 @@ ORDER  BY failure_rate_per_unit DESC NULLS LAST
 WITH eq_info AS (
     SELECT
         e.id,
+        e.ueic,
         e.factory_serial_number,
         e.manufacturer,
         e.model_number,
@@ -6617,12 +6618,15 @@ WITH eq_info AS (
     LEFT JOIN public."CategoryMaster"    cm ON cm.id = e.equipment_type_id
     LEFT JOIN public.org_departments     od ON od.id = e.department_id
     LEFT JOIN public.equipment_analytics ea ON ea.equipment_id = e.id
-    WHERE  e.id = :equipment_id ::uuid
+    -- No equipment chosen (plain Run from Reporting Center) = every
+    -- equipment that has tests; it used to return nothing at all then.
+    WHERE  (:equipment_id ::uuid IS NULL OR e.id = :equipment_id ::uuid)
       {org_clause}
 ),
 tests AS (
     SELECT
         tr.id                 AS testing_request_id,
+        tr.equipment_id,
         tr.request_number,
         tr.request_category,
         COALESCE(tr.completed_at, tr.requested_date, tr.cts) AS event_date,
@@ -6632,15 +6636,17 @@ tests AS (
                                AS templates_tested
     FROM   public.testing_requests tr
     LEFT JOIN public.test_results  tres ON tres.testing_request_id = tr.id
-    WHERE  tr.equipment_id = :equipment_id ::uuid
+    WHERE  (:equipment_id ::uuid IS NULL OR tr.equipment_id = :equipment_id ::uuid)
+      AND  tr.equipment_id IS NOT NULL
       AND  (:date_from ::date IS NULL
             OR COALESCE(tr.completed_at, tr.requested_date, tr.cts) >= :date_from ::date)
       AND  (:date_to   ::date IS NULL
             OR COALESCE(tr.completed_at, tr.requested_date, tr.cts) <= :date_to ::date)
-    GROUP  BY tr.id, tr.request_number, tr.request_category,
+    GROUP  BY tr.id, tr.equipment_id, tr.request_number, tr.request_category,
               COALESCE(tr.completed_at, tr.requested_date, tr.cts)
 )
 SELECT
+    ei.ueic,
     ei.factory_serial_number,
     ei.manufacturer,
     ei.model_number,
@@ -6658,8 +6664,11 @@ SELECT
     t.templates_tested,
     (t.request_category = 'failure_registry' OR t.had_critical_result)  AS is_failure_event
 FROM   eq_info ei
-LEFT JOIN tests t ON true
-ORDER  BY t.event_date DESC NULLS LAST
+LEFT JOIN tests t ON t.equipment_id = ei.id
+-- one equipment chosen: show it even with no tests; none chosen: only
+-- equipment that actually has test history
+WHERE  :equipment_id ::uuid IS NOT NULL OR t.testing_request_id IS NOT NULL
+ORDER  BY ei.ueic, t.event_date DESC NULLS LAST
 """),
 
         dict(
@@ -6678,7 +6687,7 @@ SELECT
     e.ueic                      AS equipment_ueic,
     cm.name                     AS equipment_type,
     fr.form_data->>'failure_category' AS failure_category,
-    fr.form_data->>'next_action'      AS resolution_outcome,
+    rec.next_action::text       AS resolution_outcome,
     fr.status                   AS approval_status,
     fr.cts::date                AS failure_date,
     wf.status                   AS linked_workflow_status,
@@ -6687,12 +6696,19 @@ FROM   public.testing_requests fr
 JOIN   public.equipment        e   ON e.id   = fr.equipment_id
 LEFT JOIN public."CategoryMaster"   cm ON cm.id = e.equipment_type_id
 LEFT JOIN public.repair_workflows   wf ON wf.source_failure_id = fr.id
+LEFT JOIN LATERAL (
+    SELECT r.next_action
+    FROM   public.recommendations r
+    WHERE  r.testing_request_id = fr.id
+    ORDER  BY r.cts DESC
+    LIMIT  1
+) rec ON TRUE
 WHERE  fr.request_category = 'failure_registry'
   {org_clause}
   AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
   AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
   AND  (:outcome IS NULL OR :outcome = 'all'
-        OR fr.form_data->>'next_action' = :outcome)
+        OR rec.next_action::text = :outcome)
 ORDER  BY fr.cts DESC
 """),
 
@@ -6833,12 +6849,27 @@ SELECT
     COUNT(si.id) FILTER (WHERE si.status = 'completed') AS stages_done,
     COUNT(si.id)                    AS stages_total,
     ROUND(COALESCE(wf.progress, 0)::numeric, 1) AS pct_complete,
-    EXTRACT(DAY FROM NOW() - wf.created_at)::int AS days_elapsed
+    COALESCE(due.d, 0)              AS due_days,
+    act.d                           AS actual_days,
+    GREATEST(act.d - COALESCE(due.d, 0), 0) AS days_elapsed
 FROM   public.repair_workflows wf
 JOIN   public.equipment          e ON e.id  = wf.equipment_id
 LEFT JOIN public.org_departments d ON d.id  = e.department_id
 LEFT JOIN public.repair_stage_definitions sd ON sd.id = wf.current_stage_id
 LEFT JOIN public.repair_stage_instances   si ON si.workflow_id = wf.id
+LEFT JOIN LATERAL (
+    SELECT SUM(sdx.default_duration_days)::int AS d
+    FROM public.repair_stage_instances six
+    JOIN public.repair_stage_definitions sdx ON sdx.id = six.stage_id
+    WHERE six.workflow_id = wf.id) due ON TRUE
+LEFT JOIN LATERAL (
+    SELECT GREATEST(EXTRACT(DAY FROM
+        (CASE WHEN wf.status = 'completed'
+              THEN COALESCE(MAX(siy.completed_at), wf.completed_at, NOW())
+              ELSE NOW() END)
+        - COALESCE(MIN(siy.started_at), wf.started_at, wf.created_at))::int, 0) AS d
+    FROM public.repair_stage_instances siy
+    WHERE siy.workflow_id = wf.id) act ON TRUE
 WHERE  wf.workflow_type = 'repair_lifecycle'
   AND  e.equipment_type_id IN (
            SELECT id FROM public."CategoryMaster"
@@ -6848,7 +6879,7 @@ WHERE  wf.workflow_type = 'repair_lifecycle'
   AND  (:date_to::date   IS NULL OR wf.created_at <= :date_to::date)
   AND  (:department_id   IS NULL OR e.department_id = :department_id::uuid)
 GROUP  BY e.ueic, e.manufacturer, e.voltage_class, d.name, wf.id,
-          wf.status, wf.created_at, sd.name, wf.progress
+          wf.status, wf.created_at, sd.name, wf.progress, due.d, act.d
 ORDER  BY wf.created_at DESC
 """),
 
@@ -7091,7 +7122,12 @@ SELECT
         COUNT(CASE WHEN ti.current_stage_code ILIKE '%clos%' THEN 1 END)::numeric
         / NULLIF(COUNT(ti.id), 0) * 100, 1
     )                               AS compliance_pct,
-    MAX(EXTRACT(DAY FROM NOW() - ti.cts))::int AS max_age_days
+    -- Age of the oldest observation still OPEN (blank when all are closed) —
+    -- how long issues have been pending. Used to be max age of ANY
+    -- observation, closed ones included, which said nothing about backlog.
+    MAX(CASE WHEN ti.current_stage_code NOT ILIKE '%clos%'
+                  OR ti.current_stage_code IS NULL
+             THEN EXTRACT(DAY FROM NOW() - ti.cts) END)::int AS oldest_open_days
 FROM   public.taqc_observations ti
 JOIN   public.taqc_annual_inspections tai ON tai.id = ti.inspection_id
 LEFT JOIN public.org_departments d  ON d.id  = tai.department_id
@@ -7196,7 +7232,10 @@ SELECT
         / NULLIF(COUNT(tr.id), 0) * 100, 1
     )                                AS compliance_pct
 FROM   public.testing_requests tr
-LEFT JOIN public.org_departments d  ON d.id  = tr.department_id
+-- Calibration tickets auto-created by the scheduler often carry no
+-- department of their own — fall back to the equipment's department.
+LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
+LEFT JOIN public.org_departments d  ON d.id  = COALESCE(tr.department_id, e.department_id)
 LEFT JOIN public.org_departments d2 ON d2.id = d.parent_department_id
 LEFT JOIN public.org_departments d3 ON d3.id = d2.parent_department_id
 LEFT JOIN public.org_departments d4 ON d4.id = d3.parent_department_id
@@ -7233,14 +7272,20 @@ SELECT
     d2.name                                                    AS ee_subdivision,
     d.name                                                      AS substation,
     COUNT(ea.id)                                                AS total_assessed,
-    COUNT(CASE WHEN ea.risk_level = 'Critical' THEN 1 END)      AS critical_count,
-    COUNT(CASE WHEN ea.risk_level = 'High'     THEN 1 END)      AS high_count,
-    COUNT(CASE WHEN ea.risk_level = 'Medium'   THEN 1 END)      AS medium_count,
-    COUNT(CASE WHEN ea.risk_level = 'Low'      THEN 1 END)      AS low_count,
-    COUNT(CASE WHEN ea.risk_level IS NULL THEN 1 END)           AS unknown_count,
+    -- Case/whitespace-insensitive: EquipmentHealthBandThreshold.label is
+    -- admin-editable free text, so risk_level values written under an
+    -- older casing (e.g. 'MEDIUM', ' High') must still land in the right
+    -- bucket instead of silently falling through to Unknown.
+    COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'critical' THEN 1 END) AS critical_count,
+    COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'high'     THEN 1 END) AS high_count,
+    COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'medium'   THEN 1 END) AS medium_count,
+    COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'low'      THEN 1 END) AS low_count,
+    COUNT(CASE WHEN ea.risk_level IS NULL
+               OR TRIM(LOWER(ea.risk_level)) NOT IN ('critical','high','medium','low')
+          THEN 1 END)                                          AS unknown_count,
     ROUND(AVG(ea.health_score), 1)                              AS avg_health_score,
     ROUND(
-        COUNT(CASE WHEN ea.risk_level = 'Critical' THEN 1 END)::numeric
+        COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'critical' THEN 1 END)::numeric
         / NULLIF(COUNT(ea.id), 0) * 100, 1
     )                                                            AS critical_pct
 FROM   public.equipment_analytics ea
@@ -7430,7 +7475,9 @@ ORDER  BY month DESC
             org_alias="s",
             sql_template="""
 SELECT
-    s.title                                        AS schedule,
+    -- Untitled schedules fall back to "<test type> — <equipment type>".
+    COALESCE(NULLIF(TRIM(s.title), ''),
+             NULLIF(CONCAT_WS(' — ', cd.name, cm.name), ''))  AS schedule,
     e.ueic,
     cm.name                                        AS equipment_type,
     cd.name                                        AS test_type,
@@ -7499,13 +7546,13 @@ FROM   public.testing_requests tr
 LEFT JOIN public.equipment         e  ON e.id  = tr.equipment_id
 LEFT JOIN public."CategoryMaster"  cm ON cm.id = COALESCE(e.equipment_type_id, tr.equipment_type_id)
 LEFT JOIN public."CategoryDetails" cd ON cd.id = tr.test_type_id
-LEFT JOIN public.org_departments   d  ON d.id  = tr.department_id
+LEFT JOIN public.org_departments   d  ON d.id  = COALESCE(tr.department_id, e.department_id)
 WHERE  tr.request_category = 'test'
   AND  tr.due_date IS NOT NULL
   AND  tr.due_date::date BETWEEN CURRENT_DATE AND CURRENT_DATE + COALESCE(:days, 15)
   AND  tr.status::text NOT IN ('closed', 'completed', 'rejected', 'cancelled')
   {org_clause}
-  AND  (:department_id IS NULL OR tr.department_id = :department_id::uuid)
+  AND  (:department_id IS NULL OR COALESCE(tr.department_id, e.department_id) = :department_id::uuid)
 ORDER  BY tr.due_date, d.name
 """),
 

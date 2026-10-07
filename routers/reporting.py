@@ -124,6 +124,7 @@ def _defn_to_dict(defn) -> dict:
         "recipient_roles":  defn.recipient_roles,
         "is_active":        defn.is_active,
         "is_system":        defn.is_system,
+        "group_name":       defn.group_name,
         "last_generated_at": defn.last_generated_at.isoformat()
                               if defn.last_generated_at else None,
         "cts":              defn.cts.isoformat() if defn.cts else None,
