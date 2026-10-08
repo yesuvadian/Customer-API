@@ -250,6 +250,7 @@ def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None =
     req.wf_stage_name   = None
     req.wf_stage_roles  = []
     req.wf_terminal_action_code = None
+    req.wf_terminal_reason = None
     try:
         if req.wf_instance_id:
             from models import TrWfStage, TrWfStatus as _TrWfStatus, TrWfAuditLog as _TrWfAuditLog
@@ -278,6 +279,7 @@ def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None =
                     )
                     if _last_log:
                         req.wf_terminal_action_code = _last_log.action_code
+                        req.wf_terminal_reason = _last_log.comment
 
                     if req.current_status_code:
                         _st = (
@@ -770,6 +772,14 @@ def list_testing_requests(
             "panel's related-requests list), not the org-wide TR worklist."
         ),
     ),
+    include_scored: bool = Query(
+        False,
+        description=(
+            "With is_closed=true, also include requests whose results feed "
+            "equipment health scores (analytics_engine.accepted_test_result_ids) "
+            "- for the per-equipment Test Results dialog."
+        ),
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -828,6 +838,7 @@ def list_testing_requests(
         failure_year=failure_year,
         capacity_mva=capacity_mva,
         include_direct_submissions=include_direct_submissions,
+        include_scored=include_scored,
     )
 
     total = service.count_requests(**common)

@@ -21,6 +21,7 @@ import io
 import os
 import re
 from datetime import datetime, timezone, date, timedelta
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -75,15 +76,118 @@ def _org_clause(org_id, alias: str = "tr") -> str:
     return f" AND {alias}.organization_id = '{org_id}'" if org_id else ""
 
 
+# What an empty cell MEANS, per column — shown in the Excel/PDF instead of a
+# blank, so every column reads as information ("Not tested") rather than a
+# gap. Display only: the data itself is never changed. Columns not listed
+# fall back to "Not recorded".
+_NO_VALUE_LABELS = {
+    # never happened yet
+    "last_tested_at": "Not tested", "last_test_name": "Not tested",
+    "last_result": "Not tested", "tested_at": "Not tested",
+    "before_test_date": "No test before", "before_health_score": "No test before",
+    "after_test_date": "No test after yet", "after_health_score": "No test after yet",
+    "pre_repair_result": "No pre-repair test", "pre_repair_tested_at": "No pre-repair test",
+    "post_repair_result": "No post-repair test", "post_repair_tested_at": "No post-repair test",
+    "last_run_date": "Never run", "completed_date": "Not completed",
+    "completed_at": "Not completed", "due_date": "No due date",
+    "review_disposition": "Not reviewed", "days_pending_review": "Reviewed",
+    "accelerating_gases": "None",
+    "assigned_to": "Not assigned", "assigned_tester": "Not assigned",
+    "approved_by": "Pending approval", "approved_date": "Pending approval",
+    "approval_notes": "No notes", "evaluation_overall": "Not evaluated",
+    "oldest_open_days": "All closed", "improvement_pct": "n/a (baseline 0)",
+    "current_stage": "Not started", "resolution_outcome": "Pending",
+    "linked_workflow_status": "No workflow", "linked_workflow_id": "No workflow",
+    "days_to_breach": "No breach predicted", "breach_threshold": "No threshold",
+    "current_value": "No reading", "unit": "-",
+    "ch4_rate_ppm_per_month": "First reading", "c2h4_rate_ppm_per_month": "First reading",
+    "c2h2_rate_ppm_per_month": "First reading",
+    "substation": "Subdivision level", "ueic": "All equipment of type",
+    "test_type": "Not specified", "priority": "Not set",
+    "current_health_score": "Not analysed", "current_risk_level": "Not analysed",
+    "current_condition": "Not analysed", "last_test_date": "Not tested",
+    "templates_tested": "No results", "is_failure_event": "No",
+    "zone": "No department", "ce_circle": "No department", "ee_subdivision": "No department",
+    "avg_days_to_complete": "No completed tests", "overall_result": "Not evaluated",
+}
+
+
+def _display_blank(key: str, val, row: dict):
+    """Value to show for `key` in a rendered report: `val` itself unless it's
+    empty, else what the blank means (see _NO_VALUE_LABELS)."""
+    if val not in (None, "") and not (isinstance(val, (list, dict)) and not val):
+        return val
+    if key in ("closure_reason", "closed_on", "closed_by"):
+        return "Still open" if row.get("outcome") == "Open" else (
+            "No reason given" if key == "closure_reason" else
+            "System (auto-closed)" if key == "closed_by" and row.get("outcome") == "Auto-closed"
+            else "Not recorded")
+    # Substation blank because there's no department at all (not because
+    # the item sits directly under a subdivision).
+    if key == "substation" and row.get("zone") in (None, "") and row.get("ee_subdivision") in (None, ""):
+        return "No department"
+    return _NO_VALUE_LABELS.get(key, "Not recorded")
+
+
+# How each report query alias reaches a department, for department-scoped
+# users (see ReportingService._scope). Aliases are the ones the built-in
+# queries and the ReportQueryKey.sql_template rows use:
+#   "direct"  — the aliased table has its own department_id
+#   "via_tr"  — table has testing_request_id → testing_requests.department_id
+#   "via_eq"  — table has equipment_id       → equipment.department_id
+_ALIAS_DEPT_LINK = {
+    "tr":  "direct",   # testing_requests
+    "fr":  "direct",   # testing_requests (failure_resolution_report)
+    "e":   "direct",   # equipment
+    "ea":  "direct",   # equipment_analytics
+    "tai": "direct",   # taqc_annual_inspections
+    "res": "via_tr",   # test_results
+    "rec": "via_tr",   # recommendations
+    "pr":  "via_tr",   # procurement_requests
+    "wf":  "via_eq",   # repair_workflows
+    "s":   "direct",   # test_request_schedules (missed_schedules_report)
+    "car": "direct",   # corrective_action_requests (open_car_report)
+    "pc":  "direct",   # precommission_requests (vendor_performance_report; dept_id exposed as department_id)
+}
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # ReportingService
 # ══════════════════════════════════════════════════════════════════════════
 
 class ReportingService:
 
-    def __init__(self, db: Session, org_id: Optional[UUID] = None):
+    def __init__(self, db: Session, org_id: Optional[UUID] = None,
+                 dept_ids: Optional[list] = None):
         self.db = db
         self.org_id = org_id
+        # Department subtree the caller may see; None = no department
+        # restriction (org admins, scheduled jobs). Set by routers/reporting.py
+        # from the logged-in user's own department scope.
+        self.dept_ids = [str(d) for d in dept_ids] if dept_ids else None
+
+    def _scope(self, alias: str) -> str:
+        """Org clause plus, for a department-scoped caller, a restriction of
+        `alias`'s rows to the caller's department subtree. Fails closed: an
+        alias with no known department link raises rather than silently
+        returning every department's rows."""
+        clause = _org_clause(self.org_id, alias)
+        if not self.dept_ids:
+            return clause
+        ids = ", ".join(f"'{UUID(d)}'" for d in self.dept_ids)   # UUID() validates
+        link = _ALIAS_DEPT_LINK.get(alias)
+        if link == "direct":
+            return clause + f" AND {alias}.department_id IN ({ids})"
+        if link == "via_tr":
+            return clause + (f" AND {alias}.testing_request_id IN (SELECT id FROM "
+                             f"public.testing_requests WHERE department_id IN ({ids}))")
+        if link == "via_eq":
+            return clause + (f" AND {alias}.equipment_id IN (SELECT id FROM "
+                             f"public.equipment WHERE department_id IN ({ids}))")
+        raise ValueError(
+            f"This report can't be limited to your department yet (alias '{alias}'). "
+            f"Ask an org admin to run it."
+        )
 
     # ── Public ─────────────────────────────────────────────────────────────
 
@@ -146,6 +250,24 @@ class ReportingService:
         self.db.refresh(defn)
         return defn
 
+    def delete_definition(self, definition_id: UUID,
+                          user_id: Optional[UUID] = None) -> None:
+        """Soft delete (is_active=False): ReportLog rows cascade on a hard
+        delete, which would wipe the report's generation history. Inactive
+        definitions already drop out of list_definitions and the scheduler.
+        System definitions and other organisations' definitions are refused.
+        """
+        defn = self.get_definition(definition_id)
+        if not defn or not defn.is_active:
+            raise ValueError("Not found")
+        if defn.is_system:
+            raise PermissionError("System report definitions cannot be deleted")
+        if self.org_id and defn.organization_id != self.org_id:
+            raise PermissionError("Report definition belongs to another organisation")
+        defn.is_active = False
+        defn.modified_by = user_id
+        self.db.commit()
+
     def generate(
         self,
         definition_id: UUID,
@@ -196,11 +318,22 @@ class ReportingService:
             self.db.commit()
 
         except Exception as exc:
+            # A failed SQL statement leaves the transaction aborted — roll it
+            # back first, or recording the failure itself raises
+            # InFailedSqlTransaction and the caller gets a bare 500 instead
+            # of the real reason.
+            self.db.rollback()
+            log = self.db.get(ReportLog, log.id) or log
             log.status        = "failed"
-            log.error_message = str(exc)
+            log.error_message = str(exc)[:2000]
             log.completed_at  = datetime.now(timezone.utc)
             self.db.commit()
-            raise
+            if isinstance(exc, (ValueError, RuntimeError)):
+                raise
+            # Database/other errors → RuntimeError, which routers/reporting.py
+            # returns as a readable 422 rather than an unhandled 500.
+            first_line = str(exc).split("\n")[0]
+            raise RuntimeError(f"Report '{defn.name}' failed: {first_line}") from exc
 
         return raw, filename, content_type
 
@@ -223,6 +356,11 @@ class ReportingService:
             "tester_performance_report":          self._q_tester_performance,
             "monthly_kpi_report":                 self._q_monthly_kpi,
             "dga_trend_report":                   self._q_dga_trend_report,
+            # Reports mirroring Notification Center topics whose logic lives
+            # in Python (not expressible as one sql_template).
+            "workflow_stage_delays_report":       self._q_workflow_stage_delays,
+            "kit_calibration_due_report":         self._q_kit_calibration_due,
+            "deterioration_watch_report":         self._q_deterioration_watch,
         }
         fn = registry.get(query_key)
         if fn:
@@ -245,7 +383,14 @@ class ReportingService:
         if not qk or not qk.sql_template:
             raise ValueError(f"Unknown query_key: '{query_key}'")
 
-        org_clause = _org_clause(self.org_id, qk.org_alias) if qk.org_alias else ""
+        if qk.org_alias:
+            org_clause = self._scope(qk.org_alias)
+        elif self.dept_ids:
+            # No alias to hang a department filter on — fail closed.
+            raise ValueError("This report can't be limited to your department yet. "
+                             "Ask an org admin to run it.")
+        else:
+            org_clause = ""
         sql = qk.sql_template.replace("{org_clause}", org_clause)
         # SQLAlchemy's text() bind-parameter tokenizer misreads ":name::type"
         # (no space) as a syntax error — insert a space so the Postgres cast
@@ -269,7 +414,7 @@ class ReportingService:
     # ── 14 Query Functions ─────────────────────────────────────────────────
 
     def _q_equipment_condition(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "e")
+        org = self._scope("e")
         # Capacity and voltage ratio live in nameplate_data (JSONB) under a
         # handful of different key names depending on which template was used
         # at onboarding — mirrors services/nameplate_helper.py's key list so
@@ -322,7 +467,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_overdue_tests(self, p: dict) -> list[dict]:
-        org   = _org_clause(self.org_id, "tr")
+        org   = self._scope("tr")
         today = date.today()
         df = _date(_p(p, "date_from"))
         dt = _date(_p(p, "date_to"))
@@ -334,10 +479,24 @@ class ReportingService:
         sql = text(f"""
             SELECT
                 tr.request_number,
-                tr.title,
-                tr.zone,
-                tr.ce_circle,
-                tr.ee_subdivision,
+                -- Title is optional on the request form: blank ones (or the
+                -- old "  -  Test Name" shape) fall back to the test name.
+                COALESCE(
+                    NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
+                    cd.name
+                )                                         AS title,
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 tr.status,
                 tr.priority,
                 tr.due_date::date                         AS due_date,
@@ -347,8 +506,22 @@ class ReportingService:
                 cd.name                                   AS test_type
             FROM   public.testing_requests tr
             LEFT JOIN public.equipment        e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster"  cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster"  cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public."CategoryDetails" cd ON cd.id = tr.test_type_id
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  tr.request_category = 'test'
               AND  tr.due_date IS NOT NULL
               AND  tr.due_date < NOW()
@@ -360,7 +533,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_active_alerts(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "res")
+        org = self._scope("res")
         sev = _p(p, "severity", "all")
         sev_clause = (
             f" AND res.evaluation_result->>'overall' = '{sev}'"
@@ -379,8 +552,18 @@ class ReportingService:
                 tr.request_number,
                 e.ueic,
                 cm.name                                 AS equipment_type,
-                tr.zone,
-                tr.ee_subdivision,
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 res.test_name,
                 res.evaluation_result->>'overall'       AS severity,
                 res.tested_at,
@@ -388,8 +571,22 @@ class ReportingService:
             FROM   public.test_results res
             JOIN   public.testing_requests  tr ON tr.id  = res.testing_request_id
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.users           u  ON u.id  = res.tested_by
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  res.evaluation_result IS NOT NULL
               {sev_clause} {org} {extra}
             ORDER  BY res.tested_at DESC
@@ -398,7 +595,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_flagged_equipment(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "res")
+        org = self._scope("res")
         # Same COALESCE key list as _q_equipment_condition / nameplate_helper.py
         sql = text(f"""
             SELECT DISTINCT ON (e.id)
@@ -429,13 +626,37 @@ class ReportingService:
                 )                                    AS voltage_ratio,
                 res.evaluation_result->>'overall'   AS condition,
                 res.tested_at                       AS last_tested_at,
-                tr.zone,
-                tr.ee_subdivision
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the equipment's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation
             FROM   public.test_results res
             JOIN   public.testing_requests  tr ON tr.id = res.testing_request_id
             JOIN   public.equipment         e  ON e.id  = tr.equipment_id
             LEFT JOIN public.org_departments d  ON d.id  = e.department_id
             LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT dp.name, dp.parent_department_id, 1 AS depth
+                    FROM   public.org_departments dp
+                    WHERE  dp.id = e.department_id
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  res.evaluation_result IS NOT NULL
               AND  res.evaluation_result->>'overall' IN ('CRITICAL','ALERT')
               {org}
@@ -444,7 +665,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_repair_progress(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "tr")
+        org = self._scope("tr")
         sql = text(f"""
             SELECT
                 tr.request_number,
@@ -455,32 +676,70 @@ class ReportingService:
                 tr.total_sessions_planned,
                 tr.requested_date::date             AS requested_date,
                 tr.due_date::date                   AS due_date,
-                tr.zone,
-                tr.ee_subdivision,
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 COUNT(ts.id)                        AS sessions_completed
             FROM   public.testing_requests tr
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.test_sessions   ts
                    ON ts.testing_request_id = tr.id AND ts.status = 'completed'
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  tr.request_category = 'repair_lifecycle'
               AND  tr.status IN ('submitted','assigned','accepted','in_progress',
                                  'test_submitted','under_approval')
               {org}
-            GROUP  BY tr.id, e.ueic, cm.name
+            GROUP  BY tr.id, e.ueic, cm.name, h.path
             ORDER  BY tr.cts DESC
         """)
         return self._exec(sql)
 
     def _q_maintenance_overdue(self, p: dict) -> list[dict]:
-        org   = _org_clause(self.org_id, "tr")
+        org   = self._scope("tr")
         today = date.today()
         sql = text(f"""
             SELECT
                 tr.request_number,
-                tr.title,
-                tr.zone,
-                tr.ee_subdivision,
+                -- Blank titles (optional on the form) fall back to the test name.
+                COALESCE(
+                    NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
+                    cd_t.name
+                )                                         AS title,
+                -- Zone → CE Circle → SE Division → EE Subdivision, read
+                -- top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 tr.status,
                 tr.due_date::date                         AS due_date,
                 ('{today}'::date - tr.due_date::date)     AS days_overdue,
@@ -488,7 +747,22 @@ class ReportingService:
                 cm.name                                   AS equipment_type
             FROM   public.testing_requests tr
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
+            LEFT JOIN public."CategoryDetails" cd_t ON cd_t.id = tr.test_type_id
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  tr.request_category = 'maintenance'
               AND  tr.due_date IS NOT NULL
               AND  tr.due_date < NOW()
@@ -500,7 +774,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_procurement_pipeline(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "pr")
+        org = self._scope("pr")
         st  = _p(p, "status", "all")
         st_clause = f" AND pr.status = '{st}'" if st and st != "all" else ""
         sql = text(f"""
@@ -522,7 +796,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_open_remediation(self, p: dict) -> list[dict]:
-        org   = _org_clause(self.org_id, "rec")
+        org   = self._scope("rec")
         today = date.today()
         sql = text(f"""
             SELECT
@@ -539,7 +813,7 @@ class ReportingService:
             FROM   public.recommendations rec
             JOIN   public.testing_requests  tr ON tr.id  = rec.testing_request_id
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.users           u  ON u.id  = rec.submitted_by
             WHERE  rec.approval_status = 'pending'
               {org}
@@ -548,7 +822,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_testing_request_status(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "tr")
+        org = self._scope("tr")
         clauses = ""
         st  = _p(p, "status")
         cat = _p(p, "category")
@@ -562,16 +836,66 @@ class ReportingService:
             clauses += f" AND tr.cts >= '{df}'"
         if dt:
             clauses += f" AND tr.cts <= '{dt}'"
+        # Outcome filter: every finished ticket has status 'closed', so the
+        # status filter alone can't tell completed / rejected / cancelled /
+        # auto-closed apart.
+        outcome_labels = {"open": "Open", "completed": "Completed", "rejected": "Rejected",
+                          "cancelled": "Cancelled", "auto_closed": "Auto-closed",
+                          "closed": "Closed"}
+        oc = (_p(p, "outcome") or "all").lower().replace("-", "_").replace(" ", "_")
+        outcome_where = f"WHERE outcome = '{outcome_labels[oc]}'" if oc in outcome_labels else ""
         sql = text(f"""
+            SELECT * FROM (
             SELECT
                 tr.request_number,
-                tr.title,
+                -- Title is optional on the request form: blank ones (or the
+                -- old "  -  Test Name" shape) fall back to the test name.
+                COALESCE(
+                    NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
+                    cd.name
+                )                   AS title,
                 tr.request_category,
                 tr.status,
+                -- Real result of a finished ticket (status is just 'closed'
+                -- for all of them): equipment-driven auto-close is marked in
+                -- rejection_reason; the rest come from the workflow's
+                -- terminal status code — same rule as the dashboard's
+                -- Rejected/Cancelled tile.
+                CASE
+                    WHEN tr.rejection_reason ILIKE 'Auto-closed%%'           THEN 'Auto-closed'
+                    WHEN tr.current_status_code = 'wf_rejected'
+                      OR tr.status::text = 'rejected'                         THEN 'Rejected'
+                    WHEN tr.current_status_code = 'wf_cancelled'             THEN 'Cancelled'
+                    WHEN tr.current_status_code = 'wf_completed'
+                      OR tr.status::text = 'completed'                        THEN 'Completed'
+                    WHEN tr.status::text = 'closed'                           THEN 'Closed'
+                    ELSE 'Open'
+                END                 AS outcome,
+                COALESCE(NULLIF(TRIM(term.comment), ''), tr.rejection_reason)
+                                    AS closure_reason,
+                CASE WHEN tr.status::text IN ('closed', 'completed', 'rejected')
+                     THEN COALESCE(term.created_at, tr.completed_at, tr.mts)::date
+                END                 AS closed_on,
+                CASE WHEN tr.status::text IN ('closed', 'completed', 'rejected')
+                     THEN COALESCE(u_c.email, u_cb.email)
+                END                 AS closed_by,
                 tr.priority,
-                tr.zone,
-                tr.ce_circle,
-                tr.ee_subdivision,
+                -- Zone → CE Circle → SE Division → EE Subdivision → Substation,
+                -- read top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                -- Depth-aware: a 5-level chain (zone/circle/division/
+                -- subdivision/substation) fills every column; a 4-level one
+                -- (no SE Division level, as in KPTCL's Bangalore Zone) leaves
+                -- SE Division blank instead of shifting every level down one.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation,
                 tr.cts::date        AS created_date,
                 tr.due_date::date   AS due_date,
                 tr.completed_at::date AS completed_date,
@@ -582,17 +906,42 @@ class ReportingService:
                 u_t.email           AS assigned_tester
             FROM   public.testing_requests tr
             LEFT JOIN public.equipment        e     ON e.id    = tr.equipment_id
-            LEFT JOIN public."CategoryMaster"  cm    ON cm.id   = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster"  cm    ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public."CategoryDetails" cd    ON cd.id   = tr.test_type_id
             LEFT JOIN public.users            u_o   ON u_o.id  = tr.originator_id
             LEFT JOIN public.users            u_t   ON u_t.id  = tr.assigned_tester_id
+            -- Last terminal workflow step: who closed it, when, and their comment.
+            LEFT JOIN LATERAL (
+                SELECT a.comment, a.created_at, a.performed_by
+                FROM   public.tr_wf_audit_logs a
+                WHERE  a.testing_request_id = tr.id AND a.is_terminal
+                ORDER  BY a.created_at DESC LIMIT 1
+            ) term ON true
+            LEFT JOIN public.users            u_c   ON u_c.id  = term.performed_by
+            LEFT JOIN public.users            u_cb  ON u_cb.id = tr.completed_by_id
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  1=1 {org} {clauses}
-            ORDER  BY tr.cts DESC
+            ) x
+            {outcome_where}
+            ORDER  BY created_date DESC
         """)
         return self._exec(sql)
 
     def _q_test_results_summary(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "res")
+        org = self._scope("res")
         sev = _p(p, "severity", "all")
         df  = _date(_p(p, "date_from"))
         dt  = _date(_p(p, "date_to"))
@@ -612,16 +961,43 @@ class ReportingService:
                 res.template_key,
                 res.overall_result,
                 res.evaluation_result->>'overall'       AS evaluation_overall,
-                res.pass_fail,
                 res.tested_at,
                 u.email                                 AS tested_by,
-                tr.zone,
-                tr.ee_subdivision
+                -- Zone → CE Circle → SE Division → EE Subdivision → Substation,
+                -- read top-down from the ticket's department chain (the
+                -- free-text zone / ce_circle / se_division / ee_subdivision
+                -- columns on the ticket are mostly empty); those typed
+                -- values are only the fallback.
+                -- Depth-aware: a 5-level chain (zone/circle/division/
+                -- subdivision/substation) fills every column; a 4-level one
+                -- (no SE Division level, as in KPTCL's Bangalore Zone) leaves
+                -- SE Division blank instead of shifting every level down one.
+                COALESCE(h.path[1], NULLIF(tr.zone, ''))            AS zone,
+                COALESCE(h.path[2], NULLIF(tr.ce_circle, ''))       AS ce_circle,
+                COALESCE(CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[4]
+                              ELSE h.path[3] END,
+                         NULLIF(tr.ee_subdivision, ''))             AS ee_subdivision,
+                CASE WHEN array_length(h.path, 1) >= 5 THEN h.path[array_length(h.path, 1)]
+                     WHEN array_length(h.path, 1) = 4  THEN h.path[4] END AS substation
             FROM   public.test_results res
             JOIN   public.testing_requests  tr ON tr.id  = res.testing_request_id
             LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm ON cm.id = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.users           u  ON u.id  = res.tested_by
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT d.name, d.parent_department_id, 1 AS depth
+                    FROM   public.org_departments d
+                    WHERE  d.id = COALESCE(tr.department_id, e.department_id)
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  1=1 {org} {clauses}
             ORDER  BY res.tested_at DESC
             LIMIT  1000
@@ -629,7 +1005,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_recommendation_approval(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "rec")
+        org = self._scope("rec")
         st  = _p(p, "status")
         clauses = ""
         if st and st != "all":
@@ -650,7 +1026,7 @@ class ReportingService:
             FROM   public.recommendations rec
             JOIN   public.testing_requests  tr  ON tr.id   = rec.testing_request_id
             LEFT JOIN public.equipment       e   ON e.id   = tr.equipment_id
-            LEFT JOIN public."CategoryMaster" cm  ON cm.id  = tr.equipment_type_id
+            LEFT JOIN public."CategoryMaster" cm  ON cm.id = COALESCE(tr.equipment_type_id, e.equipment_type_id)
             LEFT JOIN public.users           u_s ON u_s.id = rec.submitted_by
             LEFT JOIN public.users           u_a ON u_a.id = rec.approved_by
             WHERE  1=1 {org} {clauses}
@@ -659,12 +1035,15 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_compliance_status(self, p: dict) -> list[dict]:
-        org         = _org_clause(self.org_id, "e")
+        org         = self._scope("e")
         period_days = int(_p(p, "period_days", 365))
         sql = text(f"""
             SELECT
                 d.name                              AS substation,
-                tr_agg.zone,
+                -- Read top-down from the equipment's own department chain,
+                -- not tr_agg.zone (an arbitrary linked ticket's free-text
+                -- zone field, mostly empty and not reliably grouped anyway).
+                h.path[1]                           AS zone,
                 COUNT(DISTINCT e.id)                AS total_equipment,
                 COUNT(DISTINCT CASE
                     WHEN latest_tr.completed_at >= NOW() - INTERVAL '{period_days} days'
@@ -681,7 +1060,6 @@ class ReportingService:
                     WHEN latest_res.condition = 'ALERT'    THEN e.id END) AS alert_count
             FROM   public.equipment e
             LEFT JOIN public.org_departments  d      ON d.id = e.department_id
-            LEFT JOIN public.testing_requests tr_agg ON tr_agg.equipment_id = e.id
             LEFT JOIN LATERAL (
                 SELECT completed_at FROM public.testing_requests
                 WHERE  equipment_id = e.id AND status = 'completed'
@@ -694,14 +1072,28 @@ class ReportingService:
                 WHERE  req.equipment_id = e.id AND res.evaluation_result IS NOT NULL
                 ORDER  BY res.tested_at DESC LIMIT 1
             ) latest_res ON true
+            -- Department chain, root first: path[1] = zone ... last = own dept.
+            LEFT JOIN LATERAL (
+                WITH RECURSIVE up AS (
+                    SELECT dp.name, dp.parent_department_id, 1 AS depth
+                    FROM   public.org_departments dp
+                    WHERE  dp.id = e.department_id
+                    UNION ALL
+                    SELECT p.name, p.parent_department_id, up.depth + 1
+                    FROM   public.org_departments p
+                    JOIN   up ON p.id = up.parent_department_id
+                    WHERE  up.depth < 10
+                )
+                SELECT array_agg(name ORDER BY depth DESC) AS path FROM up
+            ) h ON true
             WHERE  e.status = 'active' {org}
-            GROUP  BY d.name, tr_agg.zone
+            GROUP  BY d.name, h.path[1]
             ORDER  BY compliance_pct ASC NULLS FIRST
         """)
         return self._exec(sql)
 
     def _q_tester_performance(self, p: dict) -> list[dict]:
-        org = _org_clause(self.org_id, "tr")
+        org = self._scope("tr")
         df  = _date(_p(p, "date_from"))
         dt  = _date(_p(p, "date_to"))
         clauses = ""
@@ -714,14 +1106,21 @@ class ReportingService:
                 u.email                                 AS tester_email,
                 TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')) AS tester_name,
                 COUNT(tr.id)                            AS total_assigned,
-                COUNT(CASE WHEN tr.status='completed'   THEN 1 END) AS completed,
-                COUNT(CASE WHEN tr.status='in_progress' THEN 1 END) AS in_progress,
-                COUNT(CASE WHEN tr.status='rejected'    THEN 1 END) AS rejected,
+                -- Finished tickets are status 'closed' with the real outcome
+                -- in current_status_code (wf_completed / wf_rejected), so
+                -- status='completed' alone matched nothing and the average
+                -- was always blank.
+                COUNT(CASE WHEN tr.status::text = 'completed'
+                             OR tr.current_status_code = 'wf_completed' THEN 1 END) AS completed,
+                COUNT(CASE WHEN tr.status::text = 'in_progress' THEN 1 END)          AS in_progress,
+                COUNT(CASE WHEN tr.status::text = 'rejected'
+                             OR tr.current_status_code = 'wf_rejected' THEN 1 END)  AS rejected,
                 ROUND(AVG(CASE
-                    WHEN tr.status='completed' AND tr.completed_at IS NOT NULL
-                         AND tr.assigned_at IS NOT NULL
-                    THEN EXTRACT(EPOCH FROM (tr.completed_at - tr.assigned_at)) / 86400.0
-                END), 1)                                AS avg_days_to_complete
+                    WHEN (tr.status::text = 'completed' OR tr.current_status_code = 'wf_completed')
+                         AND tr.completed_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (tr.completed_at
+                                             - COALESCE(tr.assigned_at, tr.cts))) / 86400.0
+                END)::numeric, 1)                       AS avg_days_to_complete
             FROM   public.testing_requests tr
             JOIN   public.users u ON u.id = tr.assigned_tester_id
             WHERE  tr.assigned_tester_id IS NOT NULL
@@ -732,7 +1131,7 @@ class ReportingService:
         return self._exec(sql)
 
     def _q_monthly_kpi(self, p: dict) -> list[dict]:
-        org    = _org_clause(self.org_id, "tr")
+        org    = self._scope("tr")
         months = int(_p(p, "months", 12))
         sql = text(f"""
             SELECT
@@ -762,6 +1161,207 @@ class ReportingService:
             ORDER  BY month DESC
         """)
         return self._exec(sql)
+
+    def _q_workflow_stage_delays(self, p: dict) -> list[dict]:
+        """Workflow stages running past their configured time limit — the
+        report behind the "Workflow Stage SLA Breach" and "<X> Stage Delayed"
+        notifications. Two sources: test-request workflow stages
+        (tr_wf_stage_instances; hours take precedence over days, same rule
+        as the notification job) and repair-type workflows' current stage
+        (repair, calibration, overhaul, pre-commission, surveillance,
+        annual audit; repair_stage_definitions.default_duration_days)."""
+        tr_sql = text(f"""
+            SELECT
+                'Test Request'                         AS workflow,
+                tr.request_number                      AS reference,
+                st.name                                AS stage,
+                e.ueic,
+                d.name                                 AS substation,
+                si.started_at                          AS stage_started,
+                si.started_at + INTERVAL '1 hour' *
+                    COALESCE(st.default_duration_hours, st.default_duration_days * 24)
+                                                       AS stage_deadline,
+                ROUND((EXTRACT(EPOCH FROM NOW() - (si.started_at + INTERVAL '1 hour' *
+                    COALESCE(st.default_duration_hours, st.default_duration_days * 24)))
+                    / 86400)::numeric, 1)              AS days_over
+            FROM   public.tr_wf_stage_instances si
+            JOIN   public.tr_wf_stages     st ON st.id = si.stage_id
+            JOIN   public.tr_wf_instances  wi ON wi.id = si.wf_instance_id
+            JOIN   public.testing_requests tr ON tr.id = wi.testing_request_id
+            LEFT JOIN public.equipment       e ON e.id = tr.equipment_id
+            LEFT JOIN public.org_departments d ON d.id = tr.department_id
+            WHERE  si.status = 'in_progress'
+              AND  si.started_at IS NOT NULL
+              AND  COALESCE(st.default_duration_hours, st.default_duration_days * 24) IS NOT NULL
+              AND  si.started_at + INTERVAL '1 hour' *
+                   COALESCE(st.default_duration_hours, st.default_duration_days * 24) < NOW()
+              {self._scope("tr")}
+        """)
+        wf_sql = text(f"""
+            SELECT
+                COALESCE(wf.workflow_code, wf.workflow_type, 'Repair') AS workflow,
+                wf.workflow_number                     AS reference,
+                rsd.name                               AS stage,
+                e.ueic,
+                d.name                                 AS substation,
+                rsi.started_at                         AS stage_started,
+                rsi.started_at + INTERVAL '1 day' * rsd.default_duration_days
+                                                       AS stage_deadline,
+                ROUND((EXTRACT(EPOCH FROM NOW() - (rsi.started_at
+                    + INTERVAL '1 day' * rsd.default_duration_days)) / 86400)::numeric, 1)
+                                                       AS days_over
+            FROM   public.repair_workflows wf
+            JOIN   public.repair_stage_instances   rsi ON rsi.id = wf.current_stage_instance_id
+            JOIN   public.repair_stage_definitions rsd ON rsd.id = rsi.stage_id
+            LEFT JOIN public.equipment       e ON e.id = wf.equipment_id
+            LEFT JOIN public.org_departments d ON d.id = e.department_id
+            WHERE  rsi.completed_at IS NULL
+              AND  rsi.started_at IS NOT NULL
+              AND  rsd.default_duration_days IS NOT NULL
+              AND  rsi.started_at + INTERVAL '1 day' * rsd.default_duration_days < NOW()
+              AND  LOWER(COALESCE(wf.status, '')) NOT IN ('completed', 'cancelled', 'closed')
+              {self._scope("wf")}
+        """)
+        rows = self._exec(tr_sql) + self._exec(wf_sql)
+        return sorted(rows, key=lambda r: r.get("days_over") or 0, reverse=True)
+
+    def _q_kit_calibration_due(self, p: dict) -> list[dict]:
+        """Calibration status of every equipment/testing kit with a
+        calibration configuration — the report behind the "Test Kit
+        Calibration Due Soon / Overdue" notifications. Uses
+        CalibrationService.get_calibration_status, the same status the
+        calibration scheduler and those notifications use."""
+        from models import Equipment, EquipmentCalibrationConfig, OrgDepartment, CategoryMaster
+        from services.calibration_service import CalibrationService
+
+        q = (
+            self.db.query(Equipment)
+            .join(EquipmentCalibrationConfig, EquipmentCalibrationConfig.equipment_id == Equipment.id)
+        )
+        if self.org_id:
+            q = q.filter(Equipment.organization_id == self.org_id)
+        if self.dept_ids:
+            q = q.filter(Equipment.department_id.in_(self.dept_ids))
+        equipment = q.all()
+
+        dept_names = {d.id: d.name for d in self.db.query(OrgDepartment).all()}
+        type_names = {c.id: c.name for c in self.db.query(CategoryMaster).all()}
+        cal = CalibrationService(self.db)
+        state_label = {"OVERDUE": "Overdue", "DUE_SOON": "Due soon",
+                       "NORMAL": "OK", "NOT_CALIBRATED": "Not calibrated"}
+        rows = []
+        for eq in equipment:
+            st = cal.get_calibration_status(eq.id)
+            rows.append({
+                "ueic":                  eq.ueic,
+                "equipment_type":        type_names.get(eq.equipment_type_id),
+                "substation":            dept_names.get(eq.department_id),
+                "calibration_status":    state_label.get(st.get("state"), st.get("state")),
+                "last_calibration_date": st.get("last_calibration_date"),
+                "next_due_date":         st.get("next_due_date"),
+                "days_until_due":        st.get("days_until_due"),
+                "calibrated_by":         st.get("calibrated_by"),
+                "certificate_number":    st.get("certificate_number"),
+            })
+        # Overdue first, then soonest due; never-calibrated last.
+        return sorted(rows, key=lambda r: (r["days_until_due"] is None,
+                                           r["days_until_due"] if r["days_until_due"] is not None else 0))
+
+    def _q_deterioration_watch(self, p: dict) -> list[dict]:
+        """Equipment parameters on the deterioration watch list (predicted to
+        breach a threshold) and whether each has been reviewed — the report
+        behind the "Deterioration Watch Escalated / Overdue Review"
+        notifications. Reuses routers.analytics.get_deterioration_watch_list,
+        the same list the watch dashboard and those notifications use."""
+        from routers.analytics import get_deterioration_watch_list
+        from models import OrgDepartment
+
+        result = get_deterioration_watch_list(
+            department_id=None, db=self.db,
+            user={"organization_id": self.org_id, "id": None},
+        )
+        allowed = set(self.dept_ids) if self.dept_ids else None
+        dept_names = {str(d.id): d.name for d in self.db.query(OrgDepartment).all()}
+        today = date.today()
+
+        # The analytics engine stores no unit for table-row parameters
+        # (SFRA correlation rows, C/tanδ winding rows, DGA zone…), so the
+        # Unit column was always empty for them.
+        from test_templates import TEST_TEMPLATES
+
+        def _column_units(node, out):
+            if isinstance(node, dict):
+                if node.get("key") and node.get("unit"):
+                    out.setdefault((node["key"]), node["unit"])
+                for v in node.values():
+                    _column_units(v, out)
+            elif isinstance(node, list):
+                for v in node:
+                    _column_units(v, out)
+            return out
+
+        template_units = {}
+
+        def _unit_for(prm):
+            if prm.get("unit"):
+                return prm["unit"]
+            key = prm.get("parameter_key") or ""
+            tkey = prm.get("template_key") or ""
+            if tkey not in template_units:
+                template_units[tkey] = _column_units(TEST_TEMPLATES.get(tkey, {}), {})
+            col = key.split(".")[-1]
+            if col in template_units[tkey]:
+                return template_units[tkey][col]
+            label = (prm.get("parameter_label") or "").lower()
+            if "%" in label:
+                return "%"
+            if "correlation" in key.lower() or "correlation" in label:
+                return "Coefficient (0–1)"
+            if "duval" in key.lower() or "duval" in label:
+                return "Zone (category)"
+            return None
+        # Duval is a zone, not a number. Report the one gas share (% of
+        # CH4+C2H4+C2H2) that decides the zone, against the boundary at which
+        # the sample enters that zone, so it reads like the numeric rows.
+        def _duval_numeric(prm):
+            z = prm["zone"]
+            c2h2, c2h4 = prm.get("pct_c2h2"), prm.get("pct_c2h4")
+            if z in ("PD", "D1", "D2", "DT"):
+                gas, val = "C2H2", c2h2
+                thr = {"PD": 1, "D1": 4, "D2": 13}.get(z, 4 if (c2h2 or 0) < 13 else 13)
+            else:
+                gas, val = "C2H4", c2h4
+                thr = {"T1": 20, "T2": 20, "T3": 50}[z]
+            return val, thr, f"% {gas} share (Zone {z})"
+
+        rows = []
+        for eq in result.get("equipment", []):
+            dept = str(eq.get("department_id")) if eq.get("department_id") else None
+            if allowed is not None and dept not in allowed:
+                continue
+            for prm in eq.get("parameters", []):
+                tested = prm.get("tested_at")
+                try:
+                    pending = (today - date.fromisoformat(tested[:10])).days if tested else None
+                except ValueError:
+                    pending = None
+                rows.append({
+                    "ueic":               eq.get("equipment_label"),
+                    "equipment_type":     eq.get("equipment_type"),
+                    "substation":         dept_names.get(dept),
+                    "risk_level":         eq.get("risk_level"),
+                    "health_score":       eq.get("health_score"),
+                    "parameter":          prm.get("parameter_label"),
+                    "current_value":      _duval_numeric(prm)[0] if prm.get("zone") else prm.get("current_value"),
+                    "unit":               _duval_numeric(prm)[2] if prm.get("zone") else _unit_for(prm),
+                    "breach_threshold":   _duval_numeric(prm)[1] if prm.get("zone") else prm.get("breach_threshold"),
+                    "days_to_breach":     0 if prm.get("zone") and prm.get("days_to_breach") is None else prm.get("days_to_breach"),
+                    "last_tested":        tested[:10] if tested else None,
+                    "reviewed":           "Yes" if prm.get("is_reviewed") else "No",
+                    "days_pending_review": None if prm.get("is_reviewed") else pending,
+                    "review_disposition": prm.get("review_disposition"),
+                })
+        return sorted(rows, key=lambda r: (r["days_to_breach"] is None, r["days_to_breach"] or 0))
 
     def _q_dga_trend_report(self, p: dict) -> list[dict]:
         """DGA gas readings per transformer over the trailing N months, with
@@ -793,6 +1393,8 @@ class ReportingService:
         )
         if self.org_id:
             q = q.filter(TestResult.organization_id == self.org_id)
+        if self.dept_ids:
+            q = q.filter(TestingRequest.department_id.in_(self.dept_ids))
         rows = q.order_by(TestResult.tested_at.asc()).all()
 
         eq_type_names = {c.id: c.name for c in self.db.query(CategoryMaster).all()}
@@ -930,9 +1532,15 @@ class ReportingService:
         for ri, row in enumerate(rows, 4):
             fill = alt_fill if ri % 2 == 0 else None
             for ci, key in enumerate(headers, 1):
-                val = row.get(key)
+                val = _display_blank(key, row.get(key), row)
                 if isinstance(val, datetime):
                     val = val.replace(tzinfo=None)
+                elif val is not None and not isinstance(
+                        val, (str, int, float, bool, date, Decimal)):
+                    # UUIDs, dicts/lists (JSON columns), etc. — openpyxl
+                    # rejects them ("Cannot convert UUID(...) to Excel"),
+                    # which failed the whole run with a misleading 404.
+                    val = str(val)
                 cell = ws.cell(row=ri, column=ci, value=val)
                 if fill:
                     cell.fill = fill
@@ -1017,7 +1625,7 @@ class ReportingService:
         for row in rows:
             row_data = []
             for h in headers:
-                val = row.get(h)
+                val = _display_blank(h, row.get(h), row)
                 # Format dates
                 if isinstance(val, datetime):
                     val = val.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
@@ -1029,13 +1637,65 @@ class ReportingService:
                 row_data.append(val)
             table_data.append(row_data)
 
-        # Create table with dynamic column widths
-        # Calculate rough column widths based on content
+        # Column widths proportional to content (header + longest value in the
+        # first rows), clamped so one long column can't starve the rest.
+        # Plain strings in a reportlab Table never wrap — they spilled into
+        # the neighbouring column — so every cell becomes a Paragraph that
+        # wraps inside its column (long unbroken values like UUIDs included).
+        from xml.sax.saxutils import escape as _esc
+        from reportlab.lib.pagesizes import A3, A2
         col_count = len(headers)
-        page_width = landscape(letter)[0] - 0.8*inch  # Account for margins
-        col_width = page_width / col_count
+        font_size = 8 if col_count <= 8 else 7
+        char_w = font_size * 0.55          # average Helvetica glyph width
+        pad = 10                           # left + right cell padding
+        # Per column: the width it needs to show its longest single word
+        # unbroken (dates, request numbers, "Completed") and the width for
+        # its longest whole value on one line. Every column gets its minimum
+        # first; leftover page width goes to the longer ones.
+        mins, naturals = [], []
+        for i in range(col_count):
+            cells = [str(table_data[0][i])] + [str(r[i]) for r in table_data[1:51]]
+            longest_word = max((len(w) for c in cells for w in c.split()), default=4)
+            longest_value = max((len(c) for c in cells), default=4)
+            mins.append(min(max(longest_word, 4), 24) * char_w + pad)
+            naturals.append(min(max(longest_value, 4), 60) * char_w + pad)
+        # Page size: the smallest landscape page on which every column fits
+        # its longest word. Wide reports (e.g. Testing Request Status, 22
+        # columns) squeezed onto Letter got words chopped mid-way
+        # ("Outco|me", "Devan|ahalli").
+        margins = 0.8 * inch
+        page_size = landscape(A2)
+        for candidate in (landscape(letter), landscape(A3), landscape(A2)):
+            if sum(mins) <= candidate[0] - margins:
+                page_size = candidate
+                break
+        doc.pagesize = page_size
+        doc.width  = page_size[0] - doc.leftMargin - doc.rightMargin
+        doc.height = page_size[1] - doc.topMargin - doc.bottomMargin
+        page_width = page_size[0] - margins
+        if sum(naturals) <= page_width:
+            scale = page_width / sum(naturals)
+            col_widths = [n * scale for n in naturals]
+        elif sum(mins) >= page_width:
+            col_widths = [m * page_width / sum(mins) for m in mins]
+        else:
+            k = (page_width - sum(mins)) / (sum(naturals) - sum(mins))
+            col_widths = [m + (n - m) * k for m, n in zip(mins, naturals)]
+        head_style = ParagraphStyle('CellHead', parent=styles['Normal'],
+                                    fontName='Helvetica-Bold', fontSize=font_size,
+                                    leading=font_size + 2, textColor=colors.whitesmoke,
+                                    alignment=TA_CENTER, splitLongWords=1)
+        cell_style = ParagraphStyle('Cell', parent=styles['Normal'],
+                                    fontName='Helvetica', fontSize=font_size,
+                                    leading=font_size + 2,
+                                    textColor=colors.HexColor('#333333'),
+                                    alignment=TA_LEFT, splitLongWords=1)
+        table_data = [
+            [Paragraph(_esc(str(v)), head_style if r_i == 0 else cell_style) for v in row]
+            for r_i, row in enumerate(table_data)
+        ]
 
-        table = Table(table_data, colWidths=[col_width] * col_count)
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
         
         # Style the table
         table.setStyle(TableStyle([
@@ -1092,12 +1752,19 @@ def run_scheduled_reports(db_factory) -> int:
                 continue
             try:
                 svc = ReportingService(db, defn.organization_id)
-                fmt = defn.output_format if defn.output_format in ("excel", "pdf") \
-                      else "excel"
-                _raw, filename, _content_type = svc.generate(defn.id, {}, fmt)
+                # "both" → one Excel + one PDF, sent together in one email
+                # (it used to fall back to Excel only).
+                if defn.output_format == "both":
+                    fmts = ["excel", "pdf"]
+                else:
+                    fmts = [defn.output_format if defn.output_format in ("excel", "pdf") else "excel"]
+                files = [svc.generate(defn.id, {}, f)[1] for f in fmts]
+                filename = files[0]
                 count += 1
-                if defn.notification_event:
-                    _fire_report_ready(db, defn, filename, fmt)
+                try:
+                    fire_report_ready(db, defn, filename, extra_filenames=files[1:])
+                except Exception as notif_exc:
+                    print(f"[Reports] Notification for '{defn.name}' failed: {notif_exc}")
             except Exception as exc:
                 print(f"[Reports] Scheduled '{defn.name}' failed: {exc}")
     finally:
@@ -1105,29 +1772,97 @@ def run_scheduled_reports(db_factory) -> int:
     return count
 
 
-def _fire_report_ready(db: Session, defn: ReportDefinition, filename: str, fmt: str) -> None:
+def fire_report_ready(db: Session, defn: ReportDefinition, filename: str,
+                      organization_id: Optional[UUID] = None,
+                      department_id: Optional[UUID] = None,
+                      event_type: Optional[str] = None,
+                      extra_filenames: Optional[list] = None) -> None:
     """
-    Notify defn.notification_event's recipients that a scheduled report finished.
+    Notify defn.notification_event's recipients that a report just finished
+    generating — opt-in per definition (no-ops if notification_event isn't
+    set). Called from both the scheduled job (run_scheduled_reports) and the
+    on-demand "Run" endpoint (routers/reporting.py) — same event either way,
+    since a recipient doesn't care whether the report ran on a timer or was
+    triggered manually.
 
-    The 14 SRS report definitions are seeded once globally (organization_id
-    IS NULL) rather than one row per org -- but NotificationService recipient
-    resolution requires an organization_id to look up OrgRole/OrgUserRole
-    rows, so firing with org_id=None silently resolves to zero recipients.
-    Fire once per active organization in that case; definitions that already
-    carry their own organization_id (ad-hoc/per-org reports) fire once, as
-    normal.
+    Per-org fan-out: the 14 SRS report definitions are seeded once globally
+    (organization_id IS NULL) rather than one row per org — but
+    NotificationService recipient resolution requires an organization_id to
+    look up OrgRole/OrgUserRole rows, so firing with org_id=None silently
+    resolves to zero recipients. Fire once per active organization in that
+    case; definitions that already carry their own organization_id (ad-hoc/
+    per-org reports) fire once, as normal.
+
+    source_type/source_id point at the ReportLog generate() just committed
+    (looked up by definition_id + filename, so a concurrent generation of
+    the same definition can't be mismatched) — this is what lets
+    _generate_attachment_bytes()'s report_log branch attach the actual file,
+    and what _enrich_context_from_source()'s report_log branch fills
+    {{report.*}} variables from.
     """
+    # event_type overrides the definition's own event (Run now uses the
+    # generic scheduled_report_ready for definitions that have none).
+    event = event_type or defn.notification_event
+    if not event:
+        return
+
     from services.notification_service import NotificationService
-    from models import Organization
+    from models import Organization, ReportLog
 
+    log = (
+        db.query(ReportLog)
+        .filter(ReportLog.definition_id == defn.id, ReportLog.file_name == filename)
+        .order_by(ReportLog.completed_at.desc())
+        .first()
+    )
+    if not log or log.status != "completed":
+        return
+
+    # Both naming schemes populated — {{report.*}} (dotted, matches the
+    # convention _enrich_context_from_source already uses for every other
+    # source_type, and what this event's seeded templates reference) plus
+    # the flat names, in case anything else ends up referencing those.
     context = {
+        "report.name":         defn.name,
+        "report.description":  defn.description or "",
+        "report.frequency":    defn.frequency,
+        "report.format":       log.output_format or "",
+        "report.row_count":    str(log.row_count or 0),
+        "report.file_name":    log.file_name or "",
+        "report.generated_at": str(log.completed_at)[:19] if log.completed_at else "",
         "report_name":   defn.name,
         "report_period": datetime.now(timezone.utc).strftime("%B %Y"),
         "download_url":  f"/reports/download/{filename}",
-        "format":        fmt,
+        "format":        log.output_format or "",
     }
 
-    if defn.organization_id:
+    # "Both" (Excel + PDF): the other file(s) of the same run ride along in
+    # the same email instead of a second, separate email.
+    extras = []
+    for extra_name in (extra_filenames or []):
+        extra_log = (
+            db.query(ReportLog)
+            .filter(ReportLog.definition_id == defn.id, ReportLog.file_name == extra_name)
+            .order_by(ReportLog.completed_at.desc())
+            .first()
+        )
+        if extra_log and extra_log.status == "completed":
+            extras.append({
+                "type": "pdf" if extra_name.lower().endswith(".pdf") else "excel",
+                "var_key": "report_attachment_extra",
+                "source_type": "report_log",
+                "source_id": str(extra_log.id),
+            })
+    if extras:
+        context["_extra_attachments"] = extras
+
+    # A department-scoped run (routers/reporting.py passes the runner's org +
+    # department) only contains that department's rows, so it's only sent to
+    # that org, with recipients limited to that department — not fanned out
+    # to every org's role holders as an org-wide scheduled report is.
+    if organization_id:
+        org_ids = [organization_id]
+    elif defn.organization_id:
         org_ids = [defn.organization_id]
     else:
         org_ids = [
@@ -1139,12 +1874,16 @@ def _fire_report_ready(db: Session, defn: ReportDefinition, filename: str, fmt: 
     for org_id in org_ids:
         try:
             nsvc.fire(
-                event_type=defn.notification_event,
+                event_type=event,
                 context=context,
                 organization_id=org_id,
+                source_type="report_log",
+                source_id=log.id,
+                recipient_roles_override=defn.recipient_roles or None,
+                department_id=department_id,
             )
         except Exception as exc:
-            print(f"[Reports] notification_event '{defn.notification_event}' fire "
+            print(f"[Reports] notification_event '{event}' fire "
                   f"failed for '{defn.name}' org={org_id}: {exc}")
 
 
@@ -1158,4 +1897,11 @@ def _is_due(defn: ReportDefinition, now: datetime) -> bool:
         return delta >= 7 * 86_400
     if defn.frequency == "monthly":
         return (now - defn.last_generated_at).days >= 28
+    # Quarterly/annual were offered in the report editor (and seeded, e.g.
+    # Equipment Failure Annual / Repairer Performance) but never matched
+    # here, so those reports were never generated on schedule at all.
+    if defn.frequency == "quarterly":
+        return (now - defn.last_generated_at).days >= 90
+    if defn.frequency == "annual":
+        return (now - defn.last_generated_at).days >= 365
     return False

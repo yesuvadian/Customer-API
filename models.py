@@ -155,9 +155,12 @@ class NextActionType(PyEnum):
 
 class EquipmentStatus(PyEnum):
     active = "active"
-    retired = "retired"
-    scrapped = "scrapped"
+    under_maintenance = "under_maintenance"
     under_repair = "under_repair"
+    condemned = "condemned"
+    retired = "retired"
+    replaced = "replaced"
+    decommissioned = "decommissioned"
 
 
 # =============================================================================
@@ -3145,6 +3148,11 @@ class TestingRequest(Base):
         nullable=True,
         index=True,
     )
+    # Lineage type (design doc section 3, migration 052): ORIGINAL for normal
+    # requests; FOLLOW_UP / RETEST when services/car_service.py raises one
+    # from a CAR Trigger Config rule. Not the same as request_type above,
+    # which is routing (normal | failure | special).
+    test_request_type = Column(String(20), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
 
     # Test Register: master catalogue template row (equipment_id=NULL, equipment_type_id set)
     is_schedule_template = Column(Boolean, default=False, nullable=False)  # True = register entry
@@ -3971,6 +3979,181 @@ class Recommendation(Base):
 
 
 # ------------------------------
+# Corrective Action Request (CAR) — auto-created by the evaluation engine
+# (services/car_service.py) when a test result evaluates CRITICAL, never
+# created manually by a user. See migrations/045_corrective_action_requests.sql.
+# ------------------------------
+class CarStatus:
+    """Plain string constants, not a DB enum — mirrors TestingRequestStatus-
+    adjacent string columns elsewhere in this file. Kept simple since the
+    lifecycle is short and unlikely to need DB-level enum migrations.
+
+    A CAR has no manual workflow of its own - it is a tracker over its
+    Test Request chain, and every status change comes from a TR result
+    (services/car_service.py):
+      OPEN      - raised by a triggering evaluation; follow-up/retest TRs in flight
+      REOPENED  - a later TR in the chain failed again, at a severity that
+                  needs a retest
+      CLOSED    - every test type that failed in the chain (at a CAR-
+                  triggering severity) has a passing retest, OR an approved
+                  Procurement (replace the equipment) closed it - the reason
+                  is kept in corrective_action ("REPLACEMENT: ...")
+      VOIDED    - raised in error (bad data / threshold), voided by an admin
+                  with a reason (POST /car/{id}/void). Not a workflow step - an
+                  escape hatch; left out of dashboards and open counts. The
+                  reason is kept in corrective_action ("VOIDED: ...").
+      REPLACEMENT_RECOMMENDED - legacy (no longer set): replacement now
+                  closes the CAR on approval.
+    The work itself (maintenance, repair, retest) is assigned, done and
+    approved inside each TR's own workflow."""
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+    REOPENED = "REOPENED"
+    VOIDED = "VOIDED"
+    # Legacy - no longer set (an approved Procurement now CLOSES the CAR);
+    # kept so any existing row still reads as open.
+    REPLACEMENT_RECOMMENDED = "REPLACEMENT_RECOMMENDED"
+
+    OPEN_STATUSES = {OPEN, REOPENED, REPLACEMENT_RECOMMENDED}
+
+
+class CarRelationshipType:
+    ORIGINATING = "ORIGINATING"
+    FOLLOW_UP = "FOLLOW_UP"
+    RETEST = "RETEST"
+    VERIFICATION = "VERIFICATION"
+
+
+class CorrectiveActionRequest(Base):
+    __tablename__ = "corrective_action_requests"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    car_number = Column(String(50), unique=True, nullable=False)
+
+    equipment_id = Column(UUID(as_uuid=True), ForeignKey("public.equipment.id", ondelete="SET NULL"), nullable=True)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="SET NULL"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("public.org_departments.id", ondelete="SET NULL"), nullable=True)
+
+    source_test_result_id = Column(UUID(as_uuid=True), ForeignKey("public.test_results.id", ondelete="SET NULL"), nullable=True)
+    template_key = Column(String(100), nullable=True)
+    severity = Column(String(20), nullable=False)  # ALERT | CRITICAL — evaluation.overall at trigger time
+
+    summary = Column(Text, nullable=True)
+    corrective_action = Column(Text, nullable=True)
+
+    status = Column(String(25), default=CarStatus.OPEN, nullable=False)
+    # True once this CAR has actually been CLOSED at least once. status can
+    # go OPEN -> REOPENED without ever having been CLOSED (a follow-up/retest
+    # failing again while still open) - has_closed_once lets callers show
+    # "OPEN" instead of the misleading "REOPENED" for that case. Set only in
+    # services/car_service.py's _close(), never cleared.
+    has_closed_once = Column(Boolean, default=False, nullable=False, server_default="false")
+    assigned_to = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
+    due_date = Column(Date, nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    source_test_result = relationship("TestResult", foreign_keys=[source_test_result_id])
+    assignee = relationship("User", foreign_keys=[assigned_to])
+    links = relationship("CarTestRequest", back_populates="car", cascade="all, delete-orphan")
+
+
+class CarTestRequest(Base):
+    """Many-to-many: which Test Requests belong to which CAR's lineage — a
+    failed retest attaches to the SAME CAR instead of spawning a new one."""
+    __tablename__ = "car_test_requests"
+    __table_args__ = (
+        UniqueConstraint("car_id", "test_request_id", name="uq_car_test_request"),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("public.corrective_action_requests.id", ondelete="CASCADE"), nullable=False)
+    test_request_id = Column(UUID(as_uuid=True), ForeignKey("public.testing_requests.id", ondelete="CASCADE"), nullable=False)
+    relationship_type = Column(String(20), nullable=False)  # ORIGINATING | FOLLOW_UP | RETEST | VERIFICATION
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    car = relationship("CorrectiveActionRequest", back_populates="links")
+    test_request = relationship("TestingRequest", foreign_keys=[test_request_id])
+
+
+class CarTriggerConfig(Base):
+    """Admin-editable rule: for a given (equipment_type, test_type, severity),
+    should a CRITICAL/ALERT evaluation trigger a CAR — and if so, what
+    follow-up actions (see CarTriggerFollowup) should be auto-created?
+    Replaces the hardcoded CAR_TRIGGER_SEVERITIES = {"CRITICAL"} constant in
+    services/car_service.py. NULL organization_id = global default (same
+    convention as ConditionMonitoringRecommendation); an org-specific row
+    overrides it. NULL test_type_id = wildcard, applies to every test type
+    under that equipment type unless a more specific row exists."""
+    __tablename__ = "car_trigger_configs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "equipment_type_id", "test_type_id", "severity",
+            name="car_trigger_configs_organization_id_equipment_type_id_test_t_key",
+        ),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("public.organizations.id", ondelete="CASCADE"), nullable=True)
+    equipment_type_id = Column(Integer, ForeignKey("public.CategoryMaster.id", ondelete="CASCADE"), nullable=False)
+    test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"), nullable=True)
+    severity = Column(String(20), nullable=False)  # ALERT | CRITICAL
+    car_trigger = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    display_order = Column(Integer, nullable=False, default=0)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    equipment_type = relationship("CategoryMaster", foreign_keys=[equipment_type_id])
+    test_type = relationship("CategoryDetails", foreign_keys=[test_type_id])
+    followups = relationship(
+        "CarTriggerFollowup",
+        back_populates="config",
+        cascade="all, delete-orphan",
+        order_by="CarTriggerFollowup.display_order",
+    )
+
+
+class CarTriggerFollowup(Base):
+    """One follow-up action fanned out from a CarTriggerConfig rule — mirrors
+    the "New Testing Request" form's own pattern of letting a user
+    multi-select several test types under one Request Type and creating one
+    independent TestingRequest per selection (see
+    create_testing_request_form.dart). follow_up_test_type_id's own
+    CategoryDetails.category_type tells the hook whether to create a
+    TestingRequest (test/maintenance/inspection) or start a repair workflow
+    instead (repair_lifecycle). due_in_days is mandatory (never an
+    open-ended follow-up from a CRITICAL finding)."""
+    __tablename__ = "car_trigger_followups"
+    __table_args__ = (
+        UniqueConstraint("car_trigger_config_id", "follow_up_test_type_id", name="uq_ctf_config_test_type"),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    car_trigger_config_id = Column(UUID(as_uuid=True), ForeignKey("public.car_trigger_configs.id", ondelete="CASCADE"), nullable=False)
+    follow_up_test_type_id = Column(Integer, ForeignKey("public.CategoryDetails.id", ondelete="CASCADE"), nullable=False)
+    display_order = Column(Integer, nullable=False, default=0)
+    due_in_days = Column(Integer, nullable=False, default=7)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    config = relationship("CarTriggerConfig", back_populates="followups")
+    follow_up_test_type = relationship("CategoryDetails", foreign_keys=[follow_up_test_type_id])
+
+
+# ------------------------------
 # ProcurementRequest Model
 # ------------------------------
 class ProcurementRequest(Base):
@@ -4462,6 +4645,60 @@ class NotificationTemplate(Base):
     org_channel_disabled = Column(Boolean, nullable=False, server_default='false')
 
     is_active = Column(Boolean, default=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class IntegrationSettings(Base):
+    """
+    SMTP + SMS gateway credentials, admin-configurable per org rather than
+    .env-only (SRS priority gap: "SMTP/SMS credentials are .env-only").
+
+    Same override shape as NotificationTemplate: organization_id NULL =
+    the one platform-default row (seeded once from the existing .env
+    values so behavior is unchanged until an org overrides it); a
+    non-null org row wins over the NULL row when both exist.
+
+    Secret fields (*_encrypted) are Fernet-encrypted at rest via
+    utils/crypto.py — never stored or returned as plaintext. The API
+    layer returns a masked placeholder for any secret field that has a
+    value, and only re-encrypts a field when the caller sends a real
+    (non-placeholder) new value — see services/integration_settings_service.py.
+    """
+    __tablename__ = "integration_settings"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_integration_settings_org"),
+        {"schema": "public"},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,  # NULL = platform default
+    )
+
+    # ── SMTP ───────────────────────────────────────────────────────────────
+    smtp_server = Column(String(255), nullable=True)
+    smtp_port = Column(Integer, nullable=True)
+    smtp_username = Column(String(255), nullable=True)
+    smtp_password_encrypted = Column(Text, nullable=True)
+    smtp_from_email = Column(String(255), nullable=True)
+
+    # ── SMS ────────────────────────────────────────────────────────────────
+    sms_provider = Column(String(20), nullable=True)  # twilio | msg91 | http | none
+    sms_from_number = Column(String(50), nullable=True)
+    twilio_account_sid = Column(String(255), nullable=True)
+    twilio_auth_token_encrypted = Column(Text, nullable=True)
+    msg91_auth_key_encrypted = Column(Text, nullable=True)
+    msg91_template_id = Column(String(100), nullable=True)
+    msg91_sender_id = Column(String(50), nullable=True)
+    sms_http_url = Column(String(500), nullable=True)
+    sms_http_auth_header = Column(String(100), nullable=True)
+    sms_http_auth_value_encrypted = Column(Text, nullable=True)
+
+    is_active = Column(Boolean, nullable=False, server_default='true')
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -5682,6 +5919,74 @@ class EquipmentConditionBandThreshold(Base):
     label     = Column(String(20), nullable=False)      # "Excellent" | "Good" | "Fair" | "Poor" | "Critical"
     is_active = Column(Boolean, default=True)
     notes     = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class EquipmentExpectedLife(Base):
+    """Admin-configurable expected service life (years) per equipment type
+    for the AI Graph Dashboard's life-left / ageing / life-stage numbers.
+    Replaces the previously hardcoded _TYPE_LIFE dict in
+    routers/ai_graph.py's _expected_life.
+
+    Row semantics: `match_pattern` is a case-insensitive substring of the
+    equipment type's CategoryMaster name; active rows are tried in ascending
+    `sort_order` (then id) and the FIRST match wins — same as the old dict's
+    insertion-order iteration. No match falls back to
+    AgeingConfig.default_expected_life_years. No org scoping, matching
+    every other table of this shape in this file.
+    """
+    __tablename__ = "equipment_expected_life"
+    __table_args__ = (
+        UniqueConstraint("match_pattern", name="uq_equipment_expected_life_pattern"),
+        {"schema": "public"},
+    )
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    match_pattern       = Column(String(100), nullable=False)   # e.g. "power transformer"
+    expected_life_years = Column(Numeric(6, 2), nullable=False)  # > 0
+    sort_order          = Column(Integer, nullable=False, default=0)  # lower = tried first
+    is_active           = Column(Boolean, default=True)
+    notes               = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AgeingConfig(Base):
+    """Single-row (global, not org-scoped) settings for the AI Graph
+    Dashboard's ageing calculations, replacing constants previously
+    hardcoded in routers/ai_graph.py:
+
+      - default_expected_life_years: _DEFAULT_LIFE (used when no
+        EquipmentExpectedLife row matches the equipment type).
+      - life_stage_mid / life_stage_near_end / life_stage_overdue: the
+        age / expected_life cutoffs /grouped buckets equipment into
+        (>= overdue -> overdue, >= near_end -> near_end, >= mid -> mid_life,
+        else early). Invariant (enforced by the API): 0 < mid < near_end <= overdue.
+      - benchmark_*: the /ageing radar's reference polygon (0-100 each).
+
+    Only the first row (lowest id) is ever read; the API upserts it.
+    """
+    __tablename__ = "ageing_config"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    default_expected_life_years = Column(Numeric(6, 2), nullable=False, default=30)
+    life_stage_mid              = Column(Numeric(6, 3), nullable=False, default=0.5)
+    life_stage_near_end         = Column(Numeric(6, 3), nullable=False, default=0.8)
+    life_stage_overdue          = Column(Numeric(6, 3), nullable=False, default=1.0)
+    benchmark_aging_rate        = Column(Numeric(5, 2), nullable=False, default=30)
+    benchmark_volatility        = Column(Numeric(5, 2), nullable=False, default=25)
+    benchmark_life_left_risk    = Column(Numeric(5, 2), nullable=False, default=35)
+    benchmark_thermal_stress    = Column(Numeric(5, 2), nullable=False, default=25)
+    benchmark_load_factor       = Column(Numeric(5, 2), nullable=False, default=30)
+    notes = Column(Text, nullable=True)
 
     created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)

@@ -24,6 +24,43 @@ from models import (
 
 from utils.common_service import UTCDateTimeMixin
 import logging
+import math
+
+
+# Same rule as the UI's TrWfProvider.standardTestWorkflowDays(): a new Test
+# Request's Due Date = start + the Standard Test Workflow's active stage
+# durations (hours, else days x 24, else 2 days), rounded up to whole days.
+STANDARD_TEST_WORKFLOW_NAME = "Standard Test Workflow"
+DEFAULT_STAGE_DUE_HOURS = 48
+
+
+def standard_test_workflow_days(db: Session, org_id) -> int:
+    """Days from start to Due Date for org_id; 0 when the org has no
+    active Standard Test Workflow (or no active stages)."""
+    from models import TrWfDefinition, TrWfStage
+    if org_id is None:
+        return 0
+    defn = (
+        db.query(TrWfDefinition)
+        .filter(
+            TrWfDefinition.org_id == org_id,
+            TrWfDefinition.name == STANDARD_TEST_WORKFLOW_NAME,
+            TrWfDefinition.is_active.is_(True),
+        )
+        .first()
+    )
+    if not defn:
+        return 0
+    hours = 0
+    for st in db.query(TrWfStage).filter(
+        TrWfStage.wf_definition_id == defn.id,
+        TrWfStage.is_active.is_(True),
+    ):
+        h = st.default_duration_hours
+        if h is None:
+            h = (st.default_duration_days or 0) * 24
+        hours += h if h > 0 else DEFAULT_STAGE_DUE_HOURS
+    return math.ceil(hours / 24) if hours > 0 else 0
 
 logger = logging.getLogger(__name__)
 
@@ -453,7 +490,9 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     TestingRequest.source_schedule_id
                         == schedule.id,
 
-                    TestingRequest.due_date
+                    # Match on the start date: due_date is now start +
+                    # the Standard Test Workflow days, not next_run_date.
+                    TestingRequest.scheduled_start_date
                         == schedule.next_run_date,
                 )
                 .first()
@@ -495,6 +534,12 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 )
 
             svc = TestingRequestService(db)
+
+            _org_id = equipment.organization_id if equipment else schedule.organization_id
+            _due = schedule.next_run_date
+            _due_days = standard_test_workflow_days(db, _org_id)
+            if _due is not None and _due_days:
+                _due = _due + timedelta(days=_due_days)
 
             new_data = {
 
@@ -574,9 +619,7 @@ class TestRequestScheduleService(UTCDateTimeMixin):
 
                 "requested_date": now,
 
-                "due_date": (
-                    schedule.next_run_date
-                ),
+                "due_date": _due,
 
                 "scheduled_start_date": (
                     schedule.next_run_date

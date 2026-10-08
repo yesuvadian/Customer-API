@@ -327,6 +327,26 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             return await call_next(request)
 
         # --------------------------------------------------
+        # Skip privilege check for marking your own bell notifications read
+        #
+        # PUT /notifications/{id}/read and /notifications/read-all were gated
+        # on can_edit for the "notifications" module (PUT -> can_edit), which
+        # most roles don't hold (it's the module that also covers template/
+        # rule admin) — so opening a notification never cleared its unread
+        # dot for them (403, silently swallowed by the bell). Both endpoints
+        # only ever touch the caller's own UserNotification rows (filtered by
+        # current_user.id in routers/notifications.py), same reasoning as the
+        # logout exemption above.
+        # --------------------------------------------------
+        if request.method == "PUT" and (
+            path == "/notifications/read-all"
+            or (path.startswith("/notifications/") and path.endswith("/read")
+                and path.count("/") == 3)
+        ):
+            db.close()
+            return await call_next(request)
+
+        # --------------------------------------------------
         # Extract module name
         # Example:
         #   /addresses/5 -> addresses
@@ -391,6 +411,17 @@ async def auth_and_privilege_middleware(request: Request, call_next):
         if "search" in endpoint_name:
             action = "can_search"
         elif "export" in endpoint_name:
+            action = "can_export"
+        elif request.method == "POST" and module_name == "reports" and (
+            (len(parts) == 4 and parts[1] == "definitions" and parts[3] == "run")
+            or path == "/reports/consolidated-test-report"
+        ):
+            # Running a report only generates a file (and emails it) — an
+            # export, not an "add". POST mapped these to can_add, which is
+            # the permission for creating report *definitions*, so roles
+            # holding view/export on Reports still got 403 on ▶ Run.
+            # Matched by path: request.scope["endpoint"] isn't set yet when
+            # this middleware runs (routing happens after it).
             action = "can_export"
         elif "approve" in endpoint_name or "reject" in endpoint_name:
             action = "can_approve"
