@@ -5370,7 +5370,8 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
         except Exception:
             doc_date = None
 
-        # Determine status enum  (values: active, retired, scrapped, under_repair)
+        # Determine status enum (values: active, under_maintenance,
+        # under_repair, condemned, retired, replaced, decommissioned)
         raw_status = (_safe_str(row.get("status")) or "In-service").lower()
         from models import EquipmentStatus
         status_map = {
@@ -5379,10 +5380,12 @@ def seed_kptcl_equipment(session, org_id: str, excel_path: str = None):
             "operational": EquipmentStatus.active,
             "active": EquipmentStatus.active,
             "retired": EquipmentStatus.retired,
-            "decommissioned": EquipmentStatus.scrapped,
-            "scrapped": EquipmentStatus.scrapped,
-            "under maintenance": EquipmentStatus.under_repair,
-            "maintenance": EquipmentStatus.under_repair,
+            "replaced": EquipmentStatus.replaced,
+            "condemned": EquipmentStatus.condemned,
+            "decommissioned": EquipmentStatus.decommissioned,
+            "scrapped": EquipmentStatus.decommissioned,
+            "under maintenance": EquipmentStatus.under_maintenance,
+            "maintenance": EquipmentStatus.under_maintenance,
             "under repair": EquipmentStatus.under_repair,
         }
         status = status_map.get(raw_status, EquipmentStatus.active)
@@ -5873,17 +5876,85 @@ def seed_report_definitions(session):
             "group_name": "KPI & Performance",
             "notification_event": None,
         },
+        # ── Notification Center topics as reports ────────────────────────────
+        # Seeded with no recipient_roles: nobody is emailed until an admin
+        # picks recipients in Reporting Center → edit.
+        {
+            "name": "Missed Schedules",
+            "description": "CM/PM schedules past their run date that were never executed",
+            "query_key": "missed_schedules_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Preventive Maintenance",
+            "notification_event": None,
+        },
+        {
+            "name": "Upcoming Due Tests",
+            "description": "Open tests due in the next 15 days",
+            "query_key": "upcoming_due_tests_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Testing Requests",
+            "notification_event": None,
+        },
+        {
+            "name": "Workflow Stage Delays",
+            "description": "Workflow stages running past their configured time limit",
+            "query_key": "workflow_stage_delays_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Stage Workflows",
+            "notification_event": None,
+        },
+        {
+            "name": "Test Kit Calibration Due",
+            "description": "Calibration status of kits/equipment with a calibration schedule",
+            "query_key": "kit_calibration_due_report",
+            "output_format": "excel",
+            "frequency": "monthly",
+            "group_name": "Calibration",
+            "notification_event": None,
+        },
+        {
+            "name": "Deterioration Watch",
+            "description": "Parameters predicted to breach a threshold, and their review status",
+            "query_key": "deterioration_watch_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Condition Monitoring",
+            "notification_event": None,
+        },
+        {
+            "name": "Open Corrective Actions (CAR)",
+            "description": "Corrective Action Requests not yet closed",
+            "query_key": "open_car_report",
+            "output_format": "excel",
+            "frequency": "weekly",
+            "group_name": "Condition Monitoring",
+            "notification_event": None,
+        },
     ]
 
     created = updated = 0
+    def _event_for(d, frequency):
+        # A scheduled report with no dedicated "<x>_report_ready" event falls
+        # back to the generic scheduled_report_ready one (its email template
+        # attaches the file and goes to the definition's recipient_roles).
+        # Without any event, fire_report_ready() skips notifying entirely, so
+        # e.g. Tester Performance was generated every month but never emailed.
+        return d.get("notification_event") or (
+            "scheduled_report_ready" if frequency and frequency != "on_demand" else None
+        )
+
     for d in DEFINITIONS:
         existing = session.query(ReportDefinition).filter_by(
             query_key=d["query_key"]
         ).first()
         if existing:
-            # Upsert: refresh group_name + notification_event on existing rows
+            # Upsert: refresh group_name + notification_event on existing rows.
+            # Uses the row's current frequency — an admin may have changed it.
             existing.group_name         = d.get("group_name")
-            existing.notification_event = d.get("notification_event")
+            existing.notification_event = _event_for(d, existing.frequency)
             existing.name               = d["name"]          # keep name current
             updated += 1
         else:
@@ -5895,7 +5966,7 @@ def seed_report_definitions(session):
                 output_format=d["output_format"],
                 frequency=d["frequency"],
                 group_name=d.get("group_name"),
-                notification_event=d.get("notification_event"),
+                notification_event=_event_for(d, d["frequency"]),
                 recipient_roles=[],
                 is_active=True,
                 is_system=True,
@@ -6085,9 +6156,13 @@ ORDER  BY compliance_pct ASC NULLS FIRST
             key="testing_request_status_report",
             label="Testing Request Status",
             group_name="Testing Requests",
-            description="All testing requests with current status and assignment.",
+            description="All testing requests with current status and assignment, and "
+                        "for finished ones the real outcome (Completed / Rejected / "
+                        "Cancelled / Auto-closed / Closed), closure reason, date and by whom.",
+            # outcome: open | completed | rejected | cancelled | auto_closed | closed
             parameters_schema={"date_from": "date", "date_to": "date",
-                               "status": "string", "category": "string"},
+                               "status": "string", "category": "string",
+                               "outcome": "string"},
             sort_order=50,
             org_alias="tr",
             sql_template="""
@@ -6445,7 +6520,7 @@ WITH fleet AS (
             ELSE '>20 years'
         END                  AS age_band,
         COUNT(DISTINCT e.id) AS fleet_unit_count,
-        COUNT(DISTINCT e.id) FILTER (WHERE ea.risk_level = 'CRITICAL')
+        COUNT(DISTINCT e.id) FILTER (WHERE TRIM(LOWER(ea.risk_level)) = 'critical')
                              AS units_currently_critical
     FROM   public.equipment e
     LEFT JOIN public."CategoryMaster"    cm ON cm.id = e.equipment_type_id
@@ -6527,6 +6602,7 @@ ORDER  BY failure_rate_per_unit DESC NULLS LAST
 WITH eq_info AS (
     SELECT
         e.id,
+        e.ueic,
         e.factory_serial_number,
         e.manufacturer,
         e.model_number,
@@ -6542,12 +6618,15 @@ WITH eq_info AS (
     LEFT JOIN public."CategoryMaster"    cm ON cm.id = e.equipment_type_id
     LEFT JOIN public.org_departments     od ON od.id = e.department_id
     LEFT JOIN public.equipment_analytics ea ON ea.equipment_id = e.id
-    WHERE  e.id = :equipment_id ::uuid
+    -- No equipment chosen (plain Run from Reporting Center) = every
+    -- equipment that has tests; it used to return nothing at all then.
+    WHERE  (:equipment_id ::uuid IS NULL OR e.id = :equipment_id ::uuid)
       {org_clause}
 ),
 tests AS (
     SELECT
         tr.id                 AS testing_request_id,
+        tr.equipment_id,
         tr.request_number,
         tr.request_category,
         COALESCE(tr.completed_at, tr.requested_date, tr.cts) AS event_date,
@@ -6557,15 +6636,17 @@ tests AS (
                                AS templates_tested
     FROM   public.testing_requests tr
     LEFT JOIN public.test_results  tres ON tres.testing_request_id = tr.id
-    WHERE  tr.equipment_id = :equipment_id ::uuid
+    WHERE  (:equipment_id ::uuid IS NULL OR tr.equipment_id = :equipment_id ::uuid)
+      AND  tr.equipment_id IS NOT NULL
       AND  (:date_from ::date IS NULL
             OR COALESCE(tr.completed_at, tr.requested_date, tr.cts) >= :date_from ::date)
       AND  (:date_to   ::date IS NULL
             OR COALESCE(tr.completed_at, tr.requested_date, tr.cts) <= :date_to ::date)
-    GROUP  BY tr.id, tr.request_number, tr.request_category,
+    GROUP  BY tr.id, tr.equipment_id, tr.request_number, tr.request_category,
               COALESCE(tr.completed_at, tr.requested_date, tr.cts)
 )
 SELECT
+    ei.ueic,
     ei.factory_serial_number,
     ei.manufacturer,
     ei.model_number,
@@ -6583,8 +6664,11 @@ SELECT
     t.templates_tested,
     (t.request_category = 'failure_registry' OR t.had_critical_result)  AS is_failure_event
 FROM   eq_info ei
-LEFT JOIN tests t ON true
-ORDER  BY t.event_date DESC NULLS LAST
+LEFT JOIN tests t ON t.equipment_id = ei.id
+-- one equipment chosen: show it even with no tests; none chosen: only
+-- equipment that actually has test history
+WHERE  :equipment_id ::uuid IS NOT NULL OR t.testing_request_id IS NOT NULL
+ORDER  BY ei.ueic, t.event_date DESC NULLS LAST
 """),
 
         dict(
@@ -6603,7 +6687,7 @@ SELECT
     e.ueic                      AS equipment_ueic,
     cm.name                     AS equipment_type,
     fr.form_data->>'failure_category' AS failure_category,
-    fr.form_data->>'next_action'      AS resolution_outcome,
+    rec.next_action::text       AS resolution_outcome,
     fr.status                   AS approval_status,
     fr.cts::date                AS failure_date,
     wf.status                   AS linked_workflow_status,
@@ -6612,12 +6696,19 @@ FROM   public.testing_requests fr
 JOIN   public.equipment        e   ON e.id   = fr.equipment_id
 LEFT JOIN public."CategoryMaster"   cm ON cm.id = e.equipment_type_id
 LEFT JOIN public.repair_workflows   wf ON wf.source_failure_id = fr.id
+LEFT JOIN LATERAL (
+    SELECT r.next_action
+    FROM   public.recommendations r
+    WHERE  r.testing_request_id = fr.id
+    ORDER  BY r.cts DESC
+    LIMIT  1
+) rec ON TRUE
 WHERE  fr.request_category = 'failure_registry'
   {org_clause}
   AND  (:date_from::date IS NULL OR fr.cts >= :date_from::date)
   AND  (:date_to::date   IS NULL OR fr.cts <= :date_to::date)
   AND  (:outcome IS NULL OR :outcome = 'all'
-        OR fr.form_data->>'next_action' = :outcome)
+        OR rec.next_action::text = :outcome)
 ORDER  BY fr.cts DESC
 """),
 
@@ -6758,12 +6849,27 @@ SELECT
     COUNT(si.id) FILTER (WHERE si.status = 'completed') AS stages_done,
     COUNT(si.id)                    AS stages_total,
     ROUND(COALESCE(wf.progress, 0)::numeric, 1) AS pct_complete,
-    EXTRACT(DAY FROM NOW() - wf.created_at)::int AS days_elapsed
+    COALESCE(due.d, 0)              AS due_days,
+    act.d                           AS actual_days,
+    GREATEST(act.d - COALESCE(due.d, 0), 0) AS days_elapsed
 FROM   public.repair_workflows wf
 JOIN   public.equipment          e ON e.id  = wf.equipment_id
 LEFT JOIN public.org_departments d ON d.id  = e.department_id
 LEFT JOIN public.repair_stage_definitions sd ON sd.id = wf.current_stage_id
 LEFT JOIN public.repair_stage_instances   si ON si.workflow_id = wf.id
+LEFT JOIN LATERAL (
+    SELECT SUM(sdx.default_duration_days)::int AS d
+    FROM public.repair_stage_instances six
+    JOIN public.repair_stage_definitions sdx ON sdx.id = six.stage_id
+    WHERE six.workflow_id = wf.id) due ON TRUE
+LEFT JOIN LATERAL (
+    SELECT GREATEST(EXTRACT(DAY FROM
+        (CASE WHEN wf.status = 'completed'
+              THEN COALESCE(MAX(siy.completed_at), wf.completed_at, NOW())
+              ELSE NOW() END)
+        - COALESCE(MIN(siy.started_at), wf.started_at, wf.created_at))::int, 0) AS d
+    FROM public.repair_stage_instances siy
+    WHERE siy.workflow_id = wf.id) act ON TRUE
 WHERE  wf.workflow_type = 'repair_lifecycle'
   AND  e.equipment_type_id IN (
            SELECT id FROM public."CategoryMaster"
@@ -6773,7 +6879,7 @@ WHERE  wf.workflow_type = 'repair_lifecycle'
   AND  (:date_to::date   IS NULL OR wf.created_at <= :date_to::date)
   AND  (:department_id   IS NULL OR e.department_id = :department_id::uuid)
 GROUP  BY e.ueic, e.manufacturer, e.voltage_class, d.name, wf.id,
-          wf.status, wf.created_at, sd.name, wf.progress
+          wf.status, wf.created_at, sd.name, wf.progress, due.d, act.d
 ORDER  BY wf.created_at DESC
 """),
 
@@ -7016,7 +7122,12 @@ SELECT
         COUNT(CASE WHEN ti.current_stage_code ILIKE '%clos%' THEN 1 END)::numeric
         / NULLIF(COUNT(ti.id), 0) * 100, 1
     )                               AS compliance_pct,
-    MAX(EXTRACT(DAY FROM NOW() - ti.cts))::int AS max_age_days
+    -- Age of the oldest observation still OPEN (blank when all are closed) —
+    -- how long issues have been pending. Used to be max age of ANY
+    -- observation, closed ones included, which said nothing about backlog.
+    MAX(CASE WHEN ti.current_stage_code NOT ILIKE '%clos%'
+                  OR ti.current_stage_code IS NULL
+             THEN EXTRACT(DAY FROM NOW() - ti.cts) END)::int AS oldest_open_days
 FROM   public.taqc_observations ti
 JOIN   public.taqc_annual_inspections tai ON tai.id = ti.inspection_id
 LEFT JOIN public.org_departments d  ON d.id  = tai.department_id
@@ -7121,7 +7232,10 @@ SELECT
         / NULLIF(COUNT(tr.id), 0) * 100, 1
     )                                AS compliance_pct
 FROM   public.testing_requests tr
-LEFT JOIN public.org_departments d  ON d.id  = tr.department_id
+-- Calibration tickets auto-created by the scheduler often carry no
+-- department of their own — fall back to the equipment's department.
+LEFT JOIN public.equipment       e  ON e.id  = tr.equipment_id
+LEFT JOIN public.org_departments d  ON d.id  = COALESCE(tr.department_id, e.department_id)
 LEFT JOIN public.org_departments d2 ON d2.id = d.parent_department_id
 LEFT JOIN public.org_departments d3 ON d3.id = d2.parent_department_id
 LEFT JOIN public.org_departments d4 ON d4.id = d3.parent_department_id
@@ -7158,14 +7272,20 @@ SELECT
     d2.name                                                    AS ee_subdivision,
     d.name                                                      AS substation,
     COUNT(ea.id)                                                AS total_assessed,
-    COUNT(CASE WHEN ea.risk_level = 'Critical' THEN 1 END)      AS critical_count,
-    COUNT(CASE WHEN ea.risk_level = 'High'     THEN 1 END)      AS high_count,
-    COUNT(CASE WHEN ea.risk_level = 'Medium'   THEN 1 END)      AS medium_count,
-    COUNT(CASE WHEN ea.risk_level = 'Low'      THEN 1 END)      AS low_count,
-    COUNT(CASE WHEN ea.risk_level IS NULL THEN 1 END)           AS unknown_count,
+    -- Case/whitespace-insensitive: EquipmentHealthBandThreshold.label is
+    -- admin-editable free text, so risk_level values written under an
+    -- older casing (e.g. 'MEDIUM', ' High') must still land in the right
+    -- bucket instead of silently falling through to Unknown.
+    COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'critical' THEN 1 END) AS critical_count,
+    COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'high'     THEN 1 END) AS high_count,
+    COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'medium'   THEN 1 END) AS medium_count,
+    COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'low'      THEN 1 END) AS low_count,
+    COUNT(CASE WHEN ea.risk_level IS NULL
+               OR TRIM(LOWER(ea.risk_level)) NOT IN ('critical','high','medium','low')
+          THEN 1 END)                                          AS unknown_count,
     ROUND(AVG(ea.health_score), 1)                              AS avg_health_score,
     ROUND(
-        COUNT(CASE WHEN ea.risk_level = 'Critical' THEN 1 END)::numeric
+        COUNT(CASE WHEN TRIM(LOWER(ea.risk_level)) = 'critical' THEN 1 END)::numeric
         / NULLIF(COUNT(ea.id), 0) * 100, 1
     )                                                            AS critical_pct
 FROM   public.equipment_analytics ea
@@ -7188,40 +7308,41 @@ ORDER  BY critical_pct DESC NULLS LAST
             key="vendor_performance_report",
             label="Vendor Performance Ranking Report",
             group_name="Vendor & Repairer",
-            description="Vendor delivery timeliness and quality ranking.",
+            description="Equipment suppliers ranked by pre-commission request approval rate "
+                        "and time to decision.",
             parameters_schema={"quarter": "int", "year": "int"},
             sort_order=10,
-            org_alias="pr",
+            # procurement_requests has no vendor/decision/delivery columns
+            # (the old query referenced pr.vendor_name etc. and failed for
+            # everyone). Vendors are recorded on pre-commission requests.
+            # department_id is exposed from dept_id so department scoping
+            # (alias "pc", direct) works like every other report.
+            org_alias="pc",
             sql_template="""
 SELECT
-    pr.vendor_name,
-    COUNT(pr.id)                        AS total_orders,
-    COUNT(CASE WHEN pr.decision = 'approved' THEN 1 END) AS approved,
-    COUNT(CASE WHEN pr.decision = 'rejected' THEN 1 END) AS rejected,
+    pc.vendor_name,
+    COUNT(pc.id)                                                    AS total_requests,
+    COALESCE(SUM(pc.quantity), 0)                                   AS total_units,
+    COUNT(CASE WHEN LOWER(pc.approval_status) = 'approved' THEN 1 END) AS approved,
+    COUNT(CASE WHEN LOWER(pc.approval_status) = 'rejected' THEN 1 END) AS rejected,
+    COUNT(CASE WHEN LOWER(COALESCE(pc.approval_status, 'pending'))
+                    NOT IN ('approved', 'rejected') THEN 1 END)     AS pending,
     ROUND(
-        AVG(EXTRACT(DAY FROM pr.decision_date - pr.cts)), 1
-    )                                   AS avg_days_to_decision,
-    COUNT(CASE
-        WHEN pr.decision = 'approved'
-         AND pr.delivery_date <= pr.expected_delivery_date
-        THEN 1 END)                     AS on_time_deliveries,
-    ROUND(
-        COUNT(CASE
-            WHEN pr.decision = 'approved'
-             AND pr.delivery_date <= pr.expected_delivery_date
-            THEN 1 END)::numeric
-        / NULLIF(COUNT(CASE WHEN pr.decision = 'approved' THEN 1 END), 0)
-        * 100, 1
-    )                                   AS on_time_pct
-FROM   public.procurement_requests pr
-WHERE  EXTRACT(QUARTER FROM pr.cts)
-         = COALESCE(:quarter, EXTRACT(QUARTER FROM NOW()))
-  AND  EXTRACT(YEAR FROM pr.cts)
-         = COALESCE(:year, EXTRACT(YEAR FROM NOW()))
-  AND  pr.vendor_name IS NOT NULL
+        COUNT(CASE WHEN LOWER(pc.approval_status) = 'approved' THEN 1 END)::numeric
+        / NULLIF(COUNT(CASE WHEN LOWER(pc.approval_status) IN ('approved', 'rejected')
+                            THEN 1 END), 0) * 100, 1
+    )                                                               AS approval_pct,
+    ROUND(AVG(EXTRACT(EPOCH FROM COALESCE(pc.approved_at, pc.rejected_at) - pc.cts)
+              / 86400)::numeric, 1)                                 AS avg_days_to_decision,
+    MAX(pc.po_date)                                                 AS latest_po_date
+FROM   (SELECT p.*, p.dept_id AS department_id
+        FROM   public.precommission_requests p) pc
+WHERE  pc.vendor_name IS NOT NULL
+  AND  EXTRACT(QUARTER FROM pc.cts) = COALESCE(:quarter, EXTRACT(QUARTER FROM NOW()))
+  AND  EXTRACT(YEAR    FROM pc.cts) = COALESCE(:year,    EXTRACT(YEAR    FROM NOW()))
   {org_clause}
-GROUP  BY pr.vendor_name
-ORDER  BY on_time_pct DESC NULLS LAST
+GROUP  BY pc.vendor_name
+ORDER  BY approval_pct DESC NULLS LAST, avg_days_to_decision ASC NULLS LAST
 """),
 
         dict(
@@ -7336,6 +7457,178 @@ WHERE  tr.cts >= NOW() - (INTERVAL '1 month' * COALESCE(:months, 12))
 GROUP  BY DATE_TRUNC('month', tr.cts)
 ORDER  BY month DESC
 """),
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Reports mirroring Notification Center topics — the same condition
+        # the matching notification fires on, as one list instead of alerts
+        # one at a time.
+        # ══════════════════════════════════════════════════════════════════════
+
+        dict(
+            key="missed_schedules_report",
+            label="Missed Schedules",
+            group_name="Preventive Maintenance",
+            description="CM/PM schedules past their run date with no successful run since "
+                        "(Schedule Execution Missed / Overdue Escalation notifications).",
+            parameters_schema={"department_id": "uuid"},
+            sort_order=90,
+            org_alias="s",
+            sql_template="""
+SELECT
+    -- Untitled schedules fall back to "<test type> — <equipment type>".
+    COALESCE(NULLIF(TRIM(s.title), ''),
+             NULLIF(CONCAT_WS(' — ', cd.name, cm.name), ''))  AS schedule,
+    e.ueic,
+    cm.name                                        AS equipment_type,
+    cd.name                                        AS test_type,
+    d.name                                         AS substation,
+    s.frequency,
+    s.next_run_date::date                          AS due_run_date,
+    (CURRENT_DATE - s.next_run_date::date)         AS days_missed,
+    CASE WHEN CURRENT_DATE - s.next_run_date::date >= 7
+         THEN 'Escalation (7+ days)' ELSE 'Missed' END AS alert_level,
+    s.last_run_date::date                          AS last_run_date
+FROM   (
+         -- Many schedules carry no department_id of their own, only their
+         -- equipment does — fall back to it so they show a substation and
+         -- are visible to that department's users (department scoping
+         -- filters on s.department_id).
+         SELECT sch.id, sch.organization_id, sch.equipment_id, sch.equipment_type_id,
+                sch.test_type_id, sch.title, sch.frequency, sch.next_run_date,
+                sch.last_run_date, sch.is_active, sch.is_deleted,
+                COALESCE(sch.department_id, eq.department_id) AS department_id
+         FROM   public.test_request_schedules sch
+         LEFT JOIN public.equipment eq ON eq.id = sch.equipment_id
+       ) s
+LEFT JOIN public.equipment         e  ON e.id  = s.equipment_id
+LEFT JOIN public."CategoryMaster"  cm ON cm.id = COALESCE(e.equipment_type_id, s.equipment_type_id)
+LEFT JOIN public."CategoryDetails" cd ON cd.id = s.test_type_id
+LEFT JOIN public.org_departments   d  ON d.id  = s.department_id
+WHERE  s.is_active
+  AND  NOT s.is_deleted
+  AND  s.next_run_date < CURRENT_DATE
+  AND  NOT EXISTS (
+         SELECT 1 FROM public.test_request_schedule_logs l
+         WHERE  l.schedule_id = s.id
+           AND  l.status = 'success'
+           AND  l.run_date >= s.next_run_date)
+  {org_clause}
+  AND  (:department_id IS NULL OR s.department_id = :department_id::uuid)
+ORDER  BY days_missed DESC, d.name, e.ueic
+"""),
+
+        dict(
+            key="upcoming_due_tests_report",
+            label="Upcoming Due Tests",
+            group_name="Testing Requests",
+            description="Open tests due within the next N days, default 15 "
+                        "(Due Reminder / Final Due Reminder notifications).",
+            parameters_schema={"days": "int", "department_id": "uuid"},
+            sort_order=95,
+            org_alias="tr",
+            sql_template="""
+SELECT
+    tr.request_number,
+    COALESCE(NULLIF(regexp_replace(COALESCE(tr.title, ''), '^[[:space:]-]+', ''), ''),
+             cd.name)                              AS title,
+    cd.name                                        AS test_type,
+    e.ueic,
+    cm.name                                        AS equipment_type,
+    d.name                                         AS substation,
+    tr.status::text                                AS status,
+    tr.priority,
+    tr.due_date::date                              AS due_date,
+    (tr.due_date::date - CURRENT_DATE)             AS days_until_due,
+    CASE WHEN tr.due_date::date - CURRENT_DATE <= 7
+         THEN 'Final reminder (7 days or less)'
+         ELSE 'Reminder (15 days or less)' END     AS reminder
+FROM   public.testing_requests tr
+LEFT JOIN public.equipment         e  ON e.id  = tr.equipment_id
+LEFT JOIN public."CategoryMaster"  cm ON cm.id = COALESCE(e.equipment_type_id, tr.equipment_type_id)
+LEFT JOIN public."CategoryDetails" cd ON cd.id = tr.test_type_id
+LEFT JOIN public.org_departments   d  ON d.id  = COALESCE(tr.department_id, e.department_id)
+WHERE  tr.request_category = 'test'
+  AND  tr.due_date IS NOT NULL
+  AND  tr.due_date::date BETWEEN CURRENT_DATE AND CURRENT_DATE + COALESCE(:days, 15)
+  AND  tr.status::text NOT IN ('closed', 'completed', 'rejected', 'cancelled')
+  {org_clause}
+  AND  (:department_id IS NULL OR COALESCE(tr.department_id, e.department_id) = :department_id::uuid)
+ORDER  BY tr.due_date, d.name
+"""),
+
+        dict(
+            key="open_car_report",
+            label="Open Corrective Actions (CAR)",
+            group_name="Condition Monitoring",
+            description="Corrective Action Requests not yet closed, with owner, age and due date "
+                        "(CAR Created / Assigned notifications).",
+            parameters_schema={"department_id": "uuid"},
+            sort_order=100,
+            org_alias="car",
+            sql_template="""
+SELECT
+    car.car_number,
+    car.severity,
+    car.status,
+    car.summary,
+    car.corrective_action,
+    e.ueic,
+    cm.name                                        AS equipment_type,
+    d.name                                         AS substation,
+    NULLIF(TRIM(CONCAT(u.firstname, ' ', u.lastname)), '') AS assigned_to,
+    car.created_at::date                           AS raised_on,
+    car.due_date::date                             AS due_date,
+    (CURRENT_DATE - car.created_at::date)          AS days_open,
+    CASE WHEN car.due_date IS NOT NULL AND car.due_date::date < CURRENT_DATE
+         THEN 'Yes' ELSE 'No' END                  AS overdue
+FROM   public.corrective_action_requests car
+LEFT JOIN public.equipment        e  ON e.id  = car.equipment_id
+LEFT JOIN public."CategoryMaster" cm ON cm.id = e.equipment_type_id
+LEFT JOIN public.org_departments  d  ON d.id  = car.department_id
+LEFT JOIN public.users            u  ON u.id  = car.assigned_to
+WHERE  UPPER(COALESCE(car.status, '')) NOT IN ('CLOSED', 'CANCELLED')
+  {org_clause}
+  AND  (:department_id IS NULL OR car.department_id = :department_id::uuid)
+ORDER  BY (car.due_date IS NULL), car.due_date, car.created_at
+"""),
+
+        # Python-implemented (ReportingService registry) — listed here so they
+        # appear as Data Sources; sql_template is never executed for these.
+        dict(
+            key="workflow_stage_delays_report",
+            label="Workflow Stage Delays",
+            group_name="Stage Workflows",
+            description="Workflow stages running past their time limit — test-request, repair, "
+                        "calibration, overhaul, pre-commission, surveillance and annual-audit "
+                        "workflows (Stage SLA Breach / Stage Delayed notifications).",
+            parameters_schema={},
+            sort_order=105,
+            org_alias=None,
+            sql_template="-- implemented in ReportingService._q_workflow_stage_delays",
+        ),
+        dict(
+            key="kit_calibration_due_report",
+            label="Test Kit Calibration Due",
+            group_name="Calibration",
+            description="Calibration status of every kit/equipment with a calibration schedule — "
+                        "overdue and due-soon first (Kit Calibration Due / Overdue notifications).",
+            parameters_schema={},
+            sort_order=110,
+            org_alias=None,
+            sql_template="-- implemented in ReportingService._q_kit_calibration_due",
+        ),
+        dict(
+            key="deterioration_watch_report",
+            label="Deterioration Watch",
+            group_name="Condition Monitoring",
+            description="Equipment parameters predicted to breach a threshold, and whether each "
+                        "has been reviewed (Deterioration Watch Escalated / Overdue Review "
+                        "notifications).",
+            parameters_schema={},
+            sort_order=115,
+            org_alias=None,
+            sql_template="-- implemented in ReportingService._q_deterioration_watch",
+        ),
 
     ]  # end KEYS
 
@@ -9861,6 +10154,25 @@ def _seed_notification_event_catalogue(session) -> int:
             context_vars=["manufacturer", "equipment_type", "problem_description", "affected_count"],
             default_roles=["CEE_TRANSMISSION_ZONE", "EE_TLSS"],
         ),
+        # ── Corrective Action Requests ───────────────────────────────────────
+        dict(
+            event_type="car_created",
+            label="Corrective Action Request Created",
+            group_name="Corrective Actions",
+            description="Fired when a CRITICAL/ALERT test evaluation auto-creates a new Corrective Action Request.",
+            context_vars=["car.number", "car.severity", "car.status", "car.summary",
+                          "car.due_date", "equipment.ueic"],
+            default_roles=["EE_TLSS"],
+        ),
+        dict(
+            event_type="car_assigned",
+            label="Corrective Action Request Assigned",
+            group_name="Corrective Actions",
+            description="Fired when a Corrective Action Request is assigned to an officer.",
+            context_vars=["car.number", "car.severity", "car.status", "car.summary",
+                          "car.due_date", "equipment.ueic"],
+            default_roles=["EE_TLSS"],
+        ),
         # ── Predictive Analytics ─────────────────────────────────────────────
         dict(
             event_type="deterioration_watch_escalated",
@@ -11162,6 +11474,45 @@ def _seed_notification_templates(session) -> int:
         ),
     )
 
+    # ── Corrective Action Requests ──────────────────────────────────────────
+    _tmpl("car_created",
+        _e(
+            "[CAR {{car.severity}}] {{car.number}} opened — {{equipment.ueic}}",
+            "<h3 style='color:darkred'>Corrective Action Request Opened</h3>"
+            "<p>A {{car.severity}} test evaluation auto-created a Corrective Action Request.</p>"
+            + _html([
+                ("CAR Number", "car.number"), ("Severity", "car.severity"),
+                ("Status", "car.status"), ("Equipment", "equipment.ueic"),
+                ("Summary", "car.summary"), ("Due Date", "car.due_date"),
+            ]) +
+            "<p>Log in to SEACMS to review and assign this Corrective Action Request.</p>",
+            ["EE_TLSS"],
+        ),
+        _i(
+            "CAR opened — {{equipment.ueic}}",
+            "{{car.number}} ({{car.severity}}) opened for {{equipment.ueic}}, due {{car.due_date}}.",
+            ["EE_TLSS"],
+        ),
+    )
+    _tmpl("car_assigned",
+        _e(
+            "[CAR] {{car.number}} assigned — {{equipment.ueic}}",
+            "<h3>Corrective Action Request Assigned</h3>"
+            + _html([
+                ("CAR Number", "car.number"), ("Severity", "car.severity"),
+                ("Status", "car.status"), ("Equipment", "equipment.ueic"),
+                ("Due Date", "car.due_date"),
+            ]) +
+            "<p>Log in to SEACMS to view assignment details.</p>",
+            ["EE_TLSS"],
+        ),
+        _i(
+            "CAR assigned — {{equipment.ueic}}",
+            "{{car.number}} assigned, due {{car.due_date}}.",
+            ["EE_TLSS"],
+        ),
+    )
+
     # ── Predictive Analytics ────────────────────────────────────────────────
     _tmpl("deterioration_watch_escalated",
         _e(
@@ -11303,9 +11654,18 @@ def _seed_notification_templates(session) -> int:
         ("oltc_report_ready",           "OLTC/CB Operations Count Report",           ["AEE_MAINTENANCE"]),
         ("post_repair_report_ready",    "Post-Repair Transformer Evaluation Report", ["SEE_WM", "CEE_TRANSMISSION_ZONE"]),
     ]
+    # The generated file itself is attached (NotificationService reads it off
+    # disk from the ReportLog the event fires for). A {{download_url}} link
+    # can't work from an inbox: it's a relative path (email clients render it
+    # as "http:///reports/...") and the endpoint needs the app's bearer token.
+    # var_key is deliberately not a context variable, so its empty value
+    # falls through to "generate from source" rather than "fetch this URL".
+    _REPORT_FILE_ATTACHMENT = [
+        {"var_key": "report_attachment", "type": "excel", "source_type": "report_log"},
+    ]
     for _event_type, _label, _roles in _REPORT_READY_EVENTS:
         _tmpl(_event_type,
-            _e(
+            _ea(
                 f"[REPORT READY] {_label} — " "{{report_period}}",
                 f"<h3 style='color:#1E3C72'>{_label} Ready</h3>"
                 "<p>{{report_name}} for {{report_period}} has been generated.</p>"
@@ -11314,8 +11674,10 @@ def _seed_notification_templates(session) -> int:
                 "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Period</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{report_period}}</td></tr>"
                 "<tr><td style='padding:4px 8px;border:1px solid #ddd'><b>Format</b></td><td style='padding:4px 8px;border:1px solid #ddd'>{{format}}</td></tr>"
                 "</table>"
-                "<p><a href='{{download_url}}'>Download the report</a> from SEACMS (login required).</p>",
+                "<p>The report is attached to this email. It is also available in "
+                "SEACMS under Reporting Center &rarr; Log.</p>",
                 _roles,
+                _REPORT_FILE_ATTACHMENT,
             ),
             _i(
                 f"{_label} ready — " "{{report_period}}",

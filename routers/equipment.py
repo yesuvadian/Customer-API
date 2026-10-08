@@ -1250,19 +1250,28 @@ def get_equipment_counts(
     if transmission_zone:
         dept_ids = ES._get_descendants_of_named(db, org_id, transmission_zone)
         if not dept_ids:
-            return {"total": 0, "active": 0, "under_repair": 0, "retired": 0, "scrapped": 0}
+            return {
+                "total": 0, "active": 0, "under_maintenance": 0, "under_repair": 0,
+                "condemned": 0, "retired": 0, "replaced": 0, "decommissioned": 0,
+            }
         query = query.filter(Equipment.department_id.in_(dept_ids))
     
     if wm_circle:
         dept_ids = ES._get_descendants_of_named(db, org_id, wm_circle)
         if not dept_ids:
-            return {"total": 0, "active": 0, "under_repair": 0, "retired": 0, "scrapped": 0}
+            return {
+                "total": 0, "active": 0, "under_maintenance": 0, "under_repair": 0,
+                "condemned": 0, "retired": 0, "replaced": 0, "decommissioned": 0,
+            }
         query = query.filter(Equipment.department_id.in_(dept_ids))
     
     if tlss_division:
         dept_ids = ES._get_descendants_of_named(db, org_id, tlss_division)
         if not dept_ids:
-            return {"total": 0, "active": 0, "under_repair": 0, "retired": 0, "scrapped": 0}
+            return {
+                "total": 0, "active": 0, "under_maintenance": 0, "under_repair": 0,
+                "condemned": 0, "retired": 0, "replaced": 0, "decommissioned": 0,
+            }
         query = query.filter(Equipment.department_id.in_(dept_ids))
     
     # ── Commission year filters ───────────────────────────────────────────
@@ -2441,6 +2450,24 @@ def retire_equipment(
     return _to_response(db, equipment)
 
 
+@router.get("/{equipment_id}/status-change-impact")
+def get_equipment_status_change_impact(
+    equipment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Open tickets + active schedules a leaving-active status change would
+    close/pause for this equipment — the confirmation dialog's data source,
+    called before the user commits to retire/under_repair/under_maintenance/
+    condemned/decommissioned."""
+    org_id = _enforce_org_scope(current_user)
+    _require_permission(db, current_user, "can_view")
+    existing = EquipmentService.get_equipment(db, equipment_id)
+    if not existing or existing.organization_id != org_id:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return EquipmentService.get_status_change_impact(db, equipment_id)
+
+
 @router.post("/{equipment_id}/status", response_model=EquipmentResponse)
 def set_equipment_status(
     equipment_id: UUID,
@@ -2448,7 +2475,8 @@ def set_equipment_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Manually set equipment status (active | under_repair | retired)."""
+    """Manually set equipment status (active | under_repair | under_maintenance
+    | retired | condemned | decommissioned)."""
     org_id = _enforce_org_scope(current_user)
     _require_permission(db, current_user, "can_edit")
     existing = EquipmentService.get_equipment(db, equipment_id)

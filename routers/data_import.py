@@ -285,6 +285,7 @@ def _create_tr_from_record(
             overall_result=overall_result,
             remarks=remarks_final,
             tester_id=current_user.id,
+            run_car_hook=False,  # historical rows: no live CARs / retests
         )
     except InvalidRequestError:
         db.expire_all()
@@ -309,6 +310,13 @@ def _create_tr_from_record(
     # which depend on tested_at, not just import order - are correct
     # immediately rather than only after the next full recompute.
     db.expire_all()
+    # Close the request BEFORE the analytics re-run: equipment health only
+    # counts accepted results (analytics_engine.accepted_test_result_ids), so
+    # re-running while the request is still in_progress / test_submitted
+    # would leave this imported test out of the score until the next full
+    # recompute.
+    tr.status = TestingRequestStatus.closed
+    db.flush()
     imported_result = (
         db.query(TestResult)
         .filter(TestResult.testing_request_id == tr.id)

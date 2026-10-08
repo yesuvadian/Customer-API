@@ -99,6 +99,7 @@ from routers import equipment
 from routers import equipment_type_kit_mappings
 from routers import condition_monitoring_recommendations
 from routers import threshold_config
+from routers import integration_settings
 
 # Notification & Alert Engine
 from routers import notifications as notifications_router
@@ -114,6 +115,8 @@ from routers import reporting as reporting_router
 # Analytics Engine
 from routers import analytics as analytics_router
 from routers import comparison_view as comparison_view_router  # AI-Assisted Comparison View
+from routers import car as car_router  # Corrective Action Requests
+from routers import car_trigger_config as car_trigger_config_router  # CAR Trigger Config (admin CRUD)
 from routers import ai_graph as ai_graph_router          # AI Graph Dashboard
 from routers import data_import as data_import_router  # Import Data module
 from routers import scada as scada_router               # SCADA Integration
@@ -326,9 +329,14 @@ scheduler.add_job(
 
 
 # Overdue & due-reminder check (runs daily at 07:00 UTC)
-def _check_schedule_notifications():
+def _check_schedule_notifications(only_request_ids=None):
     """
     Fully config-driven scheduler job.
+
+    only_request_ids: manual run (run_notification_check.py) limited to these
+    TestingRequest ids -- evaluates only them in Pass 1 / Pass 4 and skips
+    the org-wide passes (recurring summaries, schedule-missed). None = the
+    normal scheduled run over everything.
 
     Reads every active NotificationScheduleRule row and evaluates each open TR.
 
@@ -390,12 +398,16 @@ def _check_schedule_notifications():
             else:
                 org_rules[rule.organization_id][key] = rule
 
-        # All statuses that represent an "open" test request
+        # All statuses that represent an "open" test request.
+        # pending_assignment = a tr_wf request past L2 (waiting for / in
+        # L3 tester assignment and L4 test execution) -- without it those
+        # requests never got a due-date reminder or overdue alert.
         open_statuses = (
             TestingRequestStatus.submitted,
             TestingRequestStatus.assigned,
             TestingRequestStatus.accepted,
             TestingRequestStatus.in_progress,
+            TestingRequestStatus.pending_assignment,
         )
 
         # Load all open TRs (with and without due_date for status_transition rules)
@@ -404,6 +416,8 @@ def _check_schedule_notifications():
             .filter(TestingRequest.status.in_(open_statuses))
             .all()
         )
+        if only_request_ids:
+            requests = [r for r in requests if r.id in only_request_ids]
 
         fired_total = 0
 
@@ -674,7 +688,7 @@ def _check_schedule_notifications():
         #
         recurring_rules = [r for r in all_rules if r.trigger_type == "recurring"]
 
-        if recurring_rules:
+        if recurring_rules and not only_request_ids:
             from collections import defaultdict as _ddict
             from models import NotificationLog
             from datetime import datetime as _dt
@@ -770,6 +784,8 @@ def _check_schedule_notifications():
                 )
                 .all()
             )
+            if only_request_ids:
+                overdue_schedules = []
 
             # Build set of schedule_ids that already have a success log after next_run_date
             executed_ids: set = set()
@@ -883,6 +899,11 @@ def _check_schedule_notifications():
                 )
                 .all()
             )
+            if only_request_ids:
+                stage_instances = [
+                    si for si in stage_instances
+                    if si.wf_instance and si.wf_instance.testing_request_id in only_request_ids
+                ]
 
             now4 = _dt4.utcnow()
 
@@ -989,7 +1010,8 @@ scheduler.add_job(
 # One-shot per breach, not a repeating digest: sla_breach_notified_at is set
 # the moment a stage is flagged, so a still-open, still-breached instance is
 # never re-notified on a later 15-minute pass.
-def _check_review_sla_breaches():
+def _check_review_sla_breaches(only_request_ids=None):
+    """only_request_ids: same manual-run filter as _check_schedule_notifications."""
     db = BackgroundSessionLocal()
     try:
         from models import TrWfStageInstance, TrWfStage, TrWfStageRole
@@ -1014,6 +1036,11 @@ def _check_review_sla_breaches():
             )
             .all()
         )
+        if only_request_ids:
+            candidates = [
+                si for si in candidates
+                if si.wf_instance and si.wf_instance.testing_request_id in only_request_ids
+            ]
 
         notified = 0
         nsvc = NotificationService(db)
@@ -1379,11 +1406,13 @@ def _run_monthly_mis_report():
         prev_month_start = datetime(prev_year, prev_month, 1, tzinfo=_tz.utc)
         report_month = prev_month_start.strftime("%B %Y")
 
+        # Same open set as _check_schedule_notifications.
         open_statuses = [
             TestingRequestStatus.submitted,
             TestingRequestStatus.assigned,
             TestingRequestStatus.accepted,
             TestingRequestStatus.in_progress,
+            TestingRequestStatus.pending_assignment,
         ]
 
         orgs = db.query(Organization).filter(Organization.is_active.is_(True)).all()
@@ -1595,6 +1624,50 @@ scheduler.add_job(
     hour=9,
     minute=30,
     id="deterioration_watch_overdue_review_job",
+)
+
+
+# ── Idle-CAR check (daily 20:30 UTC = 02:00 IST) ─────────────────────────────
+# A CAR is only moved by TR results. If the one request still expecting a
+# result for it is rejected / cancelled in its own workflow, it closes with
+# no result and the result hook never runs for that CAR again - it would sit
+# OPEN/REOPENED with nothing driving it. This links any in-flight request of
+# the same equipment/test, or raises one retest of the trigger test type
+# (services/car_service.heal_idle_cars - same logic as the live hook and as
+# alter_raise_retests_for_idle_cars.py). Daily and off-hours rather than at
+# startup, so a CAR raised in error can be voided first.
+def _check_idle_cars():
+    db = BackgroundSessionLocal()
+    try:
+        from services.car_service import car_lock, heal_idle_cars
+        # Every uvicorn worker (WEB_CONCURRENCY) runs its own scheduler, so
+        # this fires once per worker at the same moment - only the worker
+        # that gets the lock runs it; the others would race it into
+        # duplicate retests.
+        with car_lock(db, "car_idle_check_job", wait=False) as got:
+            if not got:
+                logger.info("[CAR idle check] another worker is running it - skipped")
+                return
+            report = heal_idle_cars(db, apply=True)
+        acted = [r for r in report if r["action"] in ("link", "retest", "close", "attention", "failed")]
+        for r in acted:
+            logger.info(f"[CAR idle check] {r['car_number']}: {r['action']} {r['detail']}")
+        if not acted:
+            logger.info(f"[CAR idle check] {len(report)} open CAR(s), none idle")
+    except Exception as e:
+        logger.error(f"[CAR idle check] job error: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    _check_idle_cars,
+    trigger="cron",
+    hour=20,
+    minute=30,
+    id="car_idle_check_job",
+    max_instances=1,
+    coalesce=True,
 )
 
 
@@ -1988,6 +2061,7 @@ app.include_router(equipment.router)
 app.include_router(equipment_type_kit_mappings.router)
 app.include_router(condition_monitoring_recommendations.router)
 app.include_router(threshold_config.router)
+app.include_router(integration_settings.router)
 
 # Notification & Alert Engine
 app.include_router(notifications_router.router)
@@ -2003,6 +2077,8 @@ app.include_router(reporting_router.router)
 # Analytics Engine
 app.include_router(analytics_router.router)
 app.include_router(comparison_view_router.router)  # AI-Assisted Comparison View
+app.include_router(car_router.router)  # Corrective Action Requests
+app.include_router(car_trigger_config_router.router)  # CAR Trigger Config (admin CRUD)
 app.include_router(ai_graph_router.router)   # AI Graph Dashboard
 app.include_router(data_import_router.router)  # Import Data module
 app.include_router(scada_router.router)         # SCADA Integration
@@ -2054,11 +2130,22 @@ async def startup_event():
     anyio.to_thread.current_default_thread_limiter().total_tokens = thread_pool_size
     logger.info(f"[Startup] Thread pool limiter set to {thread_pool_size} (THREAD_POOL_SIZE)")
 
-    scheduler.start()
-    logger.info(
-        "[Scheduler] APScheduler started — "
-        "daily test request job scheduled at 00:00 UTC"
-    )
+    # scheduler.start() runs on every process startup — fine for a single
+    # instance, but if this container is ever scaled to multiple replicas
+    # (Docker/Kubernetes horizontal scaling), each replica would run its own
+    # copy of every cron/interval job (notification dispatch, daily overdue
+    # checks, etc.), causing duplicate emails and duplicate report runs.
+    # ENABLE_SCHEDULER lets a deployment designate exactly one replica to
+    # run the scheduler; every other replica still serves HTTP normally.
+    # Default "true" preserves today's single-instance behavior unchanged.
+    if os.getenv("ENABLE_SCHEDULER", "true").lower() in ("1", "true", "yes"):
+        scheduler.start()
+        logger.info(
+            "[Scheduler] APScheduler started — "
+            "daily test request job scheduled at 00:00 UTC"
+        )
+    else:
+        logger.info("[Scheduler] APScheduler disabled on this instance (ENABLE_SCHEDULER=false)")
     # Register workflow lifecycle hooks (import = self-registration side-effect)
     import calibration_hooks  # noqa: F401
     import overhaul_hooks  # noqa: F401

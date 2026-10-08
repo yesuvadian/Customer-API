@@ -146,6 +146,25 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", EMAIL_USER or "noreply@example.com")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", 5))
 MAX_DOCUMENT_UPLOAD_MB = int(os.getenv("MAX_DOCUMENT_UPLOAD_MB", 10))
 
+# ==============================
+# CAR (CORRECTIVE ACTION REQUEST)
+# ==============================
+# GET /car's default page size / "Load More" pagination — same
+# admin-tunable-via-env convention as routers/testing_requests.py's
+# TR_PAGE_SIZE, rather than a number hardcoded into the router.
+CAR_PAGE_SIZE = int(os.getenv("CAR_PAGE_SIZE", 20))
+
+# ==============================
+# CAR (CORRECTIVE ACTION REQUEST) DUE DATES
+# ==============================
+# services/car_service.py stamps a due_date on every CAR at creation, keyed
+# by severity — CRITICAL findings get a tighter window than ALERT ones.
+# Read by the car_overdue check in main.py (every 15 min, same cadence as
+# the Result Review SLA breach check) to fire the Notification Center
+# "car_overdue" event once a still-open CAR passes this date.
+CAR_DUE_DAYS_CRITICAL = int(os.getenv("CAR_DUE_DAYS_CRITICAL", 3))
+CAR_DUE_DAYS_ALERT = int(os.getenv("CAR_DUE_DAYS_ALERT", 7))
+
 ALLOWED_UPLOAD_TYPES = {
     "document":    {"application/pdf": {".pdf"}, "image/jpeg": {".jpg", ".jpeg"}, "image/png": {".png"}},
     "image":       {"image/jpeg": {".jpg", ".jpeg"}, "image/png": {".png"}},

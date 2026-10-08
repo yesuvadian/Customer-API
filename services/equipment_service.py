@@ -618,6 +618,171 @@ class EquipmentService:
         db.flush()
         return equipment
 
+    # TestingRequestStatus values with no further downstream action — every
+    # other value counts as "open" for the leaving-active cascade below.
+    # Mirrors the _LEGACY_CLOSED set routers/testing_requests.py already
+    # uses for its own is_closed computation, minus the two enum values
+    # that set actually carries ("pass"/"cancelled") that aren't real
+    # TestingRequestStatus members.
+    _TERMINAL_TR_STATUSES = {
+        "approved", "rejected", "completed",
+        "outcome_active", "commissioned", "closed",
+    }
+
+    @classmethod
+    def get_status_change_impact(cls, db: Session, equipment_id: UUID) -> dict:
+        """Open tickets + active schedules that a leaving-active status
+        change (retire/under_repair/under_maintenance/condemned/
+        decommissioned) would close/pause for this equipment — what the
+        confirmation dialog shows before the user commits."""
+        from models import TestingRequest, TestRequestSchedule
+
+        equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        if not equipment:
+            raise HTTPException(status_code=404, detail="Equipment not found")
+
+        open_tickets = (
+            db.query(TestingRequest)
+            .filter(
+                TestingRequest.equipment_id == equipment_id,
+                ~TestingRequest.status.in_(cls._TERMINAL_TR_STATUSES),
+            )
+            .order_by(TestingRequest.cts.desc())
+            .all()
+        )
+        schedules = (
+            db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id == equipment_id,
+                TestRequestSchedule.is_active.is_(True),
+                TestRequestSchedule.is_deleted.is_(False),
+            )
+            .all()
+        )
+        return {
+            "open_tickets": [
+                {
+                    "id": str(t.id),
+                    "request_number": t.request_number,
+                    "title": t.title,
+                    "status": t.status.value if t.status else None,
+                }
+                for t in open_tickets
+            ],
+            "open_ticket_count": len(open_tickets),
+            "schedules": [
+                {
+                    "id": str(s.id),
+                    "test_type_id": s.test_type_id,
+                    "frequency": s.frequency.value if s.frequency else None,
+                    "next_run_date": s.next_run_date.isoformat() if s.next_run_date else None,
+                }
+                for s in schedules
+            ],
+            "schedule_count": len(schedules),
+        }
+
+    @classmethod
+    def _cascade_equipment_left_active(
+        cls,
+        db: Session,
+        equipment: Equipment,
+        reason: str,
+        modified_by: Optional[UUID],
+    ) -> None:
+        """Closes every open TestingRequest and pauses every active
+        TestRequestSchedule for equipment that's just left 'active' —
+        the user-confirmed consequence of retiring/repairing/condemning/
+        decommissioning it (KPTCL: testing/scheduling equipment that's out
+        of service doesn't make sense). Called from both retire_equipment
+        and set_equipment_status so every leaving-active path (including
+        replace_equipment, which calls retire_equipment) gets it for free.
+        """
+        from models import TestingRequest, TestRequestSchedule, TestingRequestStatus
+
+        open_tickets = (
+            db.query(TestingRequest)
+            .filter(
+                TestingRequest.equipment_id == equipment.id,
+                ~TestingRequest.status.in_(cls._TERMINAL_TR_STATUSES),
+            )
+            .all()
+        )
+        for tr in open_tickets:
+            tr.status = TestingRequestStatus.closed
+            tr.rejection_reason = (
+                f"Auto-closed: equipment marked {equipment.status.value}. {reason}".strip()
+            )
+            if modified_by:
+                tr.modified_by = modified_by
+
+            if tr.wf_instance_id:
+                from models import TrWfInstance, TrWfStageInstance, TrWfAuditLog
+                instance = db.query(TrWfInstance).filter(
+                    TrWfInstance.id == tr.wf_instance_id
+                ).first()
+                if instance and instance.status == "active":
+                    from_stage_id = instance.current_stage_id
+                    instance.status = "terminated"
+                    open_stage = (
+                        db.query(TrWfStageInstance)
+                        .filter(
+                            TrWfStageInstance.wf_instance_id == instance.id,
+                            TrWfStageInstance.status == "in_progress",
+                        )
+                        .first()
+                    )
+                    if open_stage:
+                        open_stage.status = "rejected"
+                        open_stage.completed_at = datetime.now(timezone.utc)
+                        open_stage.comment = tr.rejection_reason
+
+                    # The flowchart/Kanban/audit-log views all read
+                    # TrWfAuditLog, not TrWfStageInstance, to decide whether
+                    # a stage is still "current" (see wf_timeline_sheet.dart:
+                    # isCurrent = !entry.isTerminal on the LAST logged entry
+                    # for that stage) — mutating the stage/instance rows
+                    # alone left the last real transition's entry as the
+                    # newest one, so the UI kept showing the stage as
+                    # CURRENT even though the ticket was already closed.
+                    # action_code='equipment_cancel' (not plain 'cancel' or
+                    # 'reject') distinguishes "equipment left service" from
+                    # a human cancelling/rejecting the test itself, while
+                    # still containing "cancel" as a substring so it lands
+                    # in the Kanban board's existing Cancelled bucket
+                    # (tr_kanban_board.dart buckets by
+                    # wf_terminal_action_code.contains('cancel'), not exact
+                    # match) and the flowchart's isCancelled check (updated
+                    # to the same .contains('cancel') convention) without
+                    # either view needing a third bucket/badge added.
+                    db.add(TrWfAuditLog(
+                        wf_instance_id=instance.id,
+                        testing_request_id=tr.id,
+                        from_stage_id=from_stage_id,
+                        to_stage_id=None,
+                        action_code="equipment_cancel",
+                        performed_by=modified_by,
+                        from_status_code=None,
+                        to_status_code=None,
+                        comment=tr.rejection_reason,
+                        is_send_back=False,
+                        is_terminal=True,
+                    ))
+
+        schedules = (
+            db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id == equipment.id,
+                TestRequestSchedule.is_active.is_(True),
+                TestRequestSchedule.is_deleted.is_(False),
+            )
+            .all()
+        )
+        for sch in schedules:
+            sch.is_active = False
+
+        db.flush()
+
     @classmethod
     def retire_equipment(
         cls,
@@ -635,6 +800,7 @@ class EquipmentService:
                 status_code=400,
                 detail=f"Equipment is already {equipment.status.value}",
             )
+        was_active = equipment.status == EquipmentStatus.active
 
         equipment.status = EquipmentStatus.retired
         equipment.retired_date = datetime.now(timezone.utc)
@@ -643,6 +809,8 @@ class EquipmentService:
             equipment.modified_by = modified_by
 
         db.flush()
+        if was_active:
+            cls._cascade_equipment_left_active(db, equipment, reason, modified_by)
         return equipment
 
     @classmethod
@@ -654,38 +822,59 @@ class EquipmentService:
         reason: Optional[str] = None,
         modified_by: Optional[UUID] = None,
     ) -> Equipment:
-        """Manually transition equipment status (active <-> under_repair, or either -> retired).
+        """Manually transition equipment status.
 
-        Retirement is terminal — once retired, equipment cannot be moved back to
-        active or under_repair.
+        Reversible/in-service states: active, under_repair, under_maintenance
+        — freely movable between each other.
+        Terminal states (no reactivation, require a reason): retired,
+        condemned, decommissioned. All three reuse the retired_date /
+        retirement_reason columns (there's no dedicated column per terminal
+        reason) — which terminal state applies is still recorded on
+        equipment.status itself, this just avoids a schema migration for
+        two more single-purpose date/reason column pairs.
         """
-        valid_statuses = {"active", "under_repair", "retired"}
+        valid_statuses = {
+            "active", "under_repair", "under_maintenance",
+            "retired", "condemned", "decommissioned",
+        }
+        terminal_statuses = {"retired", "condemned", "decommissioned"}
         if new_status not in valid_statuses:
             raise HTTPException(
                 status_code=422,
                 detail=f"status must be one of: {', '.join(sorted(valid_statuses))}",
             )
 
-        if new_status == "retired":
-            if not reason or not reason.strip():
-                raise HTTPException(status_code=422, detail="Reason is required to retire equipment")
-            return cls.retire_equipment(db, equipment_id, reason, modified_by=modified_by)
-
         equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
         if not equipment:
             raise HTTPException(status_code=404, detail="Equipment not found")
 
         current = equipment.status.value if equipment.status else "active"
-        if current == "retired":
-            raise HTTPException(status_code=400, detail="Retired equipment cannot be reactivated")
+        if current in terminal_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{current.replace('_', ' ').capitalize()} equipment cannot change status",
+            )
         if current == new_status:
             raise HTTPException(status_code=400, detail=f"Equipment is already {new_status}")
+
+        if new_status in terminal_statuses:
+            if not reason or not reason.strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Reason is required to mark equipment as {new_status}",
+                )
+            equipment.retired_date = datetime.now(timezone.utc)
+            equipment.retirement_reason = reason
 
         equipment.status = EquipmentStatus(new_status)
         if modified_by:
             equipment.modified_by = modified_by
 
         db.flush()
+        if current == "active" and new_status != "active":
+            cls._cascade_equipment_left_active(
+                db, equipment, reason or f"Marked {new_status}.", modified_by
+            )
         return equipment
 
     @classmethod

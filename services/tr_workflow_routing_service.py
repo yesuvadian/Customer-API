@@ -148,6 +148,43 @@ class WorkflowConfigError(HTTPException):
         )
 
 
+def fallback_terminal_status(db, wf_definition_id, *, action_code: Optional[str], is_rejection: bool):
+    """End status for a terminal transition that has none configured
+    (terminal_status_id NULL). It used to be "the workflow's last status by
+    sequence" - for the Standard Test Workflow that is wf_cancelled, so every
+    request completed by such a "complete" was labelled Cancelled. Now it
+    matches the action:
+      - a rejection        -> the workflow's reject status,
+      - a cancel action    -> its cancel status,
+      - anything else      -> its completed / closed / commissioned status,
+                              never a cancel or reject one.
+    Falls back to the last non-cancel/non-reject status, then to the last
+    status, so a workflow with unusual codes still gets something."""
+    statuses = (
+        db.query(TrWfStatus)
+        .filter(TrWfStatus.wf_definition_id == wf_definition_id)
+        .order_by(TrWfStatus.sequence.desc())
+        .all()
+    )
+    if not statuses:
+        return None
+
+    def has(st, *words):
+        code = (st.status_code or "").lower()
+        return any(w in code for w in words)
+
+    action = (action_code or "").lower()
+    if is_rejection:
+        wanted = [s for s in statuses if has(s, "reject")]
+    elif "cancel" in action:
+        wanted = [s for s in statuses if has(s, "cancel")]
+    else:
+        wanted = [s for s in statuses if has(s, "complete", "closed", "commission")]
+        if not wanted:
+            wanted = [s for s in statuses if not has(s, "cancel", "reject")]
+    return (wanted or statuses)[0]
+
+
 class WorkflowRoutingService:
     """
     Core engine for the tr_wf_* workflow system.
@@ -511,16 +548,15 @@ class WorkflowRoutingService:
                     terminal_status_code = ts.status_code
                     terminal_status_name = ts.status_name
             if not terminal_status_code:
-                # Fallback: last TrWfStatus (by sequence) for this definition
-                _last = (
-                    self.db.query(TrWfStatus)
-                    .filter(TrWfStatus.wf_definition_id == instance.wf_definition_id)
-                    .order_by(TrWfStatus.sequence.desc())
-                    .first()
+                # No end status configured on this transition - pick one that
+                # matches the action (see fallback_terminal_status)
+                _fallback = fallback_terminal_status(
+                    self.db, instance.wf_definition_id,
+                    action_code=action_code, is_rejection=bool(transition.is_rejection),
                 )
-                if _last:
-                    terminal_status_code = _last.status_code
-                    terminal_status_name = _last.status_name
+                if _fallback:
+                    terminal_status_code = _fallback.status_code
+                    terminal_status_name = _fallback.status_name
 
         # Close current stage instance
         current_stage_inst: Optional[TrWfStageInstance] = (
@@ -668,6 +704,36 @@ class WorkflowRoutingService:
                 },
             )
 
+        # ── Equipment health refresh on every terminal transition ─────────
+        # Equipment health only counts results whose workflow ended accepted
+        # (analytics_engine.accepted_test_result_ids), so the score must be
+        # recomputed whenever a workflow ends - not only when the org happened
+        # to configure a trigger_analytics / recommendation_finalize
+        # post_action on that transition. Seeded configs have terminal
+        # `complete` / `accept` transitions with no post_action, and no
+        # cancel/reject transition has one, so without this an approved test
+        # never reached the score and a cancelled one never left it until the
+        # next full recompute. TestAnalytics already exists from submission
+        # (TestingService.create_structured_result), so re-aggregating the
+        # equipment is enough. Savepoint so an analytics failure can't break
+        # the transition itself.
+        _analytics_post_actions = {"trigger_analytics", "recommendation_finalize"}
+        if (
+            is_terminal
+            and testing_request.equipment_id
+            and transition.post_action not in _analytics_post_actions
+        ):
+            try:
+                from services.analytics_engine import AnalyticsEngine
+                self.db.flush()
+                with self.db.begin_nested():
+                    AnalyticsEngine(self.db).run_for_equipment(testing_request.equipment_id)
+            except Exception as _analytics_err:
+                log.warning(
+                    "Terminal-transition analytics refresh failed for request %s: %s",
+                    testing_request.id, _analytics_err,
+                )
+
         # ── Notification ───────────────────────────────────────────────────
         # Fire the appropriate notification for every stage transition.
         # Rejection → request_rejected (has templates, notifies originator).
@@ -756,9 +822,26 @@ class WorkflowRoutingService:
                         log.warning("Dispatch after terminal action failed (non-fatal): %s", _de)
                         testing_request.status = _TRS.closed
                         testing_request.completed_at = _dt.now(_tz.utc)
+                elif testing_request.status in (
+                    _TRS.finance_pending, _TRS.outcome_active, _TRS.procurement_initiated, _TRS.commissioned,
+                ):
+                    # This transition's post_action (recommendation_finalize)
+                    # already dispatched and set the outcome - e.g. Procurement
+                    # -> finance_pending while Finance decides. Don't overwrite it.
+                    pass
                 else:
                     testing_request.status = _TRS.closed
                     testing_request.completed_at = _dt.now(_tz.utc)
+
+            # A request just finished: its CARs may now be closable (a CAR
+            # closes only when every linked request is finished) or have
+            # retests to raise (e.g. corrective work done). Runs after the
+            # caller commits this transition, in its own session.
+            try:
+                from services.car_service import schedule_recheck_after_commit
+                schedule_recheck_after_commit(self.db, testing_request.id)
+            except Exception as _car_err:
+                log.warning("CAR re-check scheduling failed (non-fatal): %s", _car_err)
 
         return instance
 

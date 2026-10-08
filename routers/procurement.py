@@ -109,6 +109,15 @@ def finance_approve(
 
     db.commit()
 
+    # CARs waiting on this replacement close now (best-effort)
+    try:
+        from services.car_service import finish_replacement, recheck_cars_for_request
+        finish_replacement(db, pr.procurement_number)
+        if tr:
+            recheck_cars_for_request(db, tr.id)
+    except Exception as _c:
+        print(f"[WARN] closing CARs after Finance approval failed: {_c}")
+
     # Notify originator / tester that procurement was approved
     if tr:
         try:
@@ -167,6 +176,17 @@ def finance_reject(
             rec.modified_by = current_user.id
 
     db.commit()
+
+    # The replacement isn't happening: reopen the CARs its approval closed
+    # (best-effort - never blocks the Finance decision).
+    if tr:
+        try:
+            from services.car_service import reopen_cars_after_replacement_rejected
+            reopen_cars_after_replacement_rejected(
+                db, tr, pr_number=pr.procurement_number, rejected_by=current_user.id, notes=notes,
+            )
+        except Exception as _c:
+            print(f"[WARN] reopening CARs after Finance rejection failed: {_c}")
 
     # Notify the tester that their procurement was rejected and needs revision
     if tr:
