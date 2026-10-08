@@ -1,0 +1,991 @@
+===== alter_activate_tneb_matrix_gaps.py =====
+(no module docstring)
+
+===== alter_add_missing_equipment_templates.py =====
+ALTER: Insert Test/Maintenance/Inspection coverage for the 11 equipment
+types that had CategoryMaster rows but zero templates — Potential
+Transformer, Isolator / Disconnector, Control & Relay Panel, Battery
+Charger, Station Auxiliary Transformer, Diesel Generator Set, Digital
+Communication Panel, LTAC Panel, PLCC Panel, Wave Trap, Fire Fighting
+System.
+
+Inserts, all disabled by default (is_active=False):
+  1. OrgTestTemplate rows for the 33 new template_keys added to
+     test_templates.py's TEST_TEMPLATES (3 per equipment type: Test,
+     Maintenance, Inspection) — org_id=NULL (system/global), is_system=True.
+  2. CategoryDetails rows under each equipment type's CategoryMaster —
+     its own Test-type name, its own Maintenance-type name, and its own
+     copies of the 6 generic Annual Audit inspection category names
+     (Electrical Safety / Civil / Fire Safety / Documentation /
+     Environmental / General Maintenance), matching the exact pattern
+     already used by Circuit Breaker / Battery Set / Surge Arrestor.
+
+Does NOT call seed_category_active_flags.sync_category_details_active_flags()
+— that function matches CategoryDetails purely by `name`, so running it here
+would also touch every OTHER equipment type's identically-named rows (e.g.
+every equipment's own "Electrical Safety" row) via its "re-enable everything
+not explicitly disabled" branch. Each row this script inserts is created
+with is_active=False directly instead, which is safe and self-contained.
+
+Safe to run multiple times (checks for existing rows by name/key first).
+
+Usage:
+    python alter_add_missing_equipment_templates.py
+
+===== alter_add_oltc_drm_template.py =====
+ALTER: Insert the OLTC Dynamic Resistance Measurement (DRM) template for
+Power Transformer — a gap flagged directly against the TNEB proposal's own
+CM matrix (one of Power Transformer's 12 in-scope CM procedures), distinct
+from both "OLTC Operations Count" (a cumulative tap-change counter) and
+"Winding Resistance Measurement" (tests the main windings, not the OLTC's
+switching contacts).
+
+Inserts, disabled by default (is_active=False):
+  1. OrgTestTemplate row for "oltc_drm_test" (test_templates.py) —
+     org_id=NULL (system/global), is_system=True.
+  2. CategoryDetails row "OLTC Dynamic Resistance Measurement (DRM)" under
+     Power Transformer's CategoryMaster, category_type="test".
+
+Safe to run multiple times (checks for existing rows by name/key first).
+
+Usage:
+    python alter_add_oltc_drm_template.py
+
+===== alter_add_partial_discharge_template.py =====
+ALTER: Insert the Partial Discharge Measurement template, shared across the
+four equipment types the TNEB proposal lists it for that are actually
+registered in the platform today — Power Transformer, Current Transformer,
+Potential Transformer, and Capacitor Voltage Transformer. (The proposal also
+lists Cables and GIS Substation, but neither has a CategoryMaster row in
+this platform yet — out of scope here.)
+
+One OrgTestTemplate row backs all four — `equipment_type` on a template is
+descriptive only, not enforced at runtime; selection is entirely driven by
+TEST_TYPE_TO_TEMPLATE + CategoryDetails, the same mechanism already used to
+share "Routine Preventive Maintenance" across many equipment types.
+
+Inserts, disabled by default (is_active=False):
+  1. OrgTestTemplate row for "partial_discharge_test" — org_id=NULL
+     (system/global), is_system=True.
+  2. One CategoryDetails row "Partial Discharge Measurement" under each of
+     the 4 equipment types' CategoryMaster, category_type="test".
+
+Safe to run multiple times (checks for existing rows by name/key first).
+
+Usage:
+    python alter_add_partial_discharge_template.py
+
+===== alter_add_ttr_template.py =====
+ALTER: Insert the Transformer Turns Ratio (TTR) template for Power
+Transformer — a gap flagged directly by the user, also the first procedure
+on the TNEB proposal's own CM matrix. The app already has per-winding-pair
+ratio tests ("Ratio Test HV-IV" / "Ratio Test HV-LV") and a differently-
+scoped tap-wise ratio template filed under the legacy generic "Transformer"
+equipment type — this is a proper standalone TTR procedure for the real
+Power Transformer registry.
+
+Inserts, disabled by default (is_active=False):
+  1. OrgTestTemplate row for "transformer_ttr_test" (test_templates.py) —
+     org_id=NULL (system/global), is_system=True.
+  2. CategoryDetails row "Transformer Turns Ratio (TTR)" under Power
+     Transformer's CategoryMaster, category_type="test".
+
+Safe to run multiple times (checks for existing rows by name/key first).
+
+Usage:
+    python alter_add_ttr_template.py
+
+===== alter_capacitance_tandelta_visibility_rules.py =====
+One-time fix for the capacitance_tandelta_transformer template, applied to
+every already-provisioned OrgTestTemplate row:
+
+  1. Set "visibility_rule" (COMPARE type) on the voltage-tier-specific
+     bushing sections, based on the single plain value stored in
+     voltage_ratio (equipment.voltage_class, e.g. "400" or "220" - NOT a
+     composite "400/220/33" string). Overwrites any earlier CONTAINS/
+     MIN_SEGMENTS rule from a prior version of this script.
+  1b. Replace winding_test_results' and idax_test_results' default_rows
+     with the family-scoped, correctly-ordered row set (see _WINDING_ROWS
+     below) - both tables test the same electrode combinations.
+  2. Give each of the five voltage tiers its own standalone "{tier} kV
+     Bushing Details" SECTION (Details / R-phase / Y-phase / B-phase
+     columns, Make / Sl. No. / Y.O. Mfg. rows), inserted immediately before
+     its "{tier} kV Bushing Test Results" section - matching KPTCL's own
+     Tan-Delta report format exactly (its "b./c.", "d./e." etc. sub-heading
+     pairs are two separate tables, not one). An earlier revision of this
+     script embedded the details table as the first FIELD inside the Test
+     Results section instead, with the axes transposed (phase-per-row
+     instead of attribute-per-row) - this version detects and migrates
+     that intermediate shape too.
+  3. Remove fields/columns/section retired from test_templates.py:
+     - "% D.F @ 20°C (Previous Test)" column from all 6 test-results tables
+       (Winding + every bushing tier)
+     - "% Moisture (Previous Test)" column from the IDAX table
+     - "Previous Test Date" field for Winding, all 5 bushing tiers, and IDAX
+       (all six - none are kept)
+     - the "Overall Assessment" section (redundant - the RecommendationWizard
+       already renders its own version; this section's fields were suppressed
+       from the tester's form regardless, see _wizardOwnedKeys in
+       test_result_form.dart)
+  4. Convert idax_test_results' tr_analysis_moisture / tr_analysis_oil
+     columns from tester-picked dropdowns to auto-computed THRESHOLD rules
+     against moisture_percent / oil_conductivity_psm in the same row:
+       % Moisture:      <1.0 As New, 1.0-2.0 Dry, 2.0-3.0 Moderately Wet, >3.0 Wet
+       Oil Conductivity: <0.37 As New, 0.37-3.7 Good, 3.7-37 Service Aged, >37 Deteriorated
+
+OrgTestTemplate rows are seeded once from test_templates.py by
+provision_global_defaults() and never auto-synced afterward - editing
+test_templates.py alone does not fix already-seeded rows in the DB, which is
+what the tester's form and the report/analytics services actually read (see
+OrgTestTemplateService.get_for_test_type / get_by_template_key, DB-first
+resolution). This script applies the same additions that were made to
+test_templates.py directly to every stored OrgTestTemplate row for this
+template_key, org-specific or global.
+
+Family logic: KPTCL's fleet has two transformer families, and voltage_ratio
+holds ONE plain value naming which family a unit belongs to -
+  "400" -> 400/220/33 kV family (400 + 220 + 33 kV bushings, tertiary winding)
+  "220" or "66" -> 220/66/11 kV family (220 + 66 + 11 kV bushings, tertiary
+                   winding). Both values are registered in practice - some
+                   220/66/11kV units are tagged "220", others "66" - so every
+                   220-family check accepts either via operator "in", not a
+                   plain "=" against "220" alone (that was the original bug:
+                   "66"-tagged equipment matched nothing, so its entire
+                   bushing/winding/IDAX area rendered with zero visible rows).
+220 kV is additionally common to BOTH families (400/220/33's own MV bushing),
+so its section (and the tertiary-only winding rows, since both families are
+3-winding) use operator "in" over all three of "400", "220", "66"; the 400kV
+and 33kV sections use a plain "=" against "400" since only the 400-family
+uses them.
+
+Sections are matched by the voltage tier embedded in their fields' keys
+(e.g. any field key starting with "bushing_400kv_"), not by title, so a
+renamed section title doesn't break the match. Idempotent - re-running after
+it has already applied the current shape reports zero changes.
+
+Usage:
+    python alter_capacitance_tandelta_visibility_rules.py --dry-run   # report only
+    python alter_capacitance_tandelta_visibility_rules.py             # apply
+
+===== alter_condition_band_rank_words.py =====
+One-time setup: create the condition_band_rank_words table (via the
+ConditionBandRankWord model in models.py) and seed it with the word/phrase
+-> severity rank (0=best, 1=mid, 2=worst) list that used to be hardcoded
+independently in two places:
+
+  - routers/analytics.py's _BAND_RANK_WORDS (used by _next_worse_boundary
+    to rank ParameterThresholdBand rows for breach forecasting)
+  - services/evaluation_service.py's _cond_rank (used by
+    _eval_threshold_table to rank a table row's own bands at
+    test-evaluation time)
+
+Confirmed live the two copies had already drifted (analytics.py's had
+"excellent", evaluation_service.py's didn't) — this is the single seed
+list both now read from at runtime via
+services/analytics_engine.py's _load_band_rank_words, same
+db-with-hardcoded-fallback pattern as _load_risk_bands/
+_load_condition_labels/_load_condition_scores.
+
+This is a one-time seed, not an extraction like
+alter_parameter_threshold_band.py — there's no single template source of
+truth for this word list, it's app-level config. Re-running is safe and
+idempotent (updates existing phrases' rank by their unique key, inserts
+any missing ones, never duplicates).
+
+Usage:
+    python alter_condition_band_rank_words.py
+
+===== alter_deterioration_notification.py =====
+One-time setup: seed the new "deterioration_watch_escalated" notification
+event type (catalogue entry + email/SMS/in-app templates) without re-running
+the full seed.py (that file seeds the entire platform — equipment types,
+workflows, hundreds of other notification templates, etc.; running it again
+against a live dev DB with real data is not something to do casually for one
+new event type).
+
+Both _seed_notification_event_catalogue() and _seed_notification_templates()
+are idempotent, self-contained functions (upsert by event_type, and by
+event_type+channel respectively) — this script just calls them directly with
+a fresh session, exactly as seed.py's own seed_all() does, but scoped to
+only these two.
+
+Usage:
+    python alter_deterioration_notification.py
+
+===== alter_deterioration_review_record.py =====
+One-time setup: create the deterioration_review_records table (via the
+DeteriorationReviewRecord model in models.py) — no seed data, this table is
+populated by officers using the app (POST /analytics/deterioration-watch-
+list/review), not by any script.
+
+Usage:
+    python alter_deterioration_review_record.py
+
+===== alter_dga_and_annual_audit_categorization.py =====
+One-time fix: DGA category_type + Annual Audit equipment_type
+=================================================================
+Two independent, unrelated-looking "Other" buckets in the Template Designer
+turned out to share one root cause — a missing classification field on how
+the row was originally seeded:
+
+  1. "Transformer Dissolved Gas Analysis (DGA)" CategoryDetails row has
+     category_type=None (seed_dga bug: _get_or_create_category_detail() was
+     called without category_type) - it renders under the catch-all "Other"
+     category_type bucket on the Power Transformer Test Templates screen
+     instead of "Test", even though it plainly is one. Fix: set it to "test".
+
+  2. The six Annual Audit OrgTestTemplate rows (audit_civil,
+     audit_electrical_safety, audit_fire_safety, audit_documentation,
+     audit_environmental, audit_general_maintenance) never set
+     template_data["equipment_type"] - the Template Designer's frontend
+     equipment_type fallback then labels their whole group "Other" instead
+     of correctly excluding them via _nonEquipmentMasters (which matches on
+     the literal string "Annual Audit Categories"). Fix: set
+     template_data["equipment_type"] = "Annual Audit Categories" so the
+     existing exclusion logic actually catches them.
+
+Both fixes are also applied at the source in seed.py, so future fresh seeds
+get this right automatically - this script only backfills what's already
+been seeded on this database.
+
+Idempotent - safe to re-run; reports "no change" once applied.
+
+Usage:
+    python alter_dga_and_annual_audit_categorization.py
+
+===== alter_dqi_rule_config.py =====
+One-time setup: create the dqi_rule_configs table (via the DqiRuleConfig
+model in models.py) and seed it with the 7 checks that used to be hardcoded
+directly in routers/dashboard_kpi.py's DQI (Data Quality Index) computation
+— 5 required Equipment nameplate fields, plus "has test history" and "not
+overdue for a test". Every value here is exactly what was hardcoded before,
+just now toggleable afterward from Threshold Config's "Data Quality" tab
+without a code change.
+
+Unlike the sibling alter_*.py scripts for this module, this one seeds fixed,
+code-bound keys, not an open list an admin can add to — see DqiRuleConfig's
+own docstring in models.py for why.
+
+Re-running this script is safe: it only inserts rows that don't already
+exist for a given key, so manual edits already made (e.g. an admin having
+turned a check off) are never overwritten.
+
+Usage:
+    python alter_dqi_rule_config.py
+
+===== alter_equipment_condition_band_threshold.py =====
+One-time setup: create the equipment_condition_band_thresholds table (via
+the EquipmentConditionBandThreshold model in models.py) and seed it with
+the same 5 bands the AI Graph Dashboard already used as a hardcoded
+constant (_condition_from_score's 88/75/65/50 cutoffs in
+routers/ai_graph.py).
+
+This is a separate, 5-tier scale (Excellent/Good/Fair/Poor/Critical) from
+EquipmentHealthBandThreshold's 4-tier one (Low/Medium/High/Critical) — not
+a duplicate of it. Both classify the same composite health score, just at
+different granularity for different dashboards.
+
+Like-for-like seed, not a new classification — every value here is exactly
+what was hardcoded before, just now editable afterward directly in the
+equipment_condition_band_thresholds table. Re-running this script is safe:
+it only inserts rows that don't already exist for a given label.
+
+Usage:
+    python alter_equipment_condition_band_threshold.py
+
+===== alter_equipment_criticality_mapping.py =====
+One-time setup: create the equipment_criticality_mappings table (via the
+EquipmentCriticalityMapping model in models.py) and seed it with a starting
+default per equipment type — a structural proxy (equipment type, and a
+voltage-class bump) standing in for a full manual classification, per
+KPTCL spec §12.5's Condition Risk Matrix.
+
+This is a STARTING DEFAULT, not a KPTCL-confirmed classification — every
+value here is editable afterward directly in the
+equipment_criticality_mappings table (an admin CRUD UI for it is a
+follow-up, not part of this script). Re-running this script is safe: it
+only inserts rows that don't already exist for a given
+(equipment_type_id, voltage_class) pair, so manual edits already made are
+never overwritten.
+
+Usage:
+    python alter_equipment_criticality_mapping.py
+
+===== alter_equipment_health_band_threshold.py =====
+One-time setup: create the equipment_health_band_thresholds table (via the
+EquipmentHealthBandThreshold model in models.py) and seed it with the same
+4 bands the app already used as a hardcoded constant (_RISK_BANDS in
+services/analytics_engine.py), per KPTCL spec §12.1's explicit requirement
+that EHS band thresholds be admin-configurable without a code change.
+
+This is a like-for-like seed, not a new classification — every value here
+is exactly what was hardcoded before, just now editable afterward directly
+in the equipment_health_band_thresholds table (an admin CRUD UI for it is a
+follow-up, not part of this script). Re-running this script is safe: it
+only inserts rows that don't already exist for a given label, so manual
+edits already made are never overwritten.
+
+Usage:
+    python alter_equipment_health_band_threshold.py
+
+===== alter_evaluate_booleans_and_fault_desc.py =====
+ALTER: Refresh template_data for 7 already-live templates whose plain
+boolean health-check fields were converted to evaluated Pass/Fail/N/A
+dropdowns (so a failed check actually raises severity), plus a new
+conditional "Fault Description" field (depends_on overall_result == Fail)
+added to each.
+
+Templates touched (all already active, already seeded — this is an UPDATE,
+not an insert):
+  - relay_testing_report               (Feeder protection relays)
+  - stability_bias_test                (Transformer differential relay)
+  - protection_relay_functional_test   (Protection Relay)
+  - ct_ratio_test                      (Current Transformer)
+  - transformer_protection_commissioning (Protection system)
+  - physical_inspection                (Transformer)
+  - buchholz_relay_functional_test     (Power Transformer)
+
+19 boolean fields converted total (see test_templates.py for the full
+list) — 4 unrelated "action taken" booleans (top_up_done,
+gas_replacement_done, water_added, gas_sample_taken) were deliberately
+left as plain booleans; they record whether an action was performed, not
+a pass/fail health outcome.
+
+Backward compatibility note: existing saved TestResult rows for these
+templates that stored `true`/`false` for the converted keys won't match
+the new Pass/Fail/N/A options - old results simply won't re-evaluate
+retroactively. New submissions going forward use the new dropdown.
+
+Safe to run multiple times (each run just re-syncs template_data to the
+current TEST_TEMPLATES content).
+
+Usage:
+    python alter_evaluate_booleans_and_fault_desc.py
+
+===== alter_evaluate_remaining_functional_fields.py =====
+ALTER: Refresh template_data for templates whose Pass/Fail-style dropdown
+and table-column fields lacked severity evaluation — a broader audit
+following the same class of bug already fixed for boolean fields (see
+alter_evaluate_booleans_and_fault_desc.py).
+
+15 fields across 8 templates fixed in test_templates.py:
+  - differential_protection_test.stability_result       -> _EV_TRIP (already
+    defined, just never wired here)
+  - transformer_protection_commissioning: 2 table columns (setting_verified,
+    trip_test_ok) -> new Yes/No severity map
+  - physical_inspection: paint_condition, silica_gel_condition -> new maps
+  - circuit_breaker_travel_timing: closing_times table's "result" column
+    -> _EV_PF (its sibling opening_times table already had this — a
+    copy-paste gap)
+  - surge_arrestor_power_freq_withstand: flashover table column -> new
+    inverted No/Yes map
+  - tan_delta_capacitance_idax: moisture_analysis + oil_conductivity_analysis
+    table columns -> _EV_MOISTURE / _EV_OIL_COND (both already defined,
+    never wired here; a near-identical template elsewhere already used
+    _EV_OIL_COND correctly)
+  - oltc_drm_test (added this session): anomaly_detected table column —
+    BUG FIX, was using dropdown_evaluation (wrong key for a table column)
+    instead of column_evaluation, so it silently evaluated nothing
+  - transformer_repair_lifecycle: 10 fields across its 10-stage form
+    (s5_inspection_outcome, s7_stage_insp_1/2/3_result, s10_turns_ratio_ok,
+    s10_winding_resistance_ok, s10_no_load_test_ok, dga_result_1m,
+    bdv_result_1m, ir_result_6m, overall_quality_rating)
+
+Deliberately NOT touched (confirmed false positives — config/attribution/
+classification fields, not health outcomes): oc_phase_curve, all 10
+*_delay_reason fields, transformer_dga.recommended_action,
+partial_discharge_test.pd_pattern.
+
+Safe to run multiple times (each run just re-syncs template_data to the
+current TEST_TEMPLATES content for whichever of these keys are actually
+live in the DB).
+
+Usage:
+    python alter_evaluate_remaining_functional_fields.py
+
+===== alter_failure_cohort_threshold_config.py =====
+One-time setup: create failure_cohort_threshold_configs and seed the
+system-wide default row (organization_id=NULL) from the current .env
+values, so existing behavior is unchanged until an org explicitly
+overrides it via the Threshold Config screen.
+
+Same "org can override, default always exists" pattern as
+NotificationTemplate -- EquipmentService.compute_failure_cohort_stats()
+looks up an org-specific row first, then this NULL default row, then the
+.env constants as a last resort.
+
+Re-running this script is safe: it only inserts the default row if one
+doesn't already exist, so an admin's already-edited value is never
+overwritten.
+
+Usage:
+    python alter_failure_cohort_threshold_config.py
+
+===== alter_failure_registry_add_fields.py =====
+One-time alter: add the failure_registry template fields called for by
+KPTCL spec §2 that were missing from the original form —
+
+  "The system shall support classification of failure type — Unexpected
+  Breakdown, Forced Outage, Degradation Failure, Partial Discharge,
+  Insulation Failure, Mechanical Failure, Protection Misoperation, and
+  any other failure type defined by the utility."
+
+  "...capturing failure date, failure mode, failure symptoms, probable
+  cause, equipment status at failure, and affected substation/bay
+  details."
+
+Adds three fields to every existing failure_registry OrgTestTemplate row:
+  failure_type                 — dropdown, the spec's own list above
+  equipment_status_at_failure  — dropdown
+  failure_symptoms             — textarea
+
+Not touched, deliberately:
+  - substation/bay — already covered transitively (the equipment record
+    itself carries bay_number + department), not a new FR field
+  - probable_cause / "failure mode" — the existing failure_category
+    field (Electrical/Mechanical/Oil/Protection/Thermal/Other) may
+    already be serving as "failure mode"; unresolved question, not
+    something to guess at here
+
+Non-destructive: reads each row's own current template_data and inserts
+only whichever of the three fields it's missing, rather than replacing
+the whole blob — any Template Designer customization already on a row
+(extra options, a renamed section, an org-specific override) survives
+untouched. Safe to run against dev/prod even if their templates have
+drifted from what's in seed.py.
+
+Idempotent per field — a row missing only one of the three is topped up
+without duplicating the ones it already has. Safe to re-run.
+
+Usage:
+    python alter_failure_registry_add_fields.py
+
+===== alter_fill_existing_equipment_gaps.py =====
+ALTER: Fill Test/Maintenance/Inspection gaps found on equipment types that
+already had SOME coverage, discovered by auditing live CategoryDetails rows
+against test_templates.py's TEST_TYPE_TO_TEMPLATE map.
+
+Two different kinds of gap, handled differently:
+
+  1. Filling in an already-ACTIVE, already-trusted feature — inserted as
+     is_active=True, no review gate needed:
+       - Protection Relay / Electronic Tri-vector Meter / Surge Arrestor /
+         Battery Set: missing Civil / Fire Safety / Environmental Inspection
+         CategoryDetails rows (they already have some of the 6 generic
+         categories active; this just completes the set, same shared
+         transformer_inspection template every equipment type already uses).
+     (Power Transformer's orphaned "Winding Tan-Delta & Capacitance Test"
+     CategoryDetails row already exists and is active in the DB — that gap
+     was purely a missing TEST_TYPE_TO_TEMPLATE alias, fixed in
+     test_templates.py directly; nothing to insert here.)
+
+  2. Genuinely new content for equipment types that had zero Maintenance
+     and zero Inspection at all — inserted disabled (is_active=False), same
+     as the 11 brand-new equipment types in
+     alter_add_missing_equipment_templates.py:
+       - Current Transformer: new current_transformer_maintenance template
+         + its own Maintenance CategoryDetails row + all 6 Inspection
+         category rows (it had none).
+       - Capacitor Voltage Transformer: new cvt_maintenance template + same.
+
+Safe to run multiple times (checks for existing rows by name/key first).
+
+Usage:
+    python alter_fill_existing_equipment_gaps.py
+
+===== alter_insulation_resistance_pi_thresholds.py =====
+Alter: Insulation Resistance (IR) & Polarization Index — auto-evaluate PI
+=============================================================================
+The ir_readings table's pi_value column (Polarisation Index, computed
+client-side as ir_value_10min / ir_value_1min) previously had no automated
+acceptance-threshold evaluation - only the tester's own manually-picked
+row_result (Pass/Fail) dropdown drove the score, so a PI of 0.8 (IEEE 43:
+"Dangerous") could be waved through as "Pass" with nothing catching it.
+
+This patches every already-provisioned insulation_resistance_test
+OrgTestTemplate row with a table_evaluation.column_evaluations block on
+pi_value, using IEEE 43 bands:
+    < 1.0        -> CRITICAL (Dangerous)
+    1.0 - 2.0    -> ALERT    (Questionable / Fair)
+    >= 2.0       -> NORMAL   (Good)
+This runs independently of, and in addition to, the tester's row_result
+pick — same coexistence pattern already used by sfra_routine's
+correlation_analysis table (numeric column_evaluations + a separate
+dropdown column_evaluation on the same table).
+
+Idempotent - safe to re-run; reports "no change" once applied.
+
+Usage:
+    python alter_insulation_resistance_pi_thresholds.py --dry-run   # report only
+    python alter_insulation_resistance_pi_thresholds.py             # apply
+
+===== alter_merge_sc_oc_test_hv_lv.py =====
+Alter: Merge Short Circuit + Open Circuit Test (HV-LV) into one form
+=========================================================================
+short_circuit_test_hv_lv and open_circuit_test_hv_lv_1ph/_3ph are performed
+back-to-back in the same site visit with the same test kit, but previously
+required two separate testing requests, approvals, and health-score
+entries for one physical test event. Combined into
+short_open_circuit_test_hv_lv (test_templates.py).
+
+This script:
+  1. Creates the CategoryDetails + OrgTestTemplate rows for the new merged
+     type ("Short Circuit & Open Circuit Test (HV-LV)") via
+     provision_global_defaults(), same as any new test type.
+  2. Deactivates (is_active=False — never deletes) the three old
+     CategoryDetails rows ("Short Circuit Test HV-LV", "Open Circuit Test
+     HV-LV (1Ph)", "Open Circuit Test HV-LV (3Ph)") so they stop appearing
+     as choices for NEW testing requests, while any existing historical
+     TestResults recorded under those template_keys remain fully readable —
+     nothing is deleted or migrated.
+
+Idempotent - safe to re-run; reports "no change" once applied.
+
+Usage:
+    python alter_merge_sc_oc_test_hv_lv.py
+
+===== alter_overview_dashboard_module.py =====
+Alter: Consolidated Overview Dashboard module + admin privileges
+=============================================================
+One-time fix applied to the already-provisioned Module id=62 row. Safe to
+run multiple times — patches instead of duplicating.
+
+Module id=62 (path="see_dashboard") backs the new org-hierarchy-adaptive
+OverviewDashboard (lib/pages/zoho/role_dashboards/overview_dashboard.dart +
+GET /dashboard/overview) for the ENTIRE AE->CEE role chain — not just SEE
+anymore, hence the rename away from "SEE Dashboard" here. The path itself
+is left untouched (still "see_dashboard") since OrgRole.default_module_id
+rows for existing roles already point at Module ids whose *path* is what
+dashboard.dart / customer_home.dart switch on — renaming the path would be
+a breaking change for zero benefit; only the display name/description was
+stale.
+
+Before this script: is_active=False, is_menu=False, zero OrgRolePermission
+grants for any role. That combination meant the module didn't show up in
+GET /modules (active-only by default), and — critically — the org-admin
+"default dashboard" picker in org_role_permissions_page.dart filters
+modules to isMenu==true, so it wasn't selectable there either, even though
+the dashboard code behind it was fully wired up and working via
+default_module_path for anyone whose default_module_id already pointed at
+it directly. is_menu=True does NOT also add it as a clickable sidebar
+item: portal_app_drawer.dart's drawer loop only shows modules whose path
+is in its own curated _pathToLabel/_pathToIcon/_pathToSection maps, and
+'see_dashboard' was deliberately removed from those (see the NOTE comment
+there) when the old per-role dashboards were retired — it stays reachable
+only via default_module_path, same as asset_dashboard/admin_dashboard.
+
+Grants:
+  - System Administrator  -> full access
+
+Also patches the live `RoleTemplate` row named "System Administrator" so
+brand-new organizations provisioned after this script runs get the module
+by default too (same gap prior dashboard-module additions — AI Graph,
+SCADA — left behind; see seed_comparison_view_module.py for the precedent
+this follows).
+
+===== alter_parameter_condition_score.py =====
+One-time setup: create the parameter_condition_scores table (via the
+ParameterConditionScore model in models.py) and seed it with the same 3
+values the app already used as a hardcoded constant (_SCORE in
+services/analytics_engine.py), completing the same §12.1 configurability
+fix as alter_equipment_health_band_threshold.py — that script covers the
+score-to-band OUTPUT step (EquipmentHealthBandThreshold); this one covers
+the condition-to-point-value INPUT step that feeds the composite health
+score in the first place.
+
+Like-for-like seed, not a new set of weights — every value here is exactly
+what was hardcoded before, just now editable afterward directly in the
+parameter_condition_scores table. Re-running this script is safe: it only
+inserts rows that don't already exist for a given condition, so manual
+edits already made are never overwritten.
+
+Usage:
+    python alter_parameter_condition_score.py
+
+===== alter_parameter_threshold_band.py =====
+One-time setup: create the parameter_threshold_bands table (via the
+ParameterThresholdBand model in models.py) and populate it by extracting
+every table-row THRESHOLD rule config already defined in test_templates.py
+(TEST_TEMPLATES) — transformer_oil_test's Acidity/Resistivity/etc bands,
+transformer_dga's per-gas IS/IEC bands, and any other template with a table
+field whose calculated column uses rule.type == "THRESHOLD".
+
+This is an ETL/projection, not a new classification: every bound extracted
+here is exactly what's already in test_templates.py's own thresholds
+config (the same one services/evaluation_service.py's _eval_threshold_table
+already parses at test-submission time) — just flattened into queryable
+rows so breach-proximity forecasting doesn't have to re-parse nested JSON
+per request. The template config stays authoritative; re-run this script
+after editing a template's thresholds to refresh the projection (it
+replaces existing rows for a (template_key, table_field_key,
+parameter_key, context_key, band_label) tuple rather than accumulating
+duplicates, so a corrected bound in the template actually takes effect
+here too).
+
+Usage:
+    python alter_parameter_threshold_band.py
+
+===== alter_pm_execution_stage_role.py =====
+One-time setup: grant the "PM Execution" stage of the PM Workflow (the
+workflow Failure Registry tickets run on) a real role, via a TrWfStageRole
+row.
+
+Without this row, PM Execution has zero role grants — and the workflow
+engine's own rule (services/tr_workflow_routing_service.py's advance_stage:
+"if the next stage has zero active TrWfStageRole rows, treat this
+transition as terminal") means the engine can never actually land on PM
+Execution at all. Approving at "Technical Approval" would fall straight
+through to terminal instead, and because the "Technical Approval -> PM
+Execution" transition itself has no terminal_status_id configured, the
+fallback logic (last TrWfStatus by sequence for the definition) resolves to
+'fr_cancelled' rather than 'pm_completed' — silently mis-closing every
+Failure Registry ticket that reaches that point as cancelled instead of
+completed.
+
+Confirmed live: this org's PM Workflow had exactly this gap before this
+script was first run (0 TrWfStageRole rows on PM Execution), discovered
+while walking FR-KP-2026-0001 through to completion for the Maintenance
+Effectiveness Index report. Every org using this codebase's PM Workflow
+needs this row.
+
+Grants AEE_MAINTENANCE can_edit=True on PM Execution — matching the
+"execution rights = can_edit" convention used everywhere else in this
+workflow engine (e.g. the Standard Test Workflow's L4 Test Execution stage),
+and AEE_MAINTENANCE is the role literally named for doing maintenance work.
+If your org names its maintenance-execution role differently, edit
+EXECUTOR_ROLE_NAME below before running.
+
+Idempotent — checks for an existing (stage, role) row before inserting, so
+re-running (or running after a manual fix) is safe.
+
+Usage:
+    python alter_pm_execution_stage_role.py
+
+===== alter_test_status_condition.py =====
+One-time setup: create the test_status_conditions table (via the
+TestStatusCondition model in models.py) and seed it with the same mapping
+the app already used as a hardcoded constant (_CONDITION in
+services/analytics_engine.py) — the third and last piece of the §12.1
+configurability chain, alongside alter_equipment_health_band_threshold.py
+(score -> band) and alter_parameter_condition_score.py (condition ->
+point value). This one is the middle step: status -> condition_label.
+
+Like-for-like seed, not a new mapping — every value here is exactly what
+was hardcoded before, just now editable afterward directly in the
+test_status_conditions table. Re-running this script is safe: it only
+inserts rows that don't already exist for a given status, so manual edits
+already made are never overwritten.
+
+Usage:
+    python alter_test_status_condition.py
+
+===== alter_tr_wf_stage_auto_close.py =====
+One-time setup: add tr_wf_stages.auto_close_normal_after_hours.
+
+Lets a result-review stage (is_result_stage=True) auto-close once every
+TestResult on the request evaluated NORMAL and this many hours have
+elapsed since the stage opened -- KPTCL spec D.8 "Auto-close NORMAL
+results after review period". Deliberately a separate column from
+default_duration_hours (the SLA-breach-notification duration): an org
+may want a different cadence for "quietly close a clean result" than for
+"escalate an overdue one", and either could reasonably outlive the other
+on the same stage.
+
+Null (the default) = auto-close disabled for that stage -- opt-in, not a
+behavior change for any existing stage. Only meaningful when
+is_result_stage is True; enforced at the API layer
+(routers/tr_workflow_config.py), not in the database, matching how
+"at least one duration required" is already enforced there rather than
+with a DB constraint.
+
+Re-running this script is safe: ADD COLUMN IF NOT EXISTS is a no-op if
+the column already exists.
+
+Usage:
+    python alter_tr_wf_stage_auto_close.py
+
+===== alter_tr_wf_stage_duration_hours.py =====
+One-time setup: add tr_wf_stages.default_duration_hours.
+
+Lets a stage's SLA be configured in hours (e.g. a 2-hour CRITICAL
+result-review turnaround) instead of only whole days. When a stage has
+both default_duration_hours and default_duration_days set, application
+code uses hours and ignores days.
+
+Every existing stage predates SLA support and has both columns NULL, so
+this script only adds the column — it does not backfill a value or add
+a NOT-NULL/CHECK constraint. "At least one of the two required" is
+enforced at the API layer (routers/tr_workflow_config.py), not in the
+database.
+
+Re-running this script is safe: ADD COLUMN IF NOT EXISTS is a no-op if
+the column already exists.
+
+Usage:
+    python alter_tr_wf_stage_duration_hours.py
+
+===== alter_tr_wf_stage_instance_sla_notified.py =====
+One-time setup: add tr_wf_stage_instances.sla_breach_notified_at.
+
+Guards the proactive Result Review SLA breach notification (main.py's
+_check_review_sla_breaches, run every 15 minutes) so each open stage
+instance is alerted on exactly once when it first crosses its configured
+deadline -- not re-fired on every subsequent 15-minute pass while it
+stays open and unactioned.
+
+Re-running this script is safe: ADD COLUMN IF NOT EXISTS is a no-op if
+the column already exists.
+
+Usage:
+    python alter_tr_wf_stage_instance_sla_notified.py
+
+===== migrate_billing_all.py =====
+Billing — Full Migration (v1 + Dept-Level)
+===========================================
+Consolidates billing_v1.sql and migrate_billing_dept.py into one script.
+Safe to run multiple times — all statements use IF NOT EXISTS / ADD COLUMN IF NOT EXISTS.
+
+Execution order:
+  1.  ALTER plans           — add price_paise, billing_cycle, duration_days
+  2.  CREATE billing_orders — Razorpay order table (v1)
+  3.  CREATE billing_scopes — dept billing lookup table
+  4.  CREATE org_plan_pricing
+  5.  CREATE billing_audit_logs
+  6.  ALTER organizations   — billing columns (scope FK, hierarchy, recompute flags, subscription_status)
+  7.  ALTER org_departments — is_billing_unit, subscription_end_date
+  8.  ALTER users           — billing_unit_id
+  9.  ALTER billing_orders  — dept billing columns (department_id, amount_paise, verified_at, …)
+  10. ALTER notification_log — idempotency_key
+  11. Seed plans            — Monthly / Yearly (upsert)
+  12. Seed system_config    — billing reminder/token/dedup settings
+  13. Seed billing_scopes   — org_level / department_level
+  14. Backfill orgs         — set billing_scope_id = org_level where NULL
+
+Run:
+    python migrate_billing_all.py
+
+===== migrate_billing_dept.py =====
+Dept-Level Billing — Phase 1 DB Migration
+==========================================
+Creates new tables and adds new columns needed for department-level billing.
+Safe to run multiple times (all statements use IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
+
+Execution order:
+  1. Create billing_scopes (no deps)
+  2. Create org_plan_pricing (refs billing_scopes, organizations, plans)
+  3. Create billing_audit_logs (refs organizations, users, billing_orders)
+  4. ALTER organizations  — add billing_* columns
+  5. ALTER org_departments — add subscription_end_date, is_billing_unit
+  6. ALTER users           — add billing_unit_id
+  7. ALTER billing_orders  — add dept billing columns
+  8. ALTER notification_log — add idempotency_key
+  9. Seed SystemConfig rows
+ 10. Backfill organizations.billing_scope_id = org_level
+
+===== migrate_condition_recommendations.py =====
+One-time migration: create condition_monitoring_recommendations and
+condition_recommendation_activations tables.
+
+Run once:
+    python migrate_condition_recommendations.py
+
+===== migrate_dept_descriptions.py =====
+Set org_departments.description based on hierarchy level:
+  Level 1 → Zone
+  Level 2 → Circle
+  Level 3 → Division
+  Level 4 with children → Subdivision
+  Level 4 leaf / Level 5 → Substation
+  Level 6+ → Level N
+
+Run once:
+    python migrate_dept_descriptions.py
+
+===== migrate_doc_support.py =====
+DDL migration for Document Support Workflow (Option B+).
+- tr_wf_instances: add entity_type, entity_id; make testing_request_id nullable
+- tr_wf_audit_logs: make testing_request_id nullable
+Idempotent — safe to re-run.
+
+===== migrate_doc_support_priority.py =====
+Add priority and target_date columns to document_requests.
+
+===== migrate_equipment_column_widths.py =====
+Widen equipment columns that were incorrectly defined as VARCHAR(10).
+
+- bay_number:    VARCHAR(10) -> VARCHAR(255)
+- serial_in_bay: VARCHAR(10) -> VARCHAR(255)
+- voltage_class: VARCHAR(10) -> VARCHAR(50)
+
+===== migrate_nextaction_test.py =====
+Migration: Add 'test' value to nextactiontype PostgreSQL enum.
+Run once after adding NextActionType.test to models.py.
+
+    python migrate_nextaction_test.py
+
+===== migrate_org_permissions.py =====
+Migrate organization admin permissions for new organization modules.
+Adds permissions for Organization User Roles and Organization Role Permissions modules
+to all existing organization admin roles.
+
+===== migrate_ueic_add_make_serial.py =====
+migrate_ueic_add_make_serial.py — Regenerate Equipment UEICs to the new format
+that includes Equipment Make and Equipment Serial No.
+
+OLD format:
+  {Zone}-{Substation}-{VoltageClass}-{Bay}-{TypeCode}-{Incremental}
+  e.g.  BN-BBXX-220-100MVA Power TR-1-CT-01
+
+NEW format:
+  {Zone}-{Substation}-{Bay}-{VoltageClass}-{TypeCode}-{Make}-{SerialNo}
+  e.g.  BN-BBXX-Begur-Vidyanagar line-66-CT-KAPE-HT1690/122569   (real serial no.)
+  e.g.  BN-BBXX-Begur-Vidyanagar line-66-CT-KAPE-KAPE2022-1      (fallback, no serial no. in DB)
+
+  - Zone         = 2-char, from department.code at the zone (depth=0) level
+  - Substation   = 4-char, generated fresh from the substation's name (not
+                   trusted from department.code, which may be stale)
+  - Bay          = bay_number, exactly as stored in DB
+  - VoltageClass = voltage_class, exactly as stored in DB (no zfill, no "KV" suffix)
+  - TypeCode     = 2-char equipment type code (TR for Power Transformer, CT,
+                   VT for Potential Transformer, ...)
+  - Make         = up to the first 4 alpha-numeric chars of manufacturer,
+                   uppercase. Not padded — a 3-char make (e.g. "ABB") stays
+                   3 chars; anything longer than 4 chars is truncated to 4.
+  - SerialNo     = factory_serial_number as-is (full string, as per DB);
+                   if missing, falls back to: {Make}{Year of Manufacture}-
+                   {auto-increment counter starting at 1}, e.g. "KAPE2022-1"
+                   (same Make code as the segment before it). If
+                   year_of_manufacture is also missing, the current calendar
+                   year is used instead. The counter is scoped to the (bay,
+                   voltage, type, make) prefix, so equipment sharing that
+                   prefix (e.g. separate phases of the same bay) still get
+                   distinct UEICs.
+
+Assumes OrgDepartment.code is already correct for zones (2-char) only —
+i.e. migrate_ueic_codes.py Phase 1 has already run. Substation codes are
+regenerated fresh from the department name every time this script runs, so
+stale/placeholder values in department.code for substations no longer matter.
+This script only rebuilds the UEIC string itself (Phase 3 equivalent), with
+the new make/serial segments added.
+
+Usage:
+  python migrate_ueic_add_make_serial.py --dry-run    # preview changes only
+  python migrate_ueic_add_make_serial.py              # apply changes
+
+===== migrate_ueic_codes.py =====
+migrate_ueic_codes.py — One-time migration to fix OrgDepartment codes and regenerate
+Equipment UEICs in the new make/serial format.
+
+Phases:
+  1. Update zone (depth=0) codes to proper 2-char unique codes
+  2. Generate proper 4-char substation (depth=3) codes from station names
+     (collision-resolved per zone) — kept on OrgDepartment.code for reference,
+     though Phase 3 always re-derives the substation code fresh from the name
+  3. Regenerate all Equipment UEICs in the NEW format:
+       {Zone}-{Substation}-{Bay}-{VoltageClass}-{TypeCode}-{Make}-{SerialNo}
+     e.g.  BN-BBXX-Begur-Vidyanagar line-66-CT-KAPE-HT1690/122569  (real serial no.)
+     e.g.  BN-BBXX-Begur-Vidyanagar line-66-CT-KAPE-KAPE2022-1     (fallback, no serial no. in DB)
+
+     - Zone         = 2-char, from department.code at the zone (depth=0) level
+                       (set in Phase 1)
+     - Substation    = 4-char, generated fresh from the substation's name
+                       (not trusted from department.code, which may be stale)
+     - Bay           = bay_number, exactly as stored in DB
+     - VoltageClass  = voltage_class, exactly as stored in DB (no zfill, no "KV" suffix)
+     - TypeCode      = 2-char equipment type code (TR for Power Transformer, CT,
+                       PT for Potential Transformer, ...)
+     - Make          = up to the first 4 alpha-numeric chars of manufacturer,
+                       uppercase. Not padded — a 3-char make (e.g. "ABB") stays
+                       3 chars; anything longer than 4 chars is truncated to 4.
+     - SerialNo      = factory_serial_number as-is (full string, as per DB);
+                       if missing, falls back to: {Make}{Year of Manufacture}-
+                       {auto-increment counter starting at 1}, e.g. "KAPE2022-1"
+                       (same Make code as the segment before it). If
+                       year_of_manufacture is also missing, the current calendar
+                       year is used instead. The counter is scoped to the (bay,
+                       voltage, type, make) prefix, so equipment sharing that
+                       prefix (e.g. separate phases of the same bay) still get
+                       distinct UEICs.
+
+Usage:
+  python migrate_ueic_codes.py --dry-run    # preview changes, no DB writes
+  python migrate_ueic_codes.py              # apply changes
+
+===== run_migration.py =====
+Run migration to alter users table for organization multi-tenancy
+
+===== run_migration_002.py =====
+Run migration 002: Testing Request Department Hierarchy
+
+===== run_migration_003.py =====
+Run migration 003: Add organization_id to Testing Tables
+
+===== run_migration_004.py =====
+Migration 004: Add workflow_definition_id to repair_stage_definitions.
+
+Run once:
+    python run_migration_004.py
+
+After this, run the backfill to populate the new column for existing rows:
+    python backfill_workflow_definition_id.py
+
+===== run_migration_007.py =====
+Migration 007: Repair Timeliness & Delay Attribution.
+
+Adds contractual timeline tracking, delay_days computation, and
+delay attribution (vendor vs KPTCL) columns to repair tables.
+
+Run once:
+    python run_migration_007.py
+
+===== run_migration_008.py =====
+Migration 008: Post-Commissioning Surveillance Workflow.
+
+Adds surveillance workflow support for 24-month post-commissioning monitoring.
+Creates 3 new tables (surveillance_config, surveillance_test_config, repair_surveillance_tests)
+and adds linkage columns to existing tables.
+
+Run once:
+    python run_migration_008.py
+
+===== run_migration_008_seed.py =====
+Migration 008 Seed Data: Surveillance Configuration & Test Types.
+
+Populates surveillance_config with system defaults and surveillance_test_config
+with standard test types (DGA, BDV, IR, Oil Quality) for Power Transformer equipment.
+
+Loads surveillance workflow and stage definitions from JSON files following
+the same pattern as REPAIR, CALIBRATION, and OVERHAUL workflows.
+
+References CategoryMaster and CategoryDetails for equipment/test type IDs to
+maintain single source of truth.
+
+Run after migration 008:
+    python run_migration_008_seed.py
+
+===== run_migration_013.py =====
+Migration 013: Add surveillance workflow linkage to test_request_schedules.
+
+Adds surveillance_workflow_id and surveillance_quarter columns to test_request_schedules
+so that schedules can be explicitly linked to surveillance workflows.
+
+Run once:
+    python run_migration_013.py
+
+===== run_migration_044.py =====
+Migration 044: Create dpr_projects table (Detailed Project Report projects).
+
+Run once:
+    python run_migration_044.py
+
+After this, run seed_dpr_workflow.py to seed the DPR_APPROVAL
+RepairWorkflowDefinition / stages / templates the table's workflow_id links to.
+
+===== run_migration_annual_audit.py =====
+(no module docstring)
+
+===== run_migration_calibration.py =====
+(no module docstring)
+
+===== run_migration_cumulative.py =====
+(no module docstring)
