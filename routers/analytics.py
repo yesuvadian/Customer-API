@@ -1458,13 +1458,8 @@ def run_test_analytics(
     if not tr:
         raise HTTPException(status_code=404, detail="Test result not found")
 
-    template_data = EvaluationService.get_template_data(
-        tr.template_key, db, org_id=tr.organization_id
-    )
-    if template_data:
-        fresh_eval = EvaluationService.evaluate_test_data(template_data, tr.test_data or {}, db)
-        tr.evaluation_result = fresh_eval
-        db.flush()
+    EvaluationService.reevaluate_stored(tr, db)
+    db.flush()
 
     engine = AnalyticsEngine(db)
     ta = engine.run_for_test(test_result_id)

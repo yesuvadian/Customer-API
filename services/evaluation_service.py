@@ -77,6 +77,15 @@ from services.analytics_engine import _load_band_rank_words, NORMAL, ALERT, CRIT
 # — see the comment above NORMAL/ALERT/CRITICAL in analytics_engine.py for why.
 _STATUS_RANK = {NORMAL: 0, ALERT: 1, CRITICAL: 2}
 
+# Why an equipment test came out CRITICAL without being assessed — stored as
+# evaluation_result["unassessed_reason"].
+NO_THRESHOLD_VALUES = "no_threshold_values"
+NOT_ASSESSED        = "not_assessed"
+TEMPLATE_NOT_FOUND  = "template_not_found"
+
+_LIMIT_KEYS = ("normal_min", "normal_max", "alert_min", "alert_max",
+               "critical_below", "critical_above")
+
 
 class EvaluationService:
     """Stateless service — all methods are static."""
@@ -85,7 +94,8 @@ class EvaluationService:
 
     @staticmethod
     def evaluate_test_data(template_data: dict, test_data: dict,
-                            db: Optional[Session] = None) -> dict:
+                            db: Optional[Session] = None,
+                            is_equipment_test: Optional[bool] = None) -> dict:
         """
         Walk every field in *template_data* that has evaluation enabled,
         read its value from *test_data*, compare against criteria, and return:
@@ -115,6 +125,9 @@ class EvaluationService:
         """
         field_results: list[dict] = []
         overall_rank = 0  # 0=NORMAL, 1=ALERT, 2=CRITICAL
+        # A result from a field that carries real thresholds — a NORMAL from
+        # a limit-less block (e.g. an all-NORMAL dropdown) assesses nothing.
+        assessed = False
 
         for section in template_data.get("sections", []):
             for field in section.get("fields", []):
@@ -140,11 +153,26 @@ class EvaluationService:
                     if rank > overall_rank:
                         overall_rank = rank
                     field_results.append(result)
+                    if "field" in EvaluationService._field_threshold_sources(field):
+                        assessed = True
 
-        # A test with no threshold values configured anywhere can't be
-        # assessed, so it must not pass silently as NORMAL — flag it CRITICAL.
-        if not EvaluationService.has_threshold_values(template_data):
-            return EvaluationService._no_threshold_result()
+        # An equipment test that can't be assessed must not pass silently as
+        # NORMAL — flag it CRITICAL. Only template_type "test" is held to
+        # this: nameplates, workflow stage forms, audits and registries carry
+        # no thresholds by design.
+        if EvaluationService.requires_thresholds(template_data, is_equipment_test):
+            sources = EvaluationService.threshold_sources(template_data)
+            if not sources:
+                return EvaluationService._unassessed_result(NO_THRESHOLD_VALUES)
+            # Thresholds exist but none were applied: every threshold
+            # parameter was left blank or matched no threshold row.
+            # Template-level rules (calibration validity, cumulative
+            # operations) are scored by the analytics engine, not here, so
+            # a test that has one is never "not assessed". Cross-session
+            # deviations are merged later by merge_cross_session(), which
+            # lifts this when the comparison assessed something.
+            if not assessed and "rule" not in sources:
+                return EvaluationService._unassessed_result(NOT_ASSESSED)
 
         overall_labels = [NORMAL, ALERT, CRITICAL]
         return {
@@ -153,72 +181,209 @@ class EvaluationService:
             "fields": field_results,
         }
 
+    _UNASSESSED = {
+        NO_THRESHOLD_VALUES: (
+            "Threshold configuration",
+            "No threshold values are configured for this test, so the "
+            "results cannot be assessed. Configure thresholds for this "
+            "test template and re-evaluate.",
+        ),
+        NOT_ASSESSED: (
+            "Threshold assessment",
+            "None of the readings could be assessed against the configured "
+            "thresholds: the threshold parameters were left blank or no "
+            "threshold applies to the entered rows. Enter the readings (or "
+            "configure the missing thresholds) and re-evaluate.",
+        ),
+        TEMPLATE_NOT_FOUND: (
+            "Test template",
+            "The test template could not be found, so the results cannot be "
+            "assessed. Restore the test template and re-evaluate.",
+        ),
+    }
+
     @staticmethod
-    def _no_threshold_result() -> dict:
-        return {
+    def _unassessed_result(reason: str) -> dict:
+        label, text = EvaluationService._UNASSESSED[reason]
+        result = {
             "overall": CRITICAL,
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
-            "no_threshold_values": True,
+            "unassessed_reason": reason,
+            "summary": text,
             "fields": [{
-                "key": "_no_threshold_values",
-                "label": "Threshold configuration",
+                "key": f"_{reason}",
+                "label": label,
                 "type": "config",
                 "value": None,
                 "status": CRITICAL,
-                "remedial_action_text": (
-                    "No threshold values are configured for this test, so the "
-                    "results cannot be assessed. Configure thresholds for this "
-                    "test template and re-evaluate."
-                ),
+                "remedial_action_text": text,
             }],
         }
+        if reason == NO_THRESHOLD_VALUES:
+            result["no_threshold_values"] = True
+        return result
+
+    @staticmethod
+    def requires_thresholds(template_data: dict,
+                            is_equipment_test: Optional[bool] = None) -> bool:
+        """True for an equipment test — the only results judged against
+        thresholds. Mirrors RuleEngine.requiresThresholds (rule_engine.dart).
+
+        An explicit non-test template_type (nameplate, stage forms, audits,
+        registries) or category_type (maintenance / inspection, set by the
+        Template Designer) is never held to it. Otherwise the request decides
+        when known (is_equipment_test = request_category is "test"), which
+        covers untyped templates such as the static test_templates.py
+        fallback; without request context the template must be typed "test".
+        """
+        tpl = template_data or {}
+        ttype = tpl.get("template_type")
+        ctype = tpl.get("category_type")
+        if ttype and ttype != "test":
+            return False
+        if ctype and ctype != "test":
+            return False
+        if is_equipment_test is not None:
+            return is_equipment_test
+        return ttype == "test"
+
+    @staticmethod
+    def is_equipment_test_request(request) -> Optional[bool]:
+        """request_category is "test" — None when there is no request."""
+        if request is None:
+            return None
+        cat = getattr(request, "request_category", None)
+        return getattr(cat, "value", cat) == "test"
 
     @staticmethod
     def has_threshold_values(template_data: dict) -> bool:
-        """True when any field in the template carries at least one usable
-        threshold value (number limits, table/column evaluation, THRESHOLD
-        bands, dropdown severities, date or cross-session evaluation)."""
-        _limit_keys = ("normal_min", "normal_max", "alert_min", "alert_max",
-                       "critical_below", "critical_above")
+        return bool(EvaluationService.threshold_sources(template_data))
 
-        def _has_limits(ev: dict) -> bool:
-            return any(_f(ev.get(k)) is not None for k in _limit_keys)
+    @staticmethod
+    def threshold_sources(template_data: dict) -> set[str]:
+        """Where the template's usable threshold values live:
+          "field"         — a field/column evaluation the evaluators below
+                            actually apply (number limits, table column /
+                            aggregate limits, THRESHOLD bands, non-NORMAL
+                            dropdown or column severities, date due rules)
+          "cross_session" — deviation limits against a baseline session
+          "rule"          — template-level rules scored by the analytics
+                            engine (calibration validity, cumulative ops limit)
+        Each check mirrors the evaluator that consumes it, so a block that
+        is switched on but holds no limit doesn't count."""
+        tpl = template_data or {}
+        sources: set[str] = set()
 
-        for section in (template_data or {}).get("sections", []):
+        for rule in tpl.get("rules") or []:
+            rtype = (rule.get("type") or "").upper()
+            cfg = rule.get("config") or {}
+            if rtype == "DATE_ADD" and cfg.get("validity_field"):
+                sources.add("rule")
+            elif rtype == "CUMULATIVE_DIFF" and _f(cfg.get("default_threshold")) is not None:
+                sources.add("rule")
+
+        for section in tpl.get("sections", []):
             for field in section.get("fields", []):
-                ev = field.get("evaluation") or {}
-                if ev.get("enabled") and _has_limits(ev):
-                    return True
+                sources |= EvaluationService._field_threshold_sources(field)
+        return sources
 
-                tev = field.get("table_evaluation") or {}
-                if tev.get("enabled") and (
-                    _f(tev.get("aggregate_threshold")) is not None
-                    or any(_has_limits(c or {})
-                           for c in (tev.get("column_evaluations") or {}).values())
-                ):
-                    return True
+    @staticmethod
+    def _field_threshold_sources(field: dict) -> set[str]:
+        """threshold_sources() for a single field ("field" / "cross_session")."""
+        sources: set[str] = set()
+        ftype = field.get("type", "text")
 
-                for col in field.get("columns", []):
-                    if col.get("column_evaluation"):
-                        return True
-                    rule = col.get("rule") or {}
-                    if (col.get("type") == "calculated"
-                            and rule.get("type") == "THRESHOLD"
-                            and (rule.get("config") or {}).get("thresholds")):
-                        return True
+        if ftype == "number":
+            ev = field.get("evaluation") or {}
+            if ev.get("enabled") and _has_limits(ev):
+                sources.add("field")
 
-                dev = field.get("dropdown_evaluation") or {}
-                if dev.get("enabled") and dev.get("value_severities"):
-                    return True
+        elif ftype == "table":
+            tev = field.get("table_evaluation") or {}
+            if tev.get("enabled") and (
+                (tev.get("aggregate_type") and tev.get("aggregate_column")
+                 and _f(tev.get("aggregate_threshold")) is not None)
+                or any(_has_limits(c or {})
+                       for c in (tev.get("column_evaluations") or {}).values())
+            ):
+                sources.add("field")
+            for col in field.get("columns", []):
+                if (col.get("type") in ("dropdown", "radio", "calculated")
+                        and _has_severity(col.get("column_evaluation"))):
+                    sources.add("field")
+                rule = col.get("rule") or {}
+                cfg = rule.get("config") or {}
+                if (col.get("type") == "calculated"
+                        and rule.get("type") == "THRESHOLD"
+                        and cfg.get("input_field") and cfg.get("thresholds")):
+                    sources.add("field")
 
-                dtev = field.get("date_evaluation") or {}
-                if dtev.get("enabled"):
-                    return True
+        elif ftype in ("dropdown", "radio", "readonly"):
+            dev = field.get("dropdown_evaluation") or {}
+            if dev.get("enabled") and _has_severity(dev.get("value_severities")):
+                sources.add("field")
 
-                csev = field.get("cross_session_evaluation") or {}
-                if csev.get("enabled"):
-                    return True
-        return False
+        elif ftype == "date":
+            # Always assesses once enabled: a past date is ALERT even
+            # with no day counts set (see _eval_date_field).
+            if (field.get("date_evaluation") or {}).get("enabled"):
+                sources.add("field")
+
+        csev = field.get("cross_session_evaluation") or {}
+        if csev.get("enabled") and (
+            (ftype == "number" and _has_limits(csev))
+            or (ftype == "table" and any(
+                _has_limits(c or {})
+                for c in (csev.get("column_comparisons") or {}).values()))
+        ):
+            sources.add("cross_session")
+        return sources
+
+    @staticmethod
+    def merge_cross_session(ev: dict, cross_ev: dict) -> dict:
+        """Fold a cross-session comparison into a per-session evaluation.
+        A "not assessed" result is replaced outright when the comparison
+        assessed something — the baseline deviations are the assessment."""
+        if not cross_ev.get("fields"):
+            return ev
+        if ev.get("unassessed_reason") == NOT_ASSESSED:
+            for k in ("unassessed_reason", "summary"):
+                ev.pop(k, None)
+            ev["fields"] = []
+            ev["overall"] = NORMAL
+        ev["fields"].extend(cross_ev["fields"])
+        ev["cross_session_comparison"] = cross_ev
+        if _STATUS_RANK.get(cross_ev["overall"], 0) > _STATUS_RANK.get(ev["overall"], 0):
+            ev["overall"] = cross_ev["overall"]
+        return ev
+
+    @staticmethod
+    def reevaluate_stored(result, db: Session) -> dict:
+        """Re-evaluate a saved TestResult the same way submission does and
+        store it. Keeps what only the submit path adds (cross-session
+        comparison, cumulative lifecycle), and escalates overall_result to
+        "fail" on CRITICAL so the two never disagree. Historical
+        re-evaluation raises no CARs or notifications."""
+        old = result.evaluation_result or {}
+        ev = EvaluationService.run(
+            result.template_key, result.test_data or {}, db,
+            org_id=result.organization_id,
+            is_equipment_test=EvaluationService.is_equipment_test_request(
+                getattr(result, "testing_request", None)),
+        )
+        cs = old.get("cross_session_comparison")
+        if isinstance(cs, dict):
+            EvaluationService.merge_cross_session(ev, cs)
+        if old.get("cumulative_lifecycle") is not None:
+            ev["cumulative_lifecycle"] = old["cumulative_lifecycle"]
+        if ev["overall"] == ALERT:
+            revised = EvaluationService.get_min_revised_interval(ev)
+            if revised is not None:
+                ev["revised_interval_days"] = revised
+        if ev["overall"] == CRITICAL:
+            result.overall_result = "fail"
+        result.evaluation_result = ev
+        return ev
 
     # ─── Field-type specific evaluators ──────────────────────────────────────
 
@@ -1215,12 +1380,14 @@ class EvaluationService:
         return current - baseline
 
     @staticmethod
-    def run(template_key: str, test_data: dict, db: Session, org_id=None) -> dict:
+    def run(template_key: str, test_data: dict, db: Session, org_id=None,
+            is_equipment_test: Optional[bool] = None) -> dict:
         """Convenience: resolve template then evaluate."""
         tpl = EvaluationService.get_template_data(template_key, db, org_id=org_id)
         if not tpl:
-            return EvaluationService._no_threshold_result()
-        return EvaluationService.evaluate_test_data(tpl, test_data, db)
+            return EvaluationService._unassessed_result(TEMPLATE_NOT_FOUND)
+        return EvaluationService.evaluate_test_data(
+            tpl, test_data, db, is_equipment_test=is_equipment_test)
 
 
 # ─── Utility ──────────────────────────────────────────────────────────────────
@@ -1233,6 +1400,18 @@ def _f(v) -> Optional[float]:
         return float(v)
     except (ValueError, TypeError):
         return None
+
+
+def _has_limits(ev: dict) -> bool:
+    """True when a number-style evaluation block holds at least one limit."""
+    return any(_f(ev.get(k)) is not None for k in _LIMIT_KEYS)
+
+
+def _has_severity(severities) -> bool:
+    """True when a value→severity map can flag something (any non-NORMAL)."""
+    return isinstance(severities, dict) and any(
+        str(v).upper() in (ALERT, CRITICAL) for v in severities.values()
+    )
 
 
 _EPS = 1e-9

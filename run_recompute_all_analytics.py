@@ -44,21 +44,13 @@ def run_recompute_all():
         ]
 
         engine = AnalyticsEngine(db)
-        template_cache: dict = {}
         done, failed = 0, 0
         for tr in results:
             try:
-                cache_key = (tr.template_key, tr.organization_id)
-                if cache_key not in template_cache:
-                    template_cache[cache_key] = EvaluationService.get_template_data(
-                        tr.template_key, db, org_id=tr.organization_id
-                    )
-                template_data = template_cache[cache_key]
-                if template_data:
-                    tr.evaluation_result = EvaluationService.evaluate_test_data(
-                        template_data, tr.test_data or {}, db
-                    )
-                    db.flush()
+                # Same evaluation as submission; a CRITICAL result also
+                # becomes overall_result "fail" (no CAR / notification).
+                EvaluationService.reevaluate_stored(tr, db)
+                db.flush()
 
                 engine.run_for_test(tr.id)
                 done += 1

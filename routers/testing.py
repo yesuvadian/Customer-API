@@ -1235,6 +1235,9 @@ def preview_test_result(
         eval_data = result.evaluation_result
         overall_eval = eval_data.get("overall", "")
         alerts = eval_data.get("alerts", [])
+        # A test that couldn't be assessed shows why it is CRITICAL
+        if not alerts and eval_data.get("unassessed_reason"):
+            alerts = [{"level": "CRITICAL", "message": eval_data.get("summary", "")}]
 
         if overall_eval or alerts:
             fields_html += '<div class="section"><h3>Evaluation Results</h3>'

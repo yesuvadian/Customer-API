@@ -643,6 +643,9 @@ class TestingRequestPDFService:
                                 val_str = " | ".join(parts)
                             else:
                                 val_str = "—"
+                    elif f.get("type") == "config":
+                        # "Not assessed" finding — the reason stands in for a reading
+                        val_str = f.get("remedial_action_text") or "—"
                     else:
                         raw = f.get("value")
                         unit = (f.get("unit") or "").strip()

@@ -870,12 +870,16 @@ class HealthScorer:
                         reason = f"Value {value}{u} exceeds the critical limit of {breach_limit}{u}"
                     elif value is not None:
                         reason = f"Value {value} {unit or ''} triggered {status} evaluation".strip()
+                    elif not field and ef.get("remedial_action_text"):
+                        # Synthetic "not assessed" finding (no template field
+                        # behind it) — its text is the reason.
+                        reason = ef["remedial_action_text"]
                     else:
                         reason = f"Evaluated as {status} based on test result"
 
                     critical_findings.append({
                         "key":           fkey,
-                        "label":         field.get("label", fkey),
+                        "label":         field.get("label") or ef.get("label") or fkey,
                         "condition":     condition,
                         "status":        status,
                         "unit":          unit,

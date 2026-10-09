@@ -366,7 +366,10 @@ def get_ae_dashboard(
         flagged = []
         for field in result.evaluation_result.get('fields', []):
             if field.get('status') in ['CRITICAL', 'ALERT']:
-                flagged.append(f"{field.get('label','')}: {field.get('value','')}{field.get('unit','')}")
+                if field.get('value') is None:
+                    flagged.append(field.get('label', ''))
+                else:
+                    flagged.append(f"{field.get('label','')}: {field.get('value')}{field.get('unit') or ''}")
         alerts_feed_ae.append({
             'id': str(result.id),
             'title': f"{overall} â€” {req.test_type.name if req.test_type else 'Test'} Â· {eq.ueic if eq else ''}",

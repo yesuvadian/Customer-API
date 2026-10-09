@@ -631,9 +631,9 @@ class DashboardService:
             for f in (ev.get("fields") or []):
                 if f.get("status") in ("CRITICAL", "ALERT"):
                     lbl = f.get("label") or f.get("key", "")
-                    val = f.get("value", "")
-                    unit = f.get("unit", "")
-                    field_parts.append(f"{lbl}: {val}{unit}")
+                    val = f.get("value")
+                    unit = f.get("unit") or ""
+                    field_parts.append(lbl if val is None else f"{lbl}: {val}{unit}")
 
             remedial = next(
                 (f["remedial_action_text"]
