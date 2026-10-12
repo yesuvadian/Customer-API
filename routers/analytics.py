@@ -325,82 +325,16 @@ def _eq_capacity_map(eq_ids: list, db: Session) -> dict:
     return best
 
 
-# Cumulative operations-counter templates (enable_cumulative=True on the
-# backend) - these track a running counter (tap-change count, breaker
-# operations count) rather than a one-off lab measurement, and have their own
-# workflow elsewhere in the app. They always have test_category == NULL, same
-# as genuine lab tests, so they can't be excluded by test_category alone.
-# Mirrors the Flutter AI Analytics modal's _nonLabTemplateKeys.
-_NON_LAB_TEMPLATE_KEYS = {"oltc_operations", "circuit_breaker_operations"}
+# Group values the AI Analytics app shows as one "Not Specified" row - keep
+# in sync with AnalyticsDashboardProvider._isUnknownGroupValue.
+_PLACEHOLDER_GROUP_VALUES = (
+    "", "null", "unknown", "n/a", "na", "-", "--",
+    "not specified", "not available", "unspecified",
+)
 
 
-def _lab_only_scores(eq_ids: list, db: Session) -> dict:
-    """
-    Recompute a lab-tests-only health_score/risk_level/critical_findings per
-    equipment, for the AI Analytics equipment list - matching the same
-    exclusion the AI Analytics modal's chip row applies (TA&QC/Failure
-    Registry direct submissions, identified by a non-null test_category, and
-    cumulative-counter templates in _NON_LAB_TEMPLATE_KEYS). Returns
-    {equipment_id: (score, risk_level, critical_findings)}; equipment whose
-    only tests are excluded types get (None, "Unknown", []) - same as
-    genuinely untested equipment, since AI Analytics has nothing lab-based to
-    show for them.
-    """
-    if not eq_ids:
-        return {}
-
-    rows = (
-        db.query(TestAnalytics)
-        .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
-        .filter(TestAnalytics.equipment_id.in_(eq_ids),
-                # Same accepted-results rule as EquipmentAnalytics - see
-                # services.analytics_engine.accepted_test_result_ids.
-                TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
-        .order_by(
-            TestAnalytics.equipment_id,
-            TestAnalytics.template_key,
-            func.coalesce(TestResult.tested_at, TestResult.cts).desc(),
-            TestAnalytics.calculated_at.desc(),
-            # Final deterministic tiebreak - same reasoning as
-            # get_equipment_test_types()'s identical tiebreak.
-            TestAnalytics.id.desc(),
-        )
-        .all()
-    )
-
-    result_ids = [r.test_result_id for r in rows]
-    tr_map = {
-        r.id: r
-        for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
-    } if result_ids else {}
-
-    # Dedupe to the latest row per (equipment_id, template_key)
-    seen: set = set()
-    latest: list[TestAnalytics] = []
-    for row in rows:
-        key = (row.equipment_id, row.template_key)
-        if key not in seen:
-            seen.add(key)
-            latest.append(row)
-
-    by_equipment: dict = {}
-    for row in latest:
-        by_equipment.setdefault(row.equipment_id, []).append(row)
-
-    out: dict = {}
-    for eq_id, eq_rows in by_equipment.items():
-        lab_rows = [
-            r for r in eq_rows
-            if r.template_key not in _NON_LAB_TEMPLATE_KEYS
-            and (tr_map.get(r.test_result_id) is None
-                 or tr_map[r.test_result_id].test_category is None)
-        ]
-        scores = [float(r.health_score) for r in lab_rows if r.health_score is not None]
-        score = round(mean(scores), 2) if scores else None
-        findings = [f for r in lab_rows for f in (r.critical_findings or [])]
-        risk = _risk_from_score(score, findings, db)
-        out[eq_id] = (score, risk, findings)
-    return out
+def _is_placeholder_group(value) -> bool:
+    return value is None or str(value).strip().lower() in _PLACEHOLDER_GROUP_VALUES
 
 
 def _build_dept_rollup(equipment_list: list, scope_dept_id, db, org_id=None) -> dict:
@@ -514,26 +448,20 @@ def get_asset_breakdown(
         for c in db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
     } if type_ids else {}
 
-    # Fetch analytics for health distribution per group
+    # Fetch analytics for health distribution per group. Retired equipment
+    # too, for the Year-of-failure health split.
     eq_ids_all = [e.id for e in all_eq]
+    _ea_ids = eq_ids_all + [e.id for e in retired_eq]
     ea_rows = db.query(EquipmentAnalytics).filter(
-        EquipmentAnalytics.equipment_id.in_(eq_ids_all)
-    ).all() if eq_ids_all else []
+        EquipmentAnalytics.equipment_id.in_(_ea_ids)
+    ).all() if _ea_ids else []
+    # All-time health/risk = the equipment's overall EquipmentAnalytics row
+    # (every test type, OLTC/TA&QC/counters included) - the same source the
+    # /dashboard KPI tiles, department cards and Risk Equipment list count,
+    # so a group's Critical/High/Medium/Low columns add up to the tiles.
+    # (Was a lab-tests-only recompute, which made e.g. the table show 24
+    # Critical against the tile's 26.)
     ea_map = {r.equipment_id: r for r in ea_rows}
-
-    # This endpoint is AI Analytics-specific (the only caller is the AI
-    # Analytics Dashboard) - the all-time health/risk fallback below must
-    # exclude the same TA&QC/Failure Registry/cumulative-counter test types
-    # the equipment list and the modal do, or this endpoint's group rollups
-    # (e.g. a "Power Transformer" row's Critical/Healthy counts) disagree
-    # with the individual equipment rows shown underneath it.
-    # Retired equipment too, for the Year-of-failure health split (it was
-    # always all "untested" because these had no lab score).
-    lab_map = _lab_only_scores(eq_ids_all + [e.id for e in retired_eq], db)
-    lab_ea_map = {
-        eq_id: SimpleNamespace(health_score=score, risk_level=risk)
-        for eq_id, (score, risk, _findings) in lab_map.items()
-    }
 
     def _empty_health() -> dict:
         return {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0,
@@ -547,7 +475,7 @@ def get_asset_breakdown(
         analytics row yet (never assessed) always lands in "untested"
         regardless. `source` supplies risk_level/health_score — a date-scoped
         TestAnalytics snapshot when a range is active; falls back to the
-        all-time lab_ea_map lookup (lab-tests-only score/risk) when omitted.
+        all-time EquipmentAnalytics row (ea_map) when omitted.
 
         Four real bands (Critical/High/Medium/Low), not the previous
         Critical/High/"everything else called Healthy" — that collapsed
@@ -556,7 +484,7 @@ def get_asset_breakdown(
         for the same equipment (confirmed live: 220kV BIAL Begur showed
         "4 Healthy" here while the matrix correctly showed 2 Medium + 2 Low).
         """
-        src = source if source is not None else lab_ea_map.get(eq_id)
+        src = source if source is not None else ea_map.get(eq_id)
         if tested and src:
             rl = (src.risk_level or "").strip()
             if rl == "Critical":
@@ -643,13 +571,9 @@ def get_asset_breakdown(
             .filter(
                 TestAnalytics.equipment_id.in_(test_count_id_set),
                 TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
-                # This endpoint is AI Analytics-specific - exclude the same
-                # TA&QC/Failure Registry/cumulative-counter test types the
-                # equipment list (/dashboard/equipment) and the modal do, so
-                # a date-scoped snapshot here can't pick an excluded test as
-                # "the" latest test and disagree with everywhere else.
-                TestAnalytics.template_key.notin_(_NON_LAB_TEMPLATE_KEYS),
-                TestResult.test_category.is_(None),
+                # Every test type, same as /dashboard's dated_ta_map that the
+                # KPI tiles count, so the tiles and this table pick the same
+                # latest in-range test per equipment.
             )
         )
         if date_from:
@@ -699,8 +623,10 @@ def get_asset_breakdown(
         # _eff_health treats a scoreless snapshot as "not assessed" (excluded
         # from its count), so this must too or the two dashboards' counts
         # drift apart again on that edge case.
-        src = dated_ta_map.get(eq.id) if _date_filter_active else lab_ea_map.get(eq.id)
-        if _date_filter_active and src is not None and src.health_score is None:
+        src = dated_ta_map.get(eq.id) if _date_filter_active else ea_map.get(eq.id)
+        # In range, the tiles only count equipment with a completed request
+        # in range (active_eq_ids) and a scored in-range snapshot - same here.
+        if _date_filter_active and src is not None and (src.health_score is None or tc == 0):
             src = None
         tested   = (not _date_filter_active) or src is not None
         tested_n = (1 if tc > 0 else 0) if not _date_filter_active else (1 if src is not None else 0)
@@ -772,9 +698,9 @@ def get_asset_breakdown(
         tc = eq_test_counts.get(str(eq.id), 0)
         by_failure_year_tests[yr] = by_failure_year_tests.get(yr, 0) + (1 if tc > 0 else 0)
         by_failure_year_test_events[yr] = by_failure_year_test_events.get(yr, 0) + tc
-        # Same source rule as active equipment above: the in-range lab test
-        # when a date range is set, else the all-time lab score.
-        rsrc = dated_ta_map.get(eq.id) if _date_filter_active else lab_ea_map.get(eq.id)
+        # Same source rule as active equipment above: the in-range test
+        # when a date range is set, else the all-time EquipmentAnalytics row.
+        rsrc = dated_ta_map.get(eq.id) if _date_filter_active else ea_map.get(eq.id)
         if _date_filter_active and rsrc is not None and rsrc.health_score is None:
             rsrc = None
         _add_health(by_failure_year_h[yr], eq.id,
@@ -1780,21 +1706,20 @@ def get_dashboard_equipment(
     if search:
         _esc = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         eq_q = eq_q.filter(Equipment.ueic.ilike(f"%{_esc}%", escape="\\"))
+    # The AI Analytics app merges blank and placeholder values ("N/A", "-",
+    # "null", ...) into one "Not Specified" row and drills it with the
+    # "unknown" sentinel, so that sentinel matches every placeholder here;
+    # a real value is compared trimmed, as /asset-breakdown groups it.
+    def _col_filter(col, value: str):
+        if value.lower() == "unknown":
+            return col.is_(None) | func.lower(func.trim(col)).in_(_PLACEHOLDER_GROUP_VALUES)
+        return func.trim(col) == value.strip()
     if voltage_class:
-        if voltage_class.lower() == "unknown":
-            eq_q = eq_q.filter((Equipment.voltage_class == None) | (Equipment.voltage_class == ""))
-        else:
-            eq_q = eq_q.filter(Equipment.voltage_class == voltage_class)
+        eq_q = eq_q.filter(_col_filter(Equipment.voltage_class, voltage_class))
     if manufacturer:
-        if manufacturer.lower() == "unknown":
-            eq_q = eq_q.filter((Equipment.manufacturer == None) | (Equipment.manufacturer == ""))
-        else:
-            eq_q = eq_q.filter(Equipment.manufacturer == manufacturer)
+        eq_q = eq_q.filter(_col_filter(Equipment.manufacturer, manufacturer))
     if model_number:
-        if model_number.lower() == "unknown":
-            eq_q = eq_q.filter((Equipment.model_number == None) | (Equipment.model_number == ""))
-        else:
-            eq_q = eq_q.filter(Equipment.model_number == model_number)
+        eq_q = eq_q.filter(_col_filter(Equipment.model_number, model_number))
     if commission_year:
         from sqlalchemy import extract
         eq_q = eq_q.filter(extract("year", Equipment.commissioned_date) == commission_year)
@@ -1835,13 +1760,19 @@ def get_dashboard_equipment(
             mk = (e.manufacturer or "").strip() or "Unknown"
             mdl = (e.model_number or "").strip()
             return f"{mk} {mdl}".strip() if mdl else mk
-        all_eq = [e for e in all_eq if _make_model_key(e) == make_model]
+        if make_model.lower() == "unknown":
+            all_eq = [e for e in all_eq if _is_placeholder_group(_make_model_key(e))]
+        else:
+            all_eq = [e for e in all_eq if _make_model_key(e) == make_model.strip()]
 
     # capacity bucket is derived from the latest nameplate/test data, same
     # helper /asset-breakdown's by_capacity_mva uses.
     if capacity_mva:
         _cap = _eq_capacity_map([e.id for e in all_eq], db)
-        all_eq = [e for e in all_eq if _capacity_bucket(_cap.get(e.id)) == capacity_mva]
+        if capacity_mva.lower() == "unknown":
+            all_eq = [e for e in all_eq if _is_placeholder_group(_capacity_bucket(_cap.get(e.id)))]
+        else:
+            all_eq = [e for e in all_eq if _capacity_bucket(_cap.get(e.id)) == capacity_mva]
 
     # Apply equipment_type filter after type_map is built (done below)
     _filter_equipment_type = equipment_type
@@ -1854,33 +1785,27 @@ def get_dashboard_equipment(
     ).all()
     ea_map = {r.equipment_id: r for r in ea_rows}
 
-    # This endpoint is AI Analytics-specific (the only caller is the AI
-    # Analytics Dashboard), so its health_score/risk_level/critical_findings
-    # must exclude TA&QC/Failure Registry/cumulative-counter test types the
-    # same way the AI Analytics equipment-detail modal's chip row does -
-    # otherwise this list disagrees with the modal for any equipment that
-    # also has one of those test types (e.g. OLTC dragging the equipment's
-    # overall EquipmentAnalytics score/risk down while the modal, which never
-    # shows OLTC, reports a healthier one). lab_map is keyed by equipment_id
-    # -> (score, risk_level, critical_findings); an equipment whose only
-    # tests are excluded types gets (None, "Unknown", []) here, same as a
-    # genuinely untested one.
-    _dated_lab = bool((date_from or date_to) and not risk_level and eq_ids)
-    lab_map = {} if _dated_lab else _lab_only_scores(eq_ids, db)
+    # Row health_score/risk_level/critical_findings come from the same
+    # source the KPI tiles and /asset-breakdown's group columns count: the
+    # all-time EquipmentAnalytics row (every test type), or with a date range
+    # the latest scored in-range TestAnalytics of any type. score_map is
+    # keyed by equipment_id -> (score, risk_level, critical_findings).
+    # (Was a lab-tests-only recompute, so a group's drill rows disagreed with
+    # the tiles for OLTC/TA&QC/counter-driven risk.)
+    _dated_rows = bool((date_from or date_to) and not risk_level and eq_ids)
+    score_map = {
+        eid: (float(ea.health_score) if ea.health_score is not None else None,
+              ea.risk_level or "Unknown", ea.critical_findings or [])
+        for eid, ea in ea_map.items()
+    }
 
-    # With a date range (and no risk filter) the summary table classifies a
-    # group's equipment by its latest in-range LAB test (/asset-breakdown's
-    # dated_ta_map) - the drill-down rows must show that same snapshot, not
-    # the all-time lab score, or a row's badge contradicts its group's count.
-    if _dated_lab:
+    if _dated_rows:
         _c = func.coalesce(TestResult.tested_at, TestResult.cts)
         _lq = (
             db.query(TestAnalytics, _c.label("eff_date"))
             .join(TestResult, TestResult.id == TestAnalytics.test_result_id)
             .filter(TestAnalytics.equipment_id.in_(eq_ids),
-                    TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)),
-                    TestAnalytics.template_key.notin_(_NON_LAB_TEMPLATE_KEYS),
-                    TestResult.test_category.is_(None))
+                    TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         )
         if date_from:
             _lq = _lq.filter(_c >= datetime.combine(date_from, datetime.min.time()))
@@ -1893,21 +1818,20 @@ def get_dashboard_equipment(
             cur = _lb.get(ta.equipment_id)
             if cur is None or eff > cur[1]:
                 _lb[ta.equipment_id] = (ta, eff)
-        lab_map = {
+        score_map = {
             eid: (float(ta.health_score), ta.risk_level or "Unknown", ta.critical_findings or [])
             for eid, (ta, _e) in _lb.items() if ta.health_score is not None
         }
 
     # Exclude untested equipment when caller requests it (AI Analytics)
     if tested_only:
-        all_eq = [e for e in all_eq if lab_map.get(e.id, (None,))[0] is not None]
+        all_eq = [e for e in all_eq if score_map.get(e.id, (None,))[0] is not None]
 
     # Apply risk_level filter using the same all-test-types risk_level the
-    # KPI tile counts (EquipmentAnalytics.risk_level via ea_map), not the
-    # lab-only recompute above. The KPI tile's Critical/High/Medium/Low
-    # counts include OLTC/circuit-breaker counter breaches and TA&QC/Failure
-    # Registry submissions; filtering here by the lab-only definition instead
-    # silently dropped equipment that's Critical only because of one of
+    # KPI tile counts (EquipmentAnalytics.risk_level via ea_map). The KPI
+    # tile's Critical/High/Medium/Low counts include OLTC/circuit-breaker
+    # counter breaches and TA&QC/Failure Registry submissions; filtering by
+    # a lab-only definition instead silently dropped equipment that's Critical only because of one of
     # those (e.g. "16 Critical" on the tile but only 3 rows in this list).
     # With a date range the KPI tile classifies each equipment by its latest
     # accepted TestAnalytics *in range* (see /dashboard's dated_ta_map), so
@@ -1956,7 +1880,7 @@ def get_dashboard_equipment(
     if _filter_equipment_type:
         _ft = _filter_equipment_type.lower()
         if _ft == "unknown":
-            all_eq = [e for e in all_eq if not type_map.get(e.equipment_type_id)]
+            all_eq = [e for e in all_eq if _is_placeholder_group(type_map.get(e.equipment_type_id))]
         else:
             all_eq = [e for e in all_eq if (type_map.get(e.equipment_type_id) or "").strip().lower() == _ft.strip()]
         eq_ids = [e.id for e in all_eq]
@@ -2002,12 +1926,10 @@ def get_dashboard_equipment(
 
     _risk_order = _severity_rank_map(db)
 
-    # When filtering by risk_level, sort/display by the same all-test-types
-    # ea_map values used for that filter above (see comment there) so a row
-    # that's in the "Critical" list actually shows a Critical badge, instead
-    # of the lab-only figures which can disagree for OLTC/circuit-breaker/
-    # TA&QC-only-critical equipment. Unfiltered listing keeps the lab-only
-    # figures, which match the equipment-detail modal's chip row.
+    # When filtering by risk_level, sort/display by the same values used for
+    # that filter above, so a row in the "Critical" list shows a Critical
+    # badge. Unfiltered listing uses score_map - the same all-test-types
+    # source, date-scoped when a range is set.
     def _eff_score_risk_findings(eq_id):
         if risk_level and eq_id in dated_risk_map:
             ta = dated_risk_map[eq_id]
@@ -2018,7 +1940,7 @@ def get_dashboard_equipment(
             if ea:
                 return ea.health_score, ea.risk_level, (ea.critical_findings or [])
             return None, "Unknown", []
-        return lab_map.get(eq_id, (None, "Unknown", []))
+        return score_map.get(eq_id, (None, "Unknown", []))
 
     def _sort_key(eq: Equipment):
         score, risk, _f = _eff_score_risk_findings(eq.id)
@@ -2042,9 +1964,8 @@ def get_dashboard_equipment(
         ea = ea_map.get(eq.id)
         eff_score, eff_risk, eff_findings = _eff_score_risk_findings(eq.id)
         # Build plain-English reason from the same findings shown in
-        # health_score/risk_level above (lab-only when unfiltered, the
-        # all-test-types ea findings when filtering by risk_level - see
-        # _eff_score_risk_findings), so the reason text can't cite a source
+        # health_score/risk_level above (see _eff_score_risk_findings), so
+        # the reason text can't cite a source
         # that no longer counts toward the score/risk shown for this row.
         reason = None
         if eff_findings:
