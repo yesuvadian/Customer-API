@@ -240,10 +240,14 @@ def _age_years(commissioned: datetime | None) -> float | None:
 def _life_left(
     commissioned: datetime | None, type_name: str | None, db: Session | None = None,
 ) -> float | None:
+    """Expected life minus age. Negative = years past expected life
+    (overdue) - it used to be clamped to 0, so an asset 7 years overdue
+    read the same "0.0 yr" as one exactly at end of life, and the fleet
+    average was inflated by counting every overdue asset as 0."""
     age = _age_years(commissioned)
     if age is None:
         return None
-    return max(0.0, _expected_life(type_name, db) - age)
+    return _expected_life(type_name, db) - age
 
 
 # ── Ageing index ──────────────────────────────────────────────────────────────
@@ -423,6 +427,8 @@ def _trend_bucket(dt: datetime, span_days: int | None) -> tuple:
 
 
 def _life_bucket(years: float) -> str:
+    # Past expected life: its own bucket, not lumped in with 0–5 yrs left.
+    if years < 0:   return "Overdue"
     if years < 5:   return "0–5 yrs"
     if years < 10:  return "5–10 yrs"
     if years < 15:  return "10–15 yrs"
@@ -537,7 +543,8 @@ def get_overview(
     Returns:
       kpis:
         fleet_health        — avg health score 0-100
-        avg_life_left       — avg remaining years
+        avg_life_left       — avg remaining years (negative = past expected life)
+        overdue_count       — assets past expected life
         ageing_risk_index   — 0-100 (higher = more risk) derived from trend rates
         dielectric_index    — avg health score of dielectric-category tests
 
@@ -608,7 +615,12 @@ def get_overview(
         ll = _life_left(eq.commissioned_date, type_map.get(eq.equipment_type_id), db)
         if ll is not None:
             life_vals.append(ll)
+    # Overdue assets count with their negative life left (same values as
+    # /life-left's table), not as 0.
     avg_life_left = round(mean(life_vals), 1) if life_vals else None
+    # Rounded like /life-left's life_left_years, so an asset the table
+    # shows as "0.0 yr" isn't counted overdue here.
+    overdue_count = sum(1 for v in life_vals if round(v, 1) < 0)
 
     # ── KPI 3: Ageing Risk Index ─────────────────────────────────────────────
     # Derived from ParameterAnalytics: mean absolute pct_change_annual across
@@ -665,7 +677,7 @@ def get_overview(
     dielectric_index = round(mean(diel_scores), 1) if diel_scores else None
 
     # ── Health distribution: condition × life-left bucket ────────────────────
-    BUCKETS = ["0–5 yrs", "5–10 yrs", "10–15 yrs", "15–20 yrs", "20–25 yrs", "25+ yrs", "Unknown"]
+    BUCKETS = ["Overdue", "0–5 yrs", "5–10 yrs", "10–15 yrs", "15–20 yrs", "20–25 yrs", "25+ yrs", "Unknown"]
     CONDITIONS = ["critical", "poor", "fair", "good", "excellent"]
     dist: dict[str, dict] = {b: {c: 0 for c in CONDITIONS} | {"unknown": 0, "total": 0} for b in BUCKETS}
 
@@ -676,7 +688,7 @@ def get_overview(
                         type_map.get(eq.equipment_type_id) if eq else None, db)
         # No commissioned date = life unknown, not "25+ yrs" (which read as
         # the healthiest bucket).
-        bucket = _life_bucket(ll) if ll is not None else "Unknown"
+        bucket = _life_bucket(round(ll, 1)) if ll is not None else "Unknown"
         cond = _condition_from_score_and_risk(
             _eff_health(ea.equipment_id, ea), _eff_risk(ea.equipment_id, ea), db
         )
@@ -741,6 +753,7 @@ def get_overview(
         "kpis": {
             "fleet_health":       fleet_health,
             "avg_life_left":      avg_life_left,
+            "overdue_count":      overdue_count,
             "ageing_risk_index":  ageing_risk_index,
             "dielectric_index":   dielectric_index,
             "equipment_count":    len(eq_ids),
@@ -856,7 +869,8 @@ def get_life_left(
         if comm.tzinfo is None:
             comm = comm.replace(tzinfo=timezone.utc)
         age_at = (tested_at - comm).days / 365.25
-        ll_at = max(0.0, _expected_life(tname, db) - age_at)
+        # Unclamped like _life_left: overdue at test time is negative.
+        ll_at = _expected_life(tname, db) - age_at
         sort_key, q_key = _trend_bucket(tested_at, span_days)
         bucket_sort_key[q_key] = sort_key
         quarter_life.setdefault(q_key, []).append(ll_at)
@@ -962,8 +976,10 @@ def get_ageing(
     for eq in eq_list:
         ll = _life_left(eq.commissioned_date, type_map.get(eq.equipment_type_id), db)
         exp = _expected_life(type_map.get(eq.equipment_type_id), db)
-        if ll is not None:
-            life_vals.append(max(0.0, 100.0 * (1 - ll / exp)))
+        # Share of expected life used, 0-100: past expected life (ll < 0)
+        # is 100, not >100 - the cap _life_left's old 0-clamp used to imply.
+        if ll is not None and exp:
+            life_vals.append(min(100.0, max(0.0, 100.0 * (1 - ll / exp))))
     life_left_risk = round(mean(life_vals), 1) if life_vals else None
 
     # Thermal stress: avg condition risk score for thermal params
