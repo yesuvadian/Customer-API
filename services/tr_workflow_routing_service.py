@@ -340,6 +340,43 @@ class WorkflowRoutingService:
         defn, _, __, ___ = self.resolve_routing(org_id, request_type, equipment_type_id, test_type_id)
         return defn
 
+    def _resolve_stage_assignment(
+        self,
+        testing_request: TestingRequest,
+        stage: TrWfStage,
+        assigned_user_id: Optional[UUID] = None,
+        assigned_role_id: Optional[UUID] = None,
+    ) -> tuple[Optional[UUID], Optional[UUID]]:
+        """
+        Assignment for a stage instance being opened — shared by
+        instantiate_workflow() (first stage) and advance_stage() (every later
+        stage) so both stamp the same fields the same way.
+          - @originator token on the stage → assigned to the request creator.
+          - No explicit role → the stage's Rules-tab mapping
+            (stage_mapped_roles) is stamped, but only when it resolves to
+            exactly one role; several matches leave it open to all of them.
+        """
+        user_id = assigned_user_id
+        if testing_request.originator_id and any(
+            r.system_token == "@originator" for r in stage.roles
+        ):
+            user_id = testing_request.originator_id
+
+        role_id = assigned_role_id
+        if role_id is None:
+            mapped_role_ids = stage_mapped_roles(
+                self.db,
+                testing_request.organization_id,
+                stage.id,
+                request_type=testing_request.request_type,
+                equipment_type_id=testing_request.equipment_type_id,
+                test_type_id=testing_request.test_type_id,
+            )
+            if len(mapped_role_ids) == 1:
+                role_id = mapped_role_ids[0]
+
+        return user_id, role_id
+
     # ------------------------------------------------------------------
     # 2. Instantiate workflow (called on L2 approve)
     # ------------------------------------------------------------------
@@ -417,10 +454,15 @@ class WorkflowRoutingService:
                 role_id=role_id,
             ))
 
+        first_user_id, first_role_id = self._resolve_stage_assignment(
+            testing_request, first_stage,
+        )
         stage_inst = TrWfStageInstance(
             wf_instance_id=instance.id,
             stage_id=first_stage.id,
             status="in_progress",
+            assigned_user_id=first_user_id,
+            assigned_role_id=first_role_id,
             started_at=datetime.now(timezone.utc),
         )
         self.db.add(stage_inst)
@@ -606,19 +648,19 @@ class WorkflowRoutingService:
                     _src_sched.deleted_at = datetime.now(timezone.utc)
                     _src_sched.deleted_by = performed_by_id
         else:
-            # If next stage has the @originator token role, auto-assign to the request creator
-            effective_assigned_user_id = assigned_user_id
-            has_originator_token = any(r.system_token == "@originator" for r in to_stage.roles)
-            if has_originator_token and testing_request.originator_id:
-                effective_assigned_user_id = testing_request.originator_id
+            effective_user_id, effective_role_id = self._resolve_stage_assignment(
+                testing_request, to_stage,
+                assigned_user_id=assigned_user_id,
+                assigned_role_id=assigned_role_id,
+            )
 
             # Open next stage
             new_stage_inst = TrWfStageInstance(
                 wf_instance_id=instance.id,
                 stage_id=to_stage.id,
                 status="in_progress",
-                assigned_user_id=effective_assigned_user_id,
-                assigned_role_id=assigned_role_id,
+                assigned_user_id=effective_user_id,
+                assigned_role_id=effective_role_id,
                 started_at=datetime.now(timezone.utc),
             )
             self.db.add(new_stage_inst)
