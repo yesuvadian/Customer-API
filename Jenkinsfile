@@ -31,4 +31,22 @@ cogniwattPipeline(
     // DR shares the production database — only the primary may run the
     // in-process APScheduler, or every scheduled job would fire twice.
     drEnv: [ENABLE_SCHEDULER: 'false'],
+
+    // Run both deployments side by side until the Docker one takes over:
+    //   docker → container on :8001       legacy → systemd service on :8000 (was deploy.ps1)
+    // Drop 'legacy' (or 'docker') from a list to switch that deployment off.
+    deployModes: [dev: ['docker', 'legacy'], prod: ['docker', 'legacy']],
+    legacy: [
+        from:   '/app',                          // same code the container runs
+        keep:   ['.env', 'venv', 'uploads'],     // server-owned; never overwritten
+        delete: false,                           // overlay, like deploy.ps1's tar -x
+        health: 'curl -sf -o /dev/null http://localhost:8000/docs',
+        dev:  [path: '/apps/customer/api', commands: [
+            'venv/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt',
+            'sudo -n /usr/bin/systemctl restart customer-api',
+        ]],
+        prod: [path: '/apps/customer/api', commands: [
+            'sudo -n /usr/bin/systemctl restart api-procurement',
+        ]],
+    ],
 )
