@@ -35,6 +35,7 @@ gated by the "Threshold Config" module (see seed_threshold_config_module.py);
 this router itself only requires an authenticated user, same as the other
 lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py).
 """
+import logging
 from typing import List, Optional
 from uuid import UUID
 
@@ -60,6 +61,20 @@ from models import (
     User,
     get_dqi_all_key_labels,
 )
+
+def _rescore_after_change() -> None:
+    """Health bands, condition scores and status conditions decide the stored
+    health score / risk level of every equipment, which the AI dashboards
+    count - re-run the scoring in the background after each change, or the
+    dashboards keep showing the old classification until someone presses
+    "Recompute All". These tables are global, so every organization is
+    rescored; saves made while a run is going coalesce into one more run."""
+    try:
+        from routers.analytics import start_recompute_job
+        start_recompute_job(None)
+    except Exception as exc:  # never fail the save over the rescore
+        logging.getLogger(__name__).warning("threshold-config: rescore not started: %s", exc)
+
 
 router = APIRouter(
     prefix="/threshold-config",
@@ -261,6 +276,7 @@ def create_health_band(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -290,6 +306,7 @@ def update_health_band(
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -303,6 +320,7 @@ def delete_health_band(band_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Health band not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Condition scores ──────────────────────────────────────────────────────────
@@ -336,6 +354,7 @@ def create_condition_score(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -365,6 +384,7 @@ def update_condition_score(
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -378,6 +398,7 @@ def delete_condition_score(score_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Condition score not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Status conditions ─────────────────────────────────────────────────────────
@@ -411,6 +432,7 @@ def create_status_condition(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -440,6 +462,7 @@ def update_status_condition(
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -453,6 +476,7 @@ def delete_status_condition(condition_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Status condition not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Condition bands (5-tier Excellent/Good/Fair/Poor/Critical scale used by

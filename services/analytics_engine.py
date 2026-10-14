@@ -119,6 +119,35 @@ def _load_risk_bands(db: Optional[Session]) -> list[tuple[float, str]]:
     return [(float(r.threshold), r.label) for r in rows]
 
 
+# The four risk slots every dashboard counts into (KPI tiles, department
+# cards, summary-table columns, AI Graph critical/high), worst first.
+RISK_SLOTS = ("Critical", "High", "Medium", "Low")
+
+
+def risk_slot_mapper(db: Optional[Session]):
+    """Returns slot(label) -> one of RISK_SLOTS, or None for a missing /
+    unrecognised label. The standard names map to themselves; any other
+    label (a band an admin renamed or added, e.g. "Severe") maps by its
+    position in the configured bands, worst first: 1st -> Critical,
+    2nd -> High, 3rd -> Medium, the rest -> Low. Counting by the literal
+    names made such equipment vanish from every tile.
+    """
+    worst_first = [label for _, label in reversed(_load_risk_bands(db))]
+    by_rank = {
+        label: RISK_SLOTS[min(i, len(RISK_SLOTS) - 1)]
+        for i, label in enumerate(worst_first)
+    }
+
+    def slot(label):
+        if not label:
+            return None
+        label = str(label).strip()
+        if label in RISK_SLOTS:
+            return label
+        return by_rank.get(label)
+    return slot
+
+
 def _load_condition_labels(db: Optional[Session]) -> dict[str, str]:
     """Admin-configured {status: condition_label} map. Falls back to
     _DEFAULT_CONDITION if no db session was given or the table has no
@@ -188,29 +217,49 @@ def _load_band_rank_words(db: Optional[Session]) -> dict[str, int]:
     return {r.phrase.lower(): r.rank for r in rows}
 
 
+def _worst_band_label(db: Optional[Session]) -> Optional[str]:
+    """Label of the lowest-threshold risk band (Critical by default) when it
+    is active, else None (disabled). Looks at inactive bands too, so turning
+    the worst band off is told apart from renaming it."""
+    if db is None:
+        return _DEFAULT_RISK_BANDS[-1][1]
+    from models import EquipmentHealthBandThreshold
+    row = (
+        db.query(EquipmentHealthBandThreshold)
+        .order_by(EquipmentHealthBandThreshold.threshold.asc())
+        .first()
+    )
+    if row is None:  # table not seeded - defaults apply
+        return _DEFAULT_RISK_BANDS[-1][1]
+    return row.label if row.is_active else None
+
+
 def _risk_from_score(
     score: Optional[float],
     critical_findings: list | None = None,
     db: Optional[Session] = None,
 ) -> str:
     bands = _load_risk_bands(db)
-    band_labels = {label for _, label in bands}
-    # If any finding has CRITICAL status, the equipment risk is at least
-    # Critical, regardless of its composite health score - but only while
-    # a "Critical" band is actually active. An admin who disables the
-    # Critical band expects it to stop appearing anywhere, including here;
-    # without this guard a single CRITICAL-status finding force-labels the
-    # equipment "Critical" no matter what the (now Critical-less) bands say,
-    # which is why disabling that band appeared to do nothing.
+    # If any finding has CRITICAL status, the equipment risk is the worst
+    # band, regardless of its composite health score - but only while that
+    # band is actually active. An admin who disables the Critical band
+    # expects it to stop appearing anywhere, including here; without this
+    # guard a single CRITICAL-status finding force-labels the equipment
+    # "Critical" no matter what the (now Critical-less) bands say, which is
+    # why disabling that band appeared to do nothing. The worst band is
+    # found by position, not by the literal name "Critical", so renaming it
+    # (e.g. to "Severe") keeps the override instead of silently dropping
+    # findings-only equipment to a milder band.
+    worst = _worst_band_label(db)
     if (
         critical_findings
-        and "Critical" in band_labels
+        and worst is not None
         and any(
             isinstance(f, dict) and f.get("status") == "CRITICAL"
             for f in critical_findings
         )
     ):
-        return "Critical"
+        return worst
     if score is None:
         return "Unknown"
     for threshold, label in bands:

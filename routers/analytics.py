@@ -61,7 +61,7 @@ from models import (
     TestingRequest,
 )
 from services.condition_recommendation_service import evaluate_for_equipment
-from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words, accepted_test_result_ids
+from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words, accepted_test_result_ids, risk_slot_mapper
 from category_labels import RiskLevelColors
 
 logger = logging.getLogger(__name__)
@@ -463,6 +463,8 @@ def get_asset_breakdown(
     # Critical against the tile's 26.)
     ea_map = {r.equipment_id: r for r in ea_rows}
 
+    _slot = risk_slot_mapper(db)
+
     def _empty_health() -> dict:
         return {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0,
                 "untested": 0, "sum": 0.0, "cnt": 0}
@@ -486,15 +488,11 @@ def get_asset_breakdown(
         """
         src = source if source is not None else ea_map.get(eq_id)
         if tested and src:
-            rl = (src.risk_level or "").strip()
-            if rl == "Critical":
-                bucket["critical"] += 1
-            elif rl == "High":
-                bucket["high"] += 1
-            elif rl == "Medium":
-                bucket["medium"] += 1
-            elif rl == "Low":
-                bucket["low"] += 1
+            # By slot, not literal name, so a renamed / added band still
+            # lands in its column (same mapping as the KPI tiles).
+            rl = _slot(src.risk_level)
+            if rl:
+                bucket[rl.lower()] += 1
             else:
                 bucket["unknown"] += 1
             if src.health_score is not None:
@@ -1019,9 +1017,13 @@ def get_analytics_dashboard(
     else:
         risk_sources = active_ea
 
+    # Counted by slot so a renamed / added band label (e.g. "Severe") still
+    # lands on its tile instead of silently dropping out of every count.
+    _slot = risk_slot_mapper(db)
     risk_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Unknown": 0}
     for src in risk_sources:
-        risk_counts[src.risk_level or "Unknown"] = risk_counts.get(src.risk_level or "Unknown", 0) + 1
+        lvl = _slot(src.risk_level) or "Unknown"
+        risk_counts[lvl] += 1
 
     # Average over scored rows only - dividing by every row let reset/unscored
     # EquipmentAnalytics rows (health_score NULL) drag the fleet average down.
@@ -1306,7 +1308,7 @@ def get_analytics_dashboard(
                 continue
             agg = child_risk.setdefault(str(root_id), {
                 "Critical": 0, "High": 0, "Medium": 0, "Low": 0, "scores": []})
-            lvl = src.risk_level or "Unknown"
+            lvl = _slot(src.risk_level) or "Unknown"
             agg[lvl] = agg.get(lvl, 0) + 1
             if src.health_score is not None:
                 agg["scores"].append(float(src.health_score))
@@ -1524,6 +1526,40 @@ def _run_recompute_job(job_id: str, org_id) -> None:
     finally:
         job["finished_at"] = datetime.now(timezone.utc).isoformat()
         db.close()
+        # A settings change saved while this job was running may have been
+        # read too late by it - run once more so the stored scores end up on
+        # the latest settings.
+        if job.get("rerun"):
+            start_recompute_job(org_id)
+
+
+def start_recompute_job(org_id) -> dict:
+    """Start a background recompute for org_id (None = every organization),
+    or, when one covering it is already running, flag that job to run once
+    more when it finishes. Returns the job. Used by /recompute-all and by
+    Threshold Config saves that change how stored scores are computed."""
+    key = str(org_id) if org_id else None
+    with _RECOMPUTE_LOCK:
+        # Keep finished jobs for an hour (for late status polls), then drop them.
+        _now = datetime.now(timezone.utc)
+        for _jid in [k for k, j in _RECOMPUTE_JOBS.items()
+                     if j.get("finished_at") and (_now - datetime.fromisoformat(j["finished_at"])).total_seconds() > 3600]:
+            _RECOMPUTE_JOBS.pop(_jid, None)
+        for jid, j in _RECOMPUTE_JOBS.items():
+            # An all-organizations job covers every organization's request.
+            if j["status"] == "running" and j["org_id"] in (key, None):
+                j["rerun"] = True
+                return {"job_id": jid, **j}
+        job_id = uuid.uuid4().hex
+        _RECOMPUTE_JOBS[job_id] = {
+            "status": "running", "org_id": key,
+            "total": None, "processed": 0, "recomputed": 0, "failed": 0,
+            "error": None, "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None, "rerun": False,
+        }
+    threading.Thread(target=_run_recompute_job, args=(job_id, org_id),
+                     name=f"recompute-{job_id[:8]}", daemon=True).start()
+    return {"job_id": job_id, **_RECOMPUTE_JOBS[job_id]}
 
 
 @router.post("/recompute-all", status_code=202,
@@ -1557,25 +1593,7 @@ def recompute_all_analytics(
         # No organization to scope to - never fall through to "all orgs".
         raise HTTPException(status_code=403, detail="No organization to recompute")
 
-    with _RECOMPUTE_LOCK:
-        # Keep finished jobs for an hour (for late status polls), then drop them.
-        _now = datetime.now(timezone.utc)
-        for _jid in [k for k, j in _RECOMPUTE_JOBS.items()
-                     if j.get("finished_at") and (_now - datetime.fromisoformat(j["finished_at"])).total_seconds() > 3600]:
-            _RECOMPUTE_JOBS.pop(_jid, None)
-        for jid, j in _RECOMPUTE_JOBS.items():
-            if j["status"] == "running" and j["org_id"] == (str(org_id) if org_id else None):
-                return {"job_id": jid, **j}
-        job_id = uuid.uuid4().hex
-        _RECOMPUTE_JOBS[job_id] = {
-            "status": "running", "org_id": str(org_id) if org_id else None,
-            "total": None, "processed": 0, "recomputed": 0, "failed": 0,
-            "error": None, "started_at": datetime.now(timezone.utc).isoformat(),
-            "finished_at": None,
-        }
-    threading.Thread(target=_run_recompute_job, args=(job_id, org_id),
-                     name=f"recompute-{job_id[:8]}", daemon=True).start()
-    return {"job_id": job_id, **_RECOMPUTE_JOBS[job_id]}
+    return start_recompute_job(org_id)
 
 
 @router.get("/recompute-all/{job_id}", summary="Progress of a recompute-all job")
@@ -1586,9 +1604,27 @@ def get_recompute_job(
     job = _RECOMPUTE_JOBS.get(job_id)
     org_id = _user_org_id(user)
     _usertype = user.get("usertype") if isinstance(user, dict) else getattr(user, "usertype", None)
-    if not job or (_usertype != "super_admin" and job["org_id"] != (str(org_id) if org_id else None)):
+    # An all-organizations job (org_id None, started by a Threshold Config
+    # save) carries only counts, so every organization may follow it.
+    if not job or (_usertype != "super_admin"
+                   and job["org_id"] not in (str(org_id) if org_id else None, None)):
         raise HTTPException(status_code=404, detail="Recompute job not found")
     return {"job_id": job_id, **job}
+
+
+@router.get("/recompute-all-current", summary="The recompute job currently running for this user's scope, if any")
+def get_current_recompute_job(user: dict = Depends(get_current_user)):
+    """Lets the app show progress of a recompute it didn't start itself
+    (e.g. one a Threshold Config save kicked off). {} when none is running."""
+    org_id = _user_org_id(user)
+    _usertype = user.get("usertype") if isinstance(user, dict) else getattr(user, "usertype", None)
+    mine = str(org_id) if org_id else None
+    with _RECOMPUTE_LOCK:
+        for jid, j in _RECOMPUTE_JOBS.items():
+            if j["status"] == "running" and (
+                    _usertype == "super_admin" or j["org_id"] in (mine, None)):
+                return {"job_id": jid, **j}
+    return {}
 
 
 # Short-lived cache of /dashboard/equipment's full sorted row list, keyed by
@@ -1860,12 +1896,13 @@ def get_dashboard_equipment(
         dated_risk_map = {k: v[0] for k, v in _best.items() if v[0].health_score is not None}
 
     if risk_level:
+        _slot = risk_slot_mapper(db)
         if date_from or date_to:
             all_eq = [e for e in all_eq
-                      if e.id in dated_risk_map and dated_risk_map[e.id].risk_level == risk_level]
+                      if e.id in dated_risk_map and _slot(dated_risk_map[e.id].risk_level) == risk_level]
         else:
             all_eq = [e for e in all_eq
-                      if (ea_map[e.id].risk_level if e.id in ea_map else "Unknown") == risk_level]
+                      if (_slot(ea_map[e.id].risk_level) if e.id in ea_map else None) == risk_level]
 
     eq_ids = [e.id for e in all_eq]
 
