@@ -45,7 +45,10 @@ cogniwattPipeline(
             'venv/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt',
             'sudo -n /usr/bin/systemctl restart customer-api',
         ]],
+        // pip install on prod too: deploy.ps1 never did, which left DR's venv
+        // without `cryptography` and its API crash-looping (found 2026-10-14).
         prod: [path: '/apps/customer/api', commands: [
+            'venv/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt',
             'sudo -n /usr/bin/systemctl restart api-procurement',
         ]],
     ],
