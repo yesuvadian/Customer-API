@@ -19,6 +19,7 @@ GET /dashboard/full               → all widgets in one call (Flutter convenien
 POST /dashboard/invalidate-cache  → flush cache for org
 """
 
+from datetime import timedelta
 from typing import Optional
 from uuid import UUID
 

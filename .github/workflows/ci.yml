@@ -1,0 +1,31 @@
+# Copyright (c) 2026 ReLU Technologies Private Limited. All rights reserved.
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile all Python files
+        run: python -m compileall -q .
+
+      # Only hard errors: syntax errors, undefined names, bad comparisons.
+      - name: Ruff (errors only)
+        run: |
+          pip install ruff
+          ruff check --select E9,F63,F7,F82 --exclude archive .
