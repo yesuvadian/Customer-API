@@ -887,7 +887,7 @@ class TestingRequestService:
             include_direct_submissions=include_direct_submissions,
             include_scored=include_scored,
         )
-        return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
+        return query.order_by(TestingRequest.cts.desc(), TestingRequest.id.desc()).offset(skip).limit(limit).all()
 
     def count_requests(
         self,
@@ -1115,7 +1115,7 @@ class TestingRequestService:
                     query = query.filter(False)
 
         return (
-            query.order_by(TestingRequest.cts.desc())
+            query.order_by(TestingRequest.cts.desc(), TestingRequest.id.desc())
             .offset(skip)
             .limit(limit)
             .all()

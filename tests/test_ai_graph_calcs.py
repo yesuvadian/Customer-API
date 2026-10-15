@@ -187,3 +187,89 @@ def test_param_risk_uses_configured_scores(db):
         for cond, pts in scores.items():
             assert risk[cond] == round(100.0 - min(100.0, max(0.0, pts)), 1)
     assert G._param_risk_score("Good") == 10.0  # no session: old constants
+
+
+# ── Radar axes: unclassified readings are "no data", not 50 ─────────────────
+
+def _rows(*conds):
+    return [type("R", (), {"condition": c})() for c in conds]
+
+
+def test_condition_axis_ignores_unclassified_readings():
+    assert G._condition_risk_axis(_rows(None, None)) is None
+    assert G._condition_risk_axis([]) is None
+    assert G._condition_risk_axis(_rows("Poor", None, "")) == G._param_risk_score("Poor")
+    assert G._condition_risk_axis(_rows("Good", "Poor")) == round(
+        (G._param_risk_score("Good") + G._param_risk_score("Poor")) / 2, 1)
+
+
+def test_life_left_never_negative_zero():
+    import json
+    assert json.dumps(G._life_left_out(-0.04)) == "0.0"
+    assert G._life_left_out(-0.06) == -0.1
+    assert G._life_left_out(None) is None
+
+
+# ── /overview assessed_count, /ageing life_left_risk population ─────────────
+
+def test_assessed_count_is_four_risk_slots(db, org_admin):
+    k = call(G.get_overview, db=db, user=org_admin)["kpis"]
+    assert isinstance(k["assessed_count"], int)
+    slot = G._risk_slot(db)
+    ea = G._scoped_ea(None, db, organization_id=org_admin.organization_id)
+    assert k["assessed_count"] == sum(1 for r in ea if slot(r.risk_level) in AE.RISK_SLOTS)
+    assert k["critical_count"] + k["high_count"] <= k["assessed_count"] <= k["equipment_count"]
+
+
+def test_life_left_risk_over_life_kpi_population(db, org_admin):
+    radar = call(G.get_ageing, db=db, user=org_admin)["radar"]["fleet"]
+    eqs = G._scoped_equipment(None, db, organization_id=org_admin.organization_id)
+    types = {c.id: c.name for c in db.query(CategoryMaster).all()}
+    vals = []
+    for e in eqs:
+        ll = G._life_left(e.commissioned_date, types.get(e.equipment_type_id), db)
+        exp = G._expected_life(types.get(e.equipment_type_id), db)
+        if ll is not None and exp:
+            vals.append(min(100.0, max(0.0, 100.0 * (1 - ll / exp))))
+    if not vals:
+        pytest.skip("no in-scope equipment with a commissioned date")
+    assert radar["life_left_risk"] == round(sum(vals) / len(vals), 1)
+
+
+# ── EquipmentAnalytics.last_test_date is the test's date ────────────────────
+
+def test_last_test_date_prefers_tested_at():
+    def row(tested, calc):
+        return type("R", (), {"tested_at": tested, "calculated_at": calc})()
+    rescored = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    t1 = datetime(2024, 3, 1, tzinfo=timezone.utc)
+    t2 = datetime(2025, 5, 1, 6, 0)                          # naive = UTC
+    assert AE._last_test_date([row(t1, rescored), row(t2, rescored)]) == t2.replace(tzinfo=timezone.utc)
+    assert AE._last_test_date([row(None, t1)]) == t1          # no test date: calculated_at
+    assert AE._last_test_date([]) is None
+
+
+# ── AI Analytics date bounds / whitespace / paging ──────────────────────────
+
+def test_analytics_date_bounds_are_local_midnight():
+    from routers import analytics as A
+    b = A._local_day_start(date(2026, 1, 2))
+    assert b.utcoffset() == timedelta(hours=5, minutes=30)
+    assert b.astimezone(timezone.utc) == datetime(2026, 1, 1, 18, 30, tzinfo=timezone.utc)
+
+
+def test_drill_strip_matches_python_strip(db):
+    """The drill's SQL trims like str.strip() (tabs, newlines, NBSP, ...) -
+    Postgres trim() strips spaces only."""
+    from sqlalchemy import func, literal
+    from routers import analytics as A
+    for raw in ("  Make\t", " Make ", "\nN/A \r", "Ma ke", "　x "):
+        got = db.query(func.regexp_replace(literal(raw), A._SQL_EDGE_WS, "", "g")).scalar()
+        assert got == raw.strip(), repr(raw)
+
+
+def test_testing_request_lists_have_id_tiebreak():
+    from services import testing_request_service as S
+    src = inspect.getsource(S)
+    assert "order_by(TestingRequest.cts.desc())" not in src
+    assert src.count("TestingRequest.cts.desc(), TestingRequest.id.desc()") >= 2

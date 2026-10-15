@@ -944,6 +944,20 @@ class HealthScorer:
         return round(max(0.0, raw), 2), critical_findings
 
 
+def _last_test_date(ta_rows):
+    """Date of the latest test among TestAnalytics rows: tested_at (the test
+    result's date, or the request's requested_date), not calculated_at, which
+    is when the row was last (re)scored - a recompute moved every equipment's
+    "last tested" to today. calculated_at only for a row with no test date.
+    Naive values read as UTC (code writes UTC), same as the dashboards."""
+    dates = [r.tested_at or r.calculated_at for r in ta_rows]
+    return max(
+        (d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc)
+         for d in dates if d),
+        default=None,
+    )
+
+
 # ── Main analytics engine ─────────────────────────────────────────────────────
 
 class AnalyticsEngine:
@@ -999,10 +1013,20 @@ class AnalyticsEngine:
             return None
 
         # Load template
-        template_data = self._load_template(template_key, organization_id)
+        template_data = self._load_template(template_key, organization_id) if template_key else None
         if not template_data:
-            logger.warning("run_for_test: template '%s' not found", template_key)
-            return None
+            # An equipment test stored CRITICAL because its template is
+            # missing (EvaluationService TEMPLATE_NOT_FOUND) still counts
+            # against the equipment: score it from that stored evaluation
+            # (its config finding scores 0 / Critical) instead of leaving a
+            # failed test out of the health score. Anything else has nothing
+            # to score.
+            from services.evaluation_service import TEMPLATE_NOT_FOUND
+            if evaluation_result.get("unassessed_reason") != TEMPLATE_NOT_FOUND:
+                logger.warning("run_for_test: template '%s' not found", template_key)
+                return None
+            template_key  = template_key or TEMPLATE_NOT_FOUND
+            template_data = {}
 
         # Load historical test data for trend analysis
         history_map, categorical_history_map = self._fetch_history_map(
@@ -1517,10 +1541,7 @@ class AnalyticsEngine:
             .count()
         ) if _latest_result_ids else 0
 
-        last_test = max(
-            (r.calculated_at for r in latest_per_template if r.calculated_at),
-            default=None,
-        )
+        last_test = _last_test_date(latest_per_template)
 
         ea = self._upsert_equipment_analytics(
             equipment_id        = equipment_id,

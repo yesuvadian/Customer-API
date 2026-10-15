@@ -1383,8 +1383,17 @@ class EvaluationService:
     def run(template_key: str, test_data: dict, db: Session, org_id=None,
             is_equipment_test: Optional[bool] = None) -> dict:
         """Convenience: resolve template then evaluate."""
-        tpl = EvaluationService.get_template_data(template_key, db, org_id=org_id)
+        tpl = EvaluationService.get_template_data(template_key, db, org_id=org_id) if template_key else None
         if not tpl:
+            # Only an equipment test is held to a template it can be judged
+            # against (requires_thresholds); a result of any other request
+            # with no template has nothing to evaluate.
+            if is_equipment_test is False:
+                return {
+                    "overall": NORMAL,
+                    "evaluated_at": datetime.now(timezone.utc).isoformat(),
+                    "fields": [],
+                }
             return EvaluationService._unassessed_result(TEMPLATE_NOT_FOUND)
         return EvaluationService.evaluate_test_data(
             tpl, test_data, db, is_equipment_test=is_equipment_test)

@@ -63,6 +63,7 @@ from models import (
 from services.condition_recommendation_service import evaluate_for_equipment
 from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words, accepted_test_result_ids, risk_slot_mapper
 from category_labels import RiskLevelColors
+from routers.ai_graph import _LOCAL_TZ
 
 logger = logging.getLogger(__name__)
 
@@ -325,11 +326,28 @@ def _eq_capacity_map(eq_ids: list, db: Session) -> dict:
     return best
 
 
+def _local_day_start(d: date) -> datetime:
+    """Local (India) midnight starting calendar day `d`, as an aware
+    datetime. date_from/date_to are the user's local dates - a naive
+    midnight bound was read in the DB session's TimeZone (UTC), putting a
+    test at 01:30 IST on the previous day. Same zone as AI Graph's ranges."""
+    return datetime.combine(d, datetime.min.time(), tzinfo=_LOCAL_TZ)
+
+
 # Group values the AI Analytics app shows as one "Not Specified" row - keep
 # in sync with AnalyticsDashboardProvider._isUnknownGroupValue.
 _PLACEHOLDER_GROUP_VALUES = (
     "", "null", "unknown", "n/a", "na", "-", "--",
     "not specified", "not available", "unspecified",
+)
+
+
+# Leading/trailing whitespace for regexp_replace(..., 'g'), trimmed the way
+# str.strip() / Dart trim() do: ASCII \s plus the Unicode spaces (NBSP,
+# the U+2000 range, line/paragraph separators, ideographic space, ...).
+_SQL_EDGE_WS = (
+    "^[\\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+"
+    "|[\\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$"
 )
 
 
@@ -575,9 +593,9 @@ def get_asset_breakdown(
             )
         )
         if date_from:
-            ta_q = ta_q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
+            ta_q = ta_q.filter(coalesced >= _local_day_start(date_from))
         if date_to:
-            ta_q = ta_q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+            ta_q = ta_q.filter(coalesced < _local_day_start(date_to + timedelta(days=1)))
         _best: dict = {}
         for ta, eff_date in ta_q.all():
             if eff_date is None:
@@ -994,9 +1012,9 @@ def get_analytics_dashboard(
         ) if active_eq_ids else None
         if dated_ta_q is not None:
             if date_from:
-                dated_ta_q = dated_ta_q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
+                dated_ta_q = dated_ta_q.filter(coalesced >= _local_day_start(date_from))
             if date_to:
-                dated_ta_q = dated_ta_q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+                dated_ta_q = dated_ta_q.filter(coalesced < _local_day_start(date_to + timedelta(days=1)))
             _best: dict = {}
             for ta, eff_date in dated_ta_q.all():
                 if eff_date is None:
@@ -1441,6 +1459,7 @@ def _run_recompute_job(job_id: str, org_id) -> None:
     job = _RECOMPUTE_JOBS[job_id]
     # Background pool - a long job must not hold a web-request connection.
     db = BackgroundSessionLocal()
+    final_status, final_error = "error", None
     try:
         _SKIP_STATUSES = {
             TestingRequestStatus.draft,
@@ -1517,26 +1536,44 @@ def _run_recompute_job(job_id: str, org_id) -> None:
                 db.commit()
         db.commit()
         _drill_cache_clear()  # cached drill-down rows hold the old scores
-        job["status"] = "done"
+        final_status = "done"
     except Exception as exc:  # pragma: no cover - surfaced through the status endpoint
         db.rollback()
         logger.exception("recompute_all job %s failed", job_id)
-        job["status"] = "error"
-        job["error"] = str(exc)
+        final_error = str(exc)
     finally:
-        job["finished_at"] = datetime.now(timezone.utc).isoformat()
         db.close()
+        # Leave "running" and read the rerun flag in one step under the lock:
+        # start_recompute_job sets the flag under it, so a save either lands
+        # before this (and is rerun) or sees the job finished (and starts its
+        # own) - never set on a job that already stopped looking.
+        with _RECOMPUTE_LOCK:
+            job["status"] = final_status
+            if final_error is not None:
+                job["error"] = final_error
+            job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            rerun, rerun_key = job.get("rerun"), job.get("rerun_org_id")
         # A settings change saved while this job was running may have been
-        # read too late by it - run once more so the stored scores end up on
-        # the latest settings.
-        if job.get("rerun"):
-            start_recompute_job(org_id)
+        # read too late by it - run once more, over every scope requested
+        # meanwhile, so the stored scores end up on the latest settings.
+        if rerun:
+            start_recompute_job(uuid.UUID(rerun_key) if rerun_key else None)
+
+
+def _widen_rerun(job: dict, key) -> None:
+    """Flag `job` to run once more for `key` (None = every organization),
+    merged with any follow-up already requested: two different scopes widen
+    to every organization."""
+    if job.get("rerun") and job.get("rerun_org_id") != key:
+        key = None
+    job["rerun"] = True
+    job["rerun_org_id"] = key
 
 
 def start_recompute_job(org_id) -> dict:
     """Start a background recompute for org_id (None = every organization),
-    or, when one covering it is already running, flag that job to run once
-    more when it finishes. Returns the job. Used by /recompute-all and by
+    or, when a job overlapping it is already running, flag that job to run
+    once more (widened to this scope) when it finishes. Returns the job. Used by /recompute-all and by
     Threshold Config saves that change how stored scores are computed."""
     key = str(org_id) if org_id else None
     with _RECOMPUTE_LOCK:
@@ -1545,17 +1582,24 @@ def start_recompute_job(org_id) -> dict:
         for _jid in [k for k, j in _RECOMPUTE_JOBS.items()
                      if j.get("finished_at") and (_now - datetime.fromisoformat(j["finished_at"])).total_seconds() > 3600]:
             _RECOMPUTE_JOBS.pop(_jid, None)
-        for jid, j in _RECOMPUTE_JOBS.items():
-            # An all-organizations job covers every organization's request.
-            if j["status"] == "running" and j["org_id"] in (key, None):
-                j["rerun"] = True
-                return {"job_id": jid, **j}
+        # Never run two jobs over the same rows (lock waits / unique
+        # violations): a request overlapping a running job - same org, an
+        # all-org job, or an all-org request over an org job - becomes a
+        # follow-up run of that job, widened to cover the requested scope.
+        overlapping = [(jid, j) for jid, j in _RECOMPUTE_JOBS.items()
+                       if j["status"] == "running"
+                       and (key is None or j["org_id"] in (key, None))]
+        for _jid, j in overlapping:
+            _widen_rerun(j, key)
+        if overlapping:
+            jid, j = overlapping[0]
+            return {"job_id": jid, **j}
         job_id = uuid.uuid4().hex
         _RECOMPUTE_JOBS[job_id] = {
             "status": "running", "org_id": key,
             "total": None, "processed": 0, "recomputed": 0, "failed": 0,
             "error": None, "started_at": datetime.now(timezone.utc).isoformat(),
-            "finished_at": None, "rerun": False,
+            "finished_at": None, "rerun": False, "rerun_org_id": None,
         }
     threading.Thread(target=_run_recompute_job, args=(job_id, org_id),
                      name=f"recompute-{job_id[:8]}", daemon=True).start()
@@ -1746,10 +1790,16 @@ def get_dashboard_equipment(
     # "null", ...) into one "Not Specified" row and drills it with the
     # "unknown" sentinel, so that sentinel matches every placeholder here;
     # a real value is compared trimmed, as /asset-breakdown groups it.
+    # Trimmed the way Python's str.strip() / Dart's trim() group it - every
+    # whitespace char incl. tabs, newlines and NBSP - not Postgres trim()
+    # (spaces only), or a "Make	" asset counted under "Make" never drills.
+    def _strip_ws(col):
+        return func.regexp_replace(col, _SQL_EDGE_WS, "", "g")
+
     def _col_filter(col, value: str):
         if value.lower() == "unknown":
-            return col.is_(None) | func.lower(func.trim(col)).in_(_PLACEHOLDER_GROUP_VALUES)
-        return func.trim(col) == value.strip()
+            return col.is_(None) | func.lower(_strip_ws(col)).in_(_PLACEHOLDER_GROUP_VALUES)
+        return _strip_ws(col) == value.strip()
     if voltage_class:
         eq_q = eq_q.filter(_col_filter(Equipment.voltage_class, voltage_class))
     if manufacturer:
@@ -1844,9 +1894,9 @@ def get_dashboard_equipment(
                     TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         )
         if date_from:
-            _lq = _lq.filter(_c >= datetime.combine(date_from, datetime.min.time()))
+            _lq = _lq.filter(_c >= _local_day_start(date_from))
         if date_to:
-            _lq = _lq.filter(_c < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+            _lq = _lq.filter(_c < _local_day_start(date_to + timedelta(days=1)))
         _lb: dict = {}
         for ta, eff in _lq.all():
             if eff is None:
@@ -1882,9 +1932,9 @@ def get_dashboard_equipment(
                     TestAnalytics.test_result_id.in_(accepted_test_result_ids(db)))
         )
         if date_from:
-            _dq = _dq.filter(_coal >= datetime.combine(date_from, datetime.min.time()))
+            _dq = _dq.filter(_coal >= _local_day_start(date_from))
         if date_to:
-            _dq = _dq.filter(_coal < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+            _dq = _dq.filter(_coal < _local_day_start(date_to + timedelta(days=1)))
         _best: dict = {}
         for ta, eff in _dq.all():
             if eff is None:
@@ -1940,9 +1990,12 @@ def get_dashboard_equipment(
     tc_q = _apply_tested_at_filter(tc_q, date_from, date_to)
     test_count_map = {row[0]: row[1] for row in tc_q.group_by(TestingRequest.equipment_id).all()}
 
-    # When a date filter is active, only show equipment that has tests in that period
-    # so pagination is correct (avoids empty pages when client filters testCount > 0)
-    if date_from or date_to:
+    # When a date filter is active, the tested-only (and risk) lists show only
+    # equipment with tests in that period, so pagination is correct (avoids
+    # empty pages when the client filters testCount > 0). A summary-table row
+    # drill (tested_only=false) lists every asset the row's Total counts -
+    # /asset-breakdown counts untested ones too - shown as untested.
+    if (date_from or date_to) and (tested_only or risk_level):
         active_ids = {eq_id for eq_id, cnt in test_count_map.items() if cnt > 0}
         all_eq = [e for e in all_eq if e.id in active_ids]
 
@@ -3014,9 +3067,9 @@ def get_parameter_analytics(
     # Use COALESCE(tested_at, cts) so historical records with null tested_at are included
     coalesced = func.coalesce(TR.tested_at, TR.cts)
     if date_from:
-        q = q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
+        q = q.filter(coalesced >= _local_day_start(date_from))
     if date_to:
-        q = q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        q = q.filter(coalesced < _local_day_start(date_to + timedelta(days=1)))
     rows = q.order_by(
         ParameterAnalytics.parameter_key,
         ParameterAnalytics.template_key,
@@ -3330,9 +3383,9 @@ def _apply_tested_at_filter(q, date_from: Optional[date], date_to: Optional[date
     q = q.join(TestResult, TestResult.testing_request_id == TestingRequest.id)
     coalesced = func.coalesce(TestResult.tested_at, TestResult.cts)
     if date_from:
-        q = q.filter(coalesced >= datetime.combine(date_from, datetime.min.time()))
+        q = q.filter(coalesced >= _local_day_start(date_from))
     if date_to:
-        q = q.filter(coalesced < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        q = q.filter(coalesced < _local_day_start(date_to + timedelta(days=1)))
     return q
 
 

@@ -33,7 +33,10 @@ alter_test_status_condition.py, alter_equipment_condition_band_threshold.py,
 alter_dqi_rule_config.py for the seed history). Menu-level visibility is
 gated by the "Threshold Config" module (see seed_threshold_config_module.py);
 this router itself only requires an authenticated user, same as the other
-lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py).
+lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py) - except
+writes to the health bands, condition scores and status conditions, which
+rescore every organization and so need a platform super admin
+(_require_platform_admin).
 """
 import logging
 from typing import List, Optional
@@ -61,6 +64,24 @@ from models import (
     User,
     get_dqi_all_key_labels,
 )
+
+def _require_platform_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Write guard for the health bands, condition scores and status
+    conditions. Those tables have no organization column - one row set
+    scores every tenant - and each save rescores every organization (see
+    _rescore_after_change), so only a platform super admin may change them;
+    an org admin (who holds the Threshold Config module) would otherwise
+    rewrite every other organization's risk levels. Same super_admin test as
+    /analytics/recompute-all's all-organizations scope."""
+    usertype = (current_user.get("usertype") if isinstance(current_user, dict)
+                else getattr(current_user, "usertype", None))
+    if usertype != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="These settings apply to every organization - super admin only",
+        )
+    return current_user
+
 
 def _rescore_after_change() -> None:
     """Health bands, condition scores and status conditions decide the stored
@@ -260,7 +281,7 @@ def list_health_bands(db: Session = Depends(get_db)):
 def create_health_band(
     payload: HealthBandCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.label == payload.label
@@ -286,7 +307,7 @@ def update_health_band(
     band_id: int,
     payload: HealthBandUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.id == band_id
@@ -312,7 +333,11 @@ def update_health_band(
 
 
 @router.delete("/health-bands/{band_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_health_band(band_id: int, db: Session = Depends(get_db)):
+def delete_health_band(
+    band_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.id == band_id
     ).first()
@@ -338,7 +363,7 @@ def list_condition_scores(db: Session = Depends(get_db)):
 def create_condition_score(
     payload: ConditionScoreCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(ParameterConditionScore).filter(
         ParameterConditionScore.condition == payload.condition
@@ -364,7 +389,7 @@ def update_condition_score(
     score_id: int,
     payload: ConditionScoreUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(ParameterConditionScore).filter(
         ParameterConditionScore.id == score_id
@@ -390,7 +415,11 @@ def update_condition_score(
 
 
 @router.delete("/condition-scores/{score_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_condition_score(score_id: int, db: Session = Depends(get_db)):
+def delete_condition_score(
+    score_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(ParameterConditionScore).filter(
         ParameterConditionScore.id == score_id
     ).first()
@@ -416,7 +445,7 @@ def list_status_conditions(db: Session = Depends(get_db)):
 def create_status_condition(
     payload: StatusConditionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(TestStatusCondition).filter(
         TestStatusCondition.status == payload.status
@@ -442,7 +471,7 @@ def update_status_condition(
     condition_id: int,
     payload: StatusConditionUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(TestStatusCondition).filter(
         TestStatusCondition.id == condition_id
@@ -468,7 +497,11 @@ def update_status_condition(
 
 
 @router.delete("/status-conditions/{condition_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_status_condition(condition_id: int, db: Session = Depends(get_db)):
+def delete_status_condition(
+    condition_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(TestStatusCondition).filter(
         TestStatusCondition.id == condition_id
     ).first()

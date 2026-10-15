@@ -35,6 +35,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 from services.analytics_engine import (
     _DEFAULT_SCORE,
+    RISK_SLOTS,
     _load_condition_scores,
     accepted_test_result_ids,
     risk_slot_mapper,
@@ -639,6 +640,22 @@ def _param_risk_score(condition: str | None, db: Session | None = None) -> float
     return _param_risk_map(db).get(condition or "Unknown", 50.0)
 
 
+def _condition_risk_axis(rows, db: Session | None = None) -> float | None:
+    """A radar axis from ParameterAnalytics rows: mean condition risk over
+    the readings that HAVE a condition. A reading with no condition used to
+    count as "Unknown" = 50, so an axis fed only by unclassified readings
+    showed a fabricated mid-scale risk - None ("no data") instead."""
+    risks = [_param_risk_score(r.condition, db) for r in rows if r.condition]
+    return round(mean(risks), 1) if risks else None
+
+
+def _life_left_out(ll: float | None) -> float | None:
+    """Life left rounded to 1 dp for output; + 0.0 turns the -0.0 a value
+    just under zero rounds to (e.g. -0.04) into 0.0, which JSON sent as
+    "-0.0" and the app showed as "-0.0 yr"."""
+    return round(ll, 1) + 0.0 if ll is not None else None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Overview — KPIs + health distribution + health trend
 # ─────────────────────────────────────────────────────────────────────────────
@@ -736,7 +753,7 @@ def get_overview(
             life_vals.append(ll)
     # Overdue assets count with their negative life left (same values as
     # /life-left's table), not as 0.
-    avg_life_left = round(mean(life_vals), 1) if life_vals else None
+    avg_life_left = _life_left_out(mean(life_vals)) if life_vals else None
     overdue_count = sum(1 for v in life_vals if _is_overdue(None, None, v))
 
     # ── KPI 3: Ageing Risk Index ─────────────────────────────────────────────
@@ -879,6 +896,10 @@ def get_overview(
             # test in it) - the denominator of the client's "critical share
             # of assessed assets", not the life KPIs' population.
             "equipment_count":    len(eq_ids),
+            # Assets with a Critical/High/Medium/Low risk (by slot) - the
+            # client's denominator for the critical share; equipment_count
+            # also counts assessed assets whose risk is Unknown / unscored.
+            "assessed_count":     sum(1 for ea in ea_list if slot(_eff_risk(ea.equipment_id, ea)) in RISK_SLOTS),
             "critical_count":     sum(1 for ea in ea_list if slot(_eff_risk(ea.equipment_id, ea)) == "Critical"),
             "high_count":         sum(1 for ea in ea_list if slot(_eff_risk(ea.equipment_id, ea)) == "High"),
         },
@@ -964,7 +985,7 @@ def get_life_left(
             "commissioned_year":  eq.commissioned_date.year if eq.commissioned_date else None,
             "age_years":          round(age, 1) if age is not None else None,
             "expected_life":      exp_life,
-            "life_left_years":    round(ll, 1) if ll is not None else None,
+            "life_left_years":    _life_left_out(ll),
             "health_score":       score,
             "condition":          _condition_from_score_and_risk(score, risk, db)
                                   if assessed else "Not assessed",
@@ -1010,7 +1031,7 @@ def get_life_left(
     life_trend = [
         {
             "period":        period,
-            "avg_life_left": round(mean(vals), 1),
+            "avg_life_left": _life_left_out(mean(vals)),
         }
         for period, vals in sorted(
             quarter_life.items(),
@@ -1069,7 +1090,12 @@ def get_ageing(
         eq_ids, ea_list, ea_map, db, date_from, date_to)
 
     eq_list = db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all() if eq_ids else []
-    type_ids = list({e.equipment_type_id for e in eq_list if e.equipment_type_id})
+    # life_eqs: every in-scope asset, assessed or not - same population as
+    # /overview's avg_life_left / overdue_count (life left needs no test).
+    life_eqs: list[Equipment] = _scoped_equipment(
+        dept_scope, db, organization_id=user.organization_id,
+        equipment_id=equipment_id, date_from=date_from, date_to=date_to)
+    type_ids = list({e.equipment_type_id for e in eq_list + life_eqs if e.equipment_type_id})
     type_map = {
         c.id: c.name
         for c in db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
@@ -1103,9 +1129,11 @@ def get_ageing(
     # Volatility: spread of the (capped) annual % changes, 0-100
     volatility = round(min(100.0, stdev(all_pct)), 1) if len(all_pct) >= 2 else None
 
-    # Life left risk: 100 = no life left, 0 = full life remaining
+    # Life left risk: 100 = no life left, 0 = full life remaining. Over every
+    # in-scope asset with a commissioned date, like the life KPIs - not only
+    # the assessed ones the parameter axes are limited to.
     life_vals = []
-    for eq in eq_list:
+    for eq in life_eqs:
         ll = _life_left(eq.commissioned_date, type_map.get(eq.equipment_type_id), db)
         exp = _expected_life(type_map.get(eq.equipment_type_id), db)
         # Share of expected life used, 0-100: past expected life (ll < 0)
@@ -1116,11 +1144,11 @@ def get_ageing(
 
     # Thermal stress: avg condition risk score for thermal params
     thermal_pa = [r for r in pa_rows if _match(r.parameter_label or r.parameter_key, _AGEING_AXES["thermal_stress"])]
-    thermal_stress = round(mean([_param_risk_score(r.condition, db) for r in thermal_pa]), 1) if thermal_pa else None
+    thermal_stress = _condition_risk_axis(thermal_pa, db)
 
     # Load factor: avg condition risk score for load params
     load_pa = [r for r in pa_rows if _match(r.parameter_label or r.parameter_key, _AGEING_AXES["load_factor"])]
-    load_factor = round(mean([_param_risk_score(r.condition, db) for r in load_pa]), 1) if load_pa else None
+    load_factor = _condition_risk_axis(load_pa, db)
 
     fleet_radar = {
         "aging_rate":     aging_rate,
@@ -1259,12 +1287,9 @@ def get_dielectric(
     for axis, keys in _DIEL_AXIS_KEYS.items():
         matched = [r for r in pa_rows
                    if _match(r.parameter_label or r.parameter_key, keys)]
-        if matched:
-            radar_fleet[axis] = round(mean([_param_risk_score(r.condition, db) for r in matched]), 1)
-        else:
-            # No readings for this axis: null ("no data"), not 0 - a 0 read
-            # as "no risk" on the radar.
-            radar_fleet[axis] = None
+        # No classified readings for this axis: null ("no data"), not 0 - a
+        # 0 read as "no risk" on the radar (nor 50 for unclassified ones).
+        radar_fleet[axis] = _condition_risk_axis(matched, db)
 
     radar_limit = {k: 100.0 for k in _DIEL_AXIS_KEYS}
 
@@ -1537,7 +1562,7 @@ def get_grouped(
             "label":         label,
             "count":         group_members[label],
             "avg_health":    round(mean(scores), 1) if scores else None,
-            "avg_life_left": round(mean(lives),  1) if lives  else None,
+            "avg_life_left": _life_left_out(mean(lives)) if lives else None,
             "avg_age_years": round(mean(ages),   1) if ages   else None,
             "critical":      conds.get("critical", 0),
             "poor":          conds.get("poor",     0),

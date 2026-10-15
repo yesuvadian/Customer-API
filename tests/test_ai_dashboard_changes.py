@@ -207,3 +207,148 @@ def test_settings_save_starts_one_coalesced_rescore(db, monkeypatch):
     assert len(started) == 1, "second save must not start a parallel job"
     (job,) = A._RECOMPUTE_JOBS.values()
     assert job["org_id"] is None and job["rerun"] is True
+
+
+# ── Background rescore: never two overlapping jobs, no lost save ────────────
+
+@pytest.fixture()
+def fake_jobs(monkeypatch):
+    """No real threads; returns the org scope of every job started."""
+    started = []
+
+    class FakeThread:
+        def __init__(self, target, args, **_):
+            started.append(args[1])
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(A.threading, "Thread", FakeThread)
+    monkeypatch.setattr(A, "_RECOMPUTE_JOBS", {})
+    return started
+
+
+ORG_A = "11111111-1111-1111-1111-111111111111"
+ORG_B = "22222222-2222-2222-2222-222222222222"
+
+
+def test_all_org_save_coalesces_with_running_org_job(fake_jobs):
+    """A Threshold Config save (all orgs) while an org's own recompute runs
+    widens that job's follow-up run to every org instead of starting a
+    second, overlapping all-org job."""
+    A.start_recompute_job(ORG_A)
+    job = A.start_recompute_job(None)
+    assert fake_jobs == [ORG_A], "all-org request must not start a parallel job"
+    assert job["org_id"] == ORG_A
+    (j,) = A._RECOMPUTE_JOBS.values()
+    assert j["rerun"] is True and j["rerun_org_id"] is None
+
+
+def test_rerun_scope_widens_across_requests(fake_jobs):
+    A.start_recompute_job(None)
+    A.start_recompute_job(ORG_A)
+    (j,) = A._RECOMPUTE_JOBS.values()
+    assert j["rerun_org_id"] == ORG_A          # only what was asked
+    A.start_recompute_job(ORG_A)
+    assert j["rerun_org_id"] == ORG_A
+    A.start_recompute_job(ORG_B)               # two orgs -> every org
+    assert j["rerun_org_id"] is None and fake_jobs == [None]
+
+
+def test_different_orgs_may_run_side_by_side(fake_jobs):
+    A.start_recompute_job(ORG_A)
+    A.start_recompute_job(ORG_B)
+    assert fake_jobs == [ORG_A, ORG_B]
+
+
+def test_finish_and_rerun_check_are_atomic(fake_jobs, monkeypatch):
+    """The job stays "running" until the locked finish step, so a save that
+    lands at the very end is either coalesced (and rerun) or starts its own
+    job - never set on a job that already read its rerun flag."""
+    import uuid
+    import database
+
+    first = A.start_recompute_job(ORG_A)["job_id"]
+    job = A._RECOMPUTE_JOBS[first]
+    seen = {}
+
+    class FakeSession:
+        def query(self, *a, **k):
+            raise RuntimeError("boom")
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            # A save arriving after the work, before the finish.
+            seen["status"] = job["status"]
+            A.start_recompute_job(None)
+
+    monkeypatch.setattr(database, "BackgroundSessionLocal", FakeSession)
+    A._run_recompute_job(first, uuid.UUID(ORG_A))
+    assert seen["status"] == "running", "job left 'running' before the locked finish"
+    assert job["status"] == "error" and job["error"] == "boom" and job["finished_at"]
+    # The save landed on the running job and was rerun over its scope.
+    assert fake_jobs[1:] == [None]
+
+
+def test_unknown_or_vanished_job_status(fake_jobs, org_admin):
+    """After a server restart _RECOMPUTE_JOBS is empty: a status poll for the
+    old job id is a clear 404, and "current job" is {}."""
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        A.get_recompute_job("0" * 32, user=org_admin)
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Recompute job not found"
+    assert A.get_current_recompute_job(user=org_admin) == {}
+
+
+# ── Global scoring config is super-admin only ───────────────────────────────
+
+def test_global_scoring_config_writes_need_super_admin():
+    import inspect
+    from fastapi import HTTPException
+    from routers import threshold_config as TC
+    with pytest.raises(HTTPException) as exc:
+        TC._require_platform_admin(type("U", (), {"id": None, "usertype": "org_admin"})())
+    assert exc.value.status_code == 403
+    with pytest.raises(HTTPException):
+        TC._require_platform_admin({"id": None, "usertype": "user"})
+    su = type("U", (), {"id": None, "usertype": "super_admin"})()
+    assert TC._require_platform_admin(su) is su
+    # Every write route of the three rescoring tables is guarded.
+    for fn in (TC.create_health_band, TC.update_health_band, TC.delete_health_band,
+               TC.create_condition_score, TC.update_condition_score, TC.delete_condition_score,
+               TC.create_status_condition, TC.update_status_condition, TC.delete_status_condition):
+        dep = inspect.signature(fn).parameters["current_user"].default
+        assert dep.dependency is TC._require_platform_admin, fn.__name__
+
+
+# ── Summary-table row drill lists every asset the row counts ────────────────
+
+_DRILLS = {
+    "by_type":          "equipment_type",
+    "by_make":          "manufacturer",
+    "by_voltage_class": "voltage_class",
+    "by_make_model":    "make_model",
+    "by_capacity_mva":  "capacity_mva",
+}
+
+
+@pytest.mark.parametrize("ranged", [False, True])
+def test_row_drill_count_equals_row_total(db, org_admin, ranged):
+    from datetime import date, timedelta
+    rng = {"date_from": date.today() - timedelta(days=365), "date_to": date.today()} if ranged else {}
+    bd = call(A.get_asset_breakdown, db=db, user=org_admin, **rng)
+    checked = 0
+    for view, param in _DRILLS.items():
+        rows: dict = {}
+        for key, n in bd[view].items():
+            drill_key = "unknown" if A._is_placeholder_group(key) else key
+            rows[drill_key] = rows.get(drill_key, 0) + n   # one "Not Specified" row
+        for drill_key, total in rows.items():
+            listed = call(A.get_dashboard_equipment, db=db, user=org_admin, page_size=1,
+                          tested_only=False, **{param: drill_key}, **rng)["total"]
+            assert listed == total, f"{view} row {drill_key!r}: drill {listed} != total {total}"
+            checked += 1
+    assert checked

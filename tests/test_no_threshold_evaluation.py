@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.evaluation_service import (  # noqa: E402
-    EvaluationService as E, NO_THRESHOLD_VALUES, NOT_ASSESSED,
+    EvaluationService as E, NO_THRESHOLD_VALUES, NOT_ASSESSED, TEMPLATE_NOT_FOUND,
 )
 
 
@@ -176,3 +176,25 @@ def test_reevaluate_stored_syncs_overall_result_and_keeps_extras(monkeypatch):
     assert r.overall_result == "fail"
     assert r.evaluation_result is ev
     assert ev["cumulative_lifecycle"] == {"status": "NORMAL"}
+
+
+# ── missing template ─────────────────────────────────────────────────────────
+
+def test_missing_template_is_critical_only_for_an_equipment_test(monkeypatch):
+    monkeypatch.setattr(E, "get_template_data", staticmethod(lambda *a, **k: None))
+    for is_test in (True, None):
+        assert E.run("gone", {}, db=None, is_equipment_test=is_test)["unassessed_reason"] == TEMPLATE_NOT_FOUND
+    ev = E.run("gone", {}, db=None, is_equipment_test=False)
+    assert ev["overall"] == "NORMAL"
+    assert "unassessed_reason" not in ev
+    assert E.run(None, {}, db=None, is_equipment_test=False)["overall"] == "NORMAL"
+
+
+# ── nameplate / inspection templates typed "test" by the sync ────────────────
+
+def test_static_nameplate_and_inspection_templates_are_exempt():
+    from test_templates import TEST_TEMPLATES
+    for key in ("power_transformer_nameplate", "transformer_physical_inspection",
+                "transformer_inspection"):
+        tpl = {**TEST_TEMPLATES[key], "template_type": "test"}  # as the sync stores it
+        assert E.requires_thresholds(tpl, is_equipment_test=True) is False, key
