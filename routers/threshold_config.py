@@ -23,6 +23,11 @@ Data Quality Index rule toggles:
                                             (GET/PUT): default expected life,
                                             life-stage cutoffs, ageing radar
                                             benchmark — see alter_ageing_config.py
+    /threshold-config/health-scoring     -> HealthScoringConfig, global
+                                            singleton (GET/PUT): how results
+                                            tables are scored (worst row /
+                                            row average) — see
+                                            alter_health_scoring_config.py
 
 These replace the previously hardcoded _RISK_BANDS / _SCORE / _CONDITION
 constants in services/analytics_engine.py, the _condition_from_score
@@ -50,6 +55,10 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+from services.analytics_engine import (
+    TABLE_SCORING_MODES,
+    TABLE_SCORING_WORST_ROW,
+)
 from models import (
     AgeingConfig,
     DqiRuleConfig,
@@ -59,6 +68,7 @@ from models import (
     EquipmentExpectedLife,
     EquipmentHealthBandThreshold,
     FailureCohortThresholdConfig,
+    HealthScoringConfig,
     ParameterConditionScore,
     TestStatusCondition,
     User,
@@ -1278,3 +1288,85 @@ def update_ageing_config(
     db.commit()
     db.refresh(row)
     return _ageing_response(row)
+
+
+# ── Health scoring (HealthScorer.score_test's table scoring mode) ───────────
+# Global like the condition scores whose points it combines, so the same
+# platform-admin write guard and automatic rescore apply. Created by
+# alter_health_scoring_config.py; until it's run GET answers the built-in
+# default and PUT answers 503 (the scorer keeps using "worst_row").
+
+_HEALTH_SCORING_SETUP_HINT = (
+    "Health scoring table doesn't exist yet -- run alter_health_scoring_config.py"
+)
+
+
+class HealthScoringConfigUpdate(BaseModel):
+    table_scoring_mode: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class HealthScoringConfigResponse(BaseModel):
+    # "worst_row" | "row_average"
+    table_scoring_mode: str
+    notes: Optional[str] = None
+    # False = no row saved yet; the value shown is the built-in default.
+    is_configured: bool
+
+
+def _health_scoring_response(row: Optional[HealthScoringConfig]) -> HealthScoringConfigResponse:
+    if row is None:
+        return HealthScoringConfigResponse(
+            table_scoring_mode=TABLE_SCORING_WORST_ROW, notes=None, is_configured=False)
+    return HealthScoringConfigResponse(
+        table_scoring_mode=row.table_scoring_mode, notes=row.notes, is_configured=True)
+
+
+@router.get("/health-scoring", response_model=HealthScoringConfigResponse)
+def get_health_scoring_config(db: Session = Depends(get_db)):
+    try:
+        row = db.query(HealthScoringConfig).order_by(HealthScoringConfig.id.asc()).first()
+    except ProgrammingError:
+        db.rollback()
+        row = None
+    return _health_scoring_response(row)
+
+
+@router.put("/health-scoring", response_model=HealthScoringConfigResponse)
+def update_health_scoring_config(
+    payload: HealthScoringConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
+    """Partial update of the single global row (created on first save).
+    Changing the mode rescores every organization in the background, same
+    as a condition-score change."""
+    data = payload.model_dump(exclude_unset=True)
+    mode = data.get("table_scoring_mode")
+    if "table_scoring_mode" in data and mode not in TABLE_SCORING_MODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"table_scoring_mode must be one of: {', '.join(TABLE_SCORING_MODES)}",
+        )
+    try:
+        row = db.query(HealthScoringConfig).order_by(HealthScoringConfig.id.asc()).first()
+    except ProgrammingError:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=_HEALTH_SCORING_SETUP_HINT)
+
+    old_mode = row.table_scoring_mode if row else TABLE_SCORING_WORST_ROW
+    if row is None:
+        row = HealthScoringConfig(table_scoring_mode=TABLE_SCORING_WORST_ROW,
+                                  created_by=current_user.id)
+        db.add(row)
+    if mode is not None:
+        row.table_scoring_mode = mode
+    if "notes" in data:
+        row.notes = data["notes"]
+    row.modified_by = current_user.id
+
+    db.commit()
+    if row.table_scoring_mode != old_mode:
+        _rescore_after_change()
+    db.refresh(row)
+    return _health_scoring_response(row)

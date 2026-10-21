@@ -38,6 +38,7 @@ from services.analytics_engine import (
     RISK_SLOTS,
     _load_condition_scores,
     accepted_test_result_ids,
+    risk_by_finding_checker,
     risk_slot_mapper,
 )
 
@@ -964,6 +965,7 @@ def get_life_left(
                 best[ta.equipment_id] = (ta, eff_date)
         latest_ta_map = {k: v[0] for k, v in best.items()}
 
+    _by_finding = risk_by_finding_checker(db)
     assets = []
     for eq in eq_list:
         ea = ea_map.get(eq.id)
@@ -990,6 +992,8 @@ def get_life_left(
             "condition":          _condition_from_score_and_risk(score, risk, db)
                                   if assessed else "Not assessed",
             "risk_level":         risk,
+            # Worst band only because of a CRITICAL finding, not the score.
+            "risk_by_finding":    _by_finding(score, risk),
             # For the row's actions menu ("Why Critical?" / "Why At Risk?").
             "critical_findings":  (src.critical_findings or []) if src is not None else [],
         })

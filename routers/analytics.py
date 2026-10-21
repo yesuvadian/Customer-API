@@ -61,7 +61,7 @@ from models import (
     TestingRequest,
 )
 from services.condition_recommendation_service import evaluate_for_equipment
-from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words, accepted_test_result_ids, risk_slot_mapper
+from services.analytics_engine import AnalyticsEngine, _risk_from_score, _load_risk_bands, _load_band_rank_words, accepted_test_result_ids, risk_slot_mapper, risk_by_finding_checker
 from category_labels import RiskLevelColors
 from routers.ai_graph import _LOCAL_TZ
 
@@ -2050,6 +2050,7 @@ def get_dashboard_equipment(
     # Rows for the whole list (cheap next to the queries above), cached for
     # the following pages - see _cache_key.
     items = []
+    _by_finding = risk_by_finding_checker(db)
     for eq in sorted_eq:
         ea = ea_map.get(eq.id)
         eff_score, eff_risk, eff_findings = _eff_score_risk_findings(eq.id)
@@ -2090,6 +2091,9 @@ def get_dashboard_equipment(
             "department_id":           str(eq.department_id) if eq.department_id else None,
             "health_score":            eff_score,
             "risk_level":              eff_risk,
+            # Worst band only because of a CRITICAL finding, not the score
+            # ("85.7 · Critical — by finding" in the app).
+            "risk_by_finding":         _by_finding(eff_score, eff_risk),
             "condition_summary":       reason,
             "critical_findings":       eff_findings,
             "parameters_at_risk":      ea.parameters_at_risk if ea else 0,
@@ -3011,6 +3015,7 @@ def get_equipment_test_types(
         for r in db.query(TestResult).filter(TestResult.id.in_(result_ids)).all()
     }
 
+    _by_finding = risk_by_finding_checker(db)
     result = []
     for row in latest:
         tr = tr_map.get(row.test_result_id)
@@ -3020,6 +3025,7 @@ def get_equipment_test_types(
             "test_category":     tr.test_category if tr else None,
             "health_score":      float(row.health_score) if row.health_score is not None else None,
             "risk_level":        row.risk_level,
+            "risk_by_finding":   _by_finding(row.health_score, row.risk_level),
             "condition_summary": row.condition_summary,
             "trend_summary":     row.trend_summary,
             "critical_findings": row.critical_findings or [],

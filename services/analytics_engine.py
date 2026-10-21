@@ -262,6 +262,11 @@ def _risk_from_score(
         return worst
     if score is None:
         return "Unknown"
+    return _band_for_score(score, bands)
+
+
+def _band_for_score(score: float, bands: list[tuple[float, str]]) -> str:
+    """The risk band a score alone falls in (no critical-finding override)."""
     for threshold, label in bands:
         if score >= threshold:
             return label
@@ -272,6 +277,51 @@ def _risk_from_score(
     # being labeled Critical instead of silently keeping the old label via
     # a hardcoded fallback.
     return bands[-1][1] if bands else "Unknown"
+
+
+def risk_by_finding_checker(db: Optional[Session]):
+    """Returns check(score, risk_level) -> True when risk_level is the worst
+    band only because of a CRITICAL finding (_risk_from_score's override),
+    i.e. the score on its own would land in a milder band - shown in the app
+    as e.g. "85.7 · Critical — by finding". Bands are loaded once, so call
+    this once per request and reuse the check for every row."""
+    bands = _load_risk_bands(db)
+    worst = _worst_band_label(db)
+
+    def check(score, risk_level) -> bool:
+        if worst is None or score is None or risk_level != worst:
+            return False
+        return _band_for_score(float(score), bands) != worst
+
+    return check
+
+
+TABLE_SCORING_WORST_ROW = "worst_row"
+TABLE_SCORING_ROW_AVERAGE = "row_average"
+TABLE_SCORING_MODES = (TABLE_SCORING_WORST_ROW, TABLE_SCORING_ROW_AVERAGE)
+
+
+def _load_table_scoring_mode(db: Optional[Session]) -> str:
+    """HealthScoringConfig.table_scoring_mode (Threshold Config "Table
+    scoring"). "worst_row" — the original behaviour — when there's no db
+    session, no row saved yet, or the table doesn't exist
+    (alter_health_scoring_config.py not run). The query runs in a SAVEPOINT
+    so a missing table doesn't poison the caller's transaction."""
+    if db is None:
+        return TABLE_SCORING_WORST_ROW
+    from sqlalchemy.exc import ProgrammingError
+    from models import HealthScoringConfig
+    try:
+        with db.begin_nested():
+            row = (
+                db.query(HealthScoringConfig.table_scoring_mode)
+                .order_by(HealthScoringConfig.id.asc())
+                .first()
+            )
+    except ProgrammingError:
+        return TABLE_SCORING_WORST_ROW
+    mode = row[0] if row else None
+    return mode if mode in TABLE_SCORING_MODES else TABLE_SCORING_WORST_ROW
 
 
 def accepted_test_result_ids(db: Session):
@@ -724,9 +774,17 @@ class HealthScorer:
         test_data: dict | None = None,
         condition_labels: dict[str, str] | None = None,
         scores: dict[str, float] | None = None,
+        table_scoring_mode: str = TABLE_SCORING_WORST_ROW,
     ) -> tuple[float, list[dict]]:
         """
         Returns (health_score 0–100, critical_findings list).
+
+        table_scoring_mode (_load_table_scoring_mode, Threshold Config
+        "Table scoring"): "worst_row" scores a results-table field as one
+        field at its overall (worst-row) status; "row_average" splits the
+        table's weight equally over its evaluated rows (see
+        _table_row_statuses). Critical findings are built the same way in
+        both modes, so risk level is unaffected.
 
         evaluation_result is the JSONB stored in TestResult.evaluation_result,
         which has {overall, fields: [{key, label, status, ...}]}.
@@ -806,7 +864,21 @@ class HealthScorer:
             condition = condition_labels.get(status, _DEFAULT_CONDITION.get(status, "Poor"))
             score     = scores.get(condition, _DEFAULT_SCORE.get(condition, 0.0))
 
-            weighted_sum  += score  * weight
+            row_statuses = (
+                HealthScorer._table_row_statuses(ef, status)
+                if table_scoring_mode == TABLE_SCORING_ROW_AVERAGE
+                and (field.get("type") == "table" or ef.get("type") == "table")
+                else []
+            )
+            if row_statuses:
+                # Row average: the table keeps its total weight, each
+                # evaluated row gets an equal share of it.
+                share = weight / len(row_statuses)
+                for rs in row_statuses:
+                    rc = condition_labels.get(rs, _DEFAULT_CONDITION.get(rs, "Poor"))
+                    weighted_sum += scores.get(rc, _DEFAULT_SCORE.get(rc, 0.0)) * share
+            else:
+                weighted_sum += score * weight
             total_weight  += weight
 
             # "Poor" (CRITICAL overall) or "Fair" (ALERT overall) - gating on
@@ -905,12 +977,42 @@ class HealthScorer:
                         critical_findings.append({
                             "key":          f"{fkey}.{name}",
                             "label":        display_name,
-                            "condition":    "Poor",
+                            # The row's own condition - an ALERT row is
+                            # "Fair", not the "Poor" this used to hardcode.
+                            "condition":    condition_labels.get(rs, _DEFAULT_CONDITION.get(rs, "Poor")),
                             "status":       rs,
                             "unit":         ru or None,
                             "value":        rv,
                             "breach_limit": rl,
                             "reason":       r_reason,
+                        })
+                    # The table's own verdict can be worse than every row -
+                    # a Duval Triangle zone (e.g. D2/T3) or an aggregate rule
+                    # with only ALERT gas rows. Without a finding for it
+                    # nothing carries that CRITICAL to _risk_from_score: under
+                    # worst-row scoring the score (0) still made the asset
+                    # Critical, but under row-average it lost Critical
+                    # altogether (seen on 3 dev DGA tests).
+                    _rank = HealthScorer._ROW_STATUS_RANK
+                    if _rank.get(status, 0) > max(
+                        _rank.get(str(r.get("status", "")).upper(), 0)
+                        for r in critical_rows
+                    ):
+                        table_label = field.get("label") or fkey
+                        if ef.get("duval_zone"):
+                            t_label = f"{table_label} — Duval zone {ef['duval_zone']}"
+                        else:
+                            t_label = table_label
+                        critical_findings.append({
+                            "key":          fkey,
+                            "label":        t_label,
+                            "condition":    condition,
+                            "status":       status,
+                            "unit":         None,
+                            "value":        None,
+                            "breach_limit": None,
+                            "reason":       ef.get("remedial_action_text")
+                                            or f"{table_label} — evaluated as {status}",
                         })
                 else:
                     # Non-table field
@@ -942,6 +1044,59 @@ class HealthScorer:
 
         raw = weighted_sum / total_weight
         return round(max(0.0, raw), 2), critical_findings
+
+    _ROW_STATUS_RANK = {"NORMAL": 0, "ALERT": 1, "CRITICAL": 2}
+
+    @staticmethod
+    def _table_row_statuses(ef: dict, field_status: str) -> list[str]:
+        """One status per evaluated row of a table field's evaluation, for
+        "row_average" scoring. Empty list = no row detail (e.g. an old
+        stored evaluation) - the caller then falls back to worst-row.
+
+          - THRESHOLD tables (DGA, oil, BDV): row_results, one per row.
+          - Column-rule tables (tan δ, DFR, functional tests):
+            column_results, one per CELL - grouped by row index, each row
+            at its worst cell, so a row isn't weighted by its column count.
+          - Rows with no status (blank readings, no threshold for that row)
+            aren't in either list, so they aren't counted.
+          - A table-level verdict that isn't any single row - a Duval
+            Triangle zone or an aggregate rule raising the table above its
+            worst row - counts as one extra row at that status; otherwise a
+            DGA table in a Critical Duval zone with every gas Normal would
+            score 100.
+        """
+        rank = HealthScorer._ROW_STATUS_RANK
+
+        def _norm(s) -> str:
+            # Template severity maps aren't always upper-case (see
+            # evaluation_service._has_severity), and the evaluator ranks an
+            # unrecognised cell status as NORMAL when it picks the table's
+            # worst row - match both here, or a "normal" cell would fall
+            # through condition_labels to "Poor".
+            s = str(s).upper()
+            return s if s in rank else "NORMAL"
+
+        statuses = [
+            _norm(r["status"]) for r in (ef.get("row_results") or [])
+            if isinstance(r, dict) and r.get("status")
+        ]
+        if not statuses:
+            by_row: dict = {}
+            for cr in ef.get("column_results") or []:
+                if not isinstance(cr, dict) or not cr.get("status"):
+                    continue
+                idx = cr.get("row")
+                st = _norm(cr["status"])
+                cur = by_row.get(idx)
+                if cur is None or rank[st] > rank[cur]:
+                    by_row[idx] = st
+            statuses = list(by_row.values())
+        if not statuses:
+            return []
+        worst_row = max(rank.get(s, 0) for s in statuses)
+        if rank.get(field_status, 0) > worst_row:
+            statuses.append(field_status)
+        return statuses
 
 
 def _last_test_date(ta_rows):
@@ -1041,11 +1196,13 @@ class AnalyticsEngine:
         # not re-queried per field.
         condition_labels = _load_condition_labels(self.db)
         condition_scores = _load_condition_scores(self.db)
+        table_scoring_mode = _load_table_scoring_mode(self.db)
 
         # Score the test
         health_score, critical_findings = HealthScorer.score_test(
             template_data, evaluation_result, test_data=test_data,
             condition_labels=condition_labels, scores=condition_scores,
+            table_scoring_mode=table_scoring_mode,
         )
 
         # An explicit tester recommendation of "Fail" overrides both the
