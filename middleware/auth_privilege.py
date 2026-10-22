@@ -58,6 +58,16 @@ SHARED_LOOKUP_GETS = {
     },
 }
 
+# Read-only per-request lookups (/<module>/<request_id>/<name>) that anyone
+# who can open the request's test result form may call - they reveal only
+# configuration, never results, and the endpoint itself still checks the
+# caller's organisation. Without this the stage gate below limited them to
+# the stage's active tester, so e.g. an L2/L3 approver filling in results
+# never saw the "No thresholds" badge (threshold-status got 403).
+SHARED_REQUEST_LOOKUP_GETS = {
+    "testing": {"threshold-status"},
+}
+
 
 def _find_stage_gate(db, parts, org_role_ids):
     """
@@ -499,6 +509,15 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             request.method == "GET"
             and len(parts) >= 2
             and parts[1] in SHARED_LOOKUP_GETS.get(module_name, ())
+        ):
+            db.close()
+            return await call_next(request)
+
+        # Per-request read-only lookups — see SHARED_REQUEST_LOOKUP_GETS
+        if (
+            request.method == "GET"
+            and len(parts) == 3
+            and parts[2] in SHARED_REQUEST_LOOKUP_GETS.get(module_name, ())
         ):
             db.close()
             return await call_next(request)

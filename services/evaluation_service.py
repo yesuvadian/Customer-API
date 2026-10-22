@@ -163,7 +163,9 @@ class EvaluationService:
         if EvaluationService.requires_thresholds(template_data, is_equipment_test):
             sources = EvaluationService.threshold_sources(template_data)
             if not sources:
-                return EvaluationService._unassessed_result(NO_THRESHOLD_VALUES)
+                # No threshold values at all: nothing can be checked, so the
+                # tester's own verdict decides (Fail -> CRITICAL, else NORMAL).
+                return EvaluationService._no_threshold_verdict_result(test_data)
             # Thresholds exist but none were applied: every threshold
             # parameter was left blank or matched no threshold row.
             # Template-level rules (calibration validity, cumulative
@@ -222,6 +224,44 @@ class EvaluationService:
         if reason == NO_THRESHOLD_VALUES:
             result["no_threshold_values"] = True
         return result
+
+    @staticmethod
+    def _no_threshold_verdict_result(test_data: Optional[dict]) -> dict:
+        """Equipment test whose template has NO threshold values: the
+        readings can't be checked, so the tester's verdict decides
+        (test_data['overall_result'], written by the test result form):
+          - Fail  -> CRITICAL (CAR, critical alert, equipment Critical)
+          - Pass / Conditional / Retest / none -> NORMAL
+        Thresholds that exist but weren't applied (blank readings) are a
+        different case - NOT_ASSESSED, still CRITICAL."""
+        verdict = str((test_data or {}).get("overall_result") or "").strip().lower()
+        if verdict in ("fail", "failed"):
+            result = EvaluationService._unassessed_result(NO_THRESHOLD_VALUES)
+            result["tester_verdict"] = verdict
+            text = ("Tester marked this test as Fail. No threshold values are "
+                    "configured for this test, so the result is based on the "
+                    "tester's assessment.")
+            result["summary"] = text
+            result["fields"][0].update(
+                label="Tester verdict (no thresholds configured)",
+                value="Fail", remedial_action_text=text)
+            return result
+        return {
+            "overall": NORMAL,
+            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            # No unassessed_reason here: reports treat that as a CRITICAL
+            # alert, and a tester Pass is not one.
+            "no_threshold_values": True,
+            "tester_verdict": verdict or None,
+            "fields": [{
+                "key": f"_{NO_THRESHOLD_VALUES}",
+                "label": "Tester verdict (no thresholds configured)",
+                "type": "config",
+                "value": verdict.title() if verdict else None,
+                "status": NORMAL,
+                "remedial_action_text": None,
+            }],
+        }
 
     @staticmethod
     def requires_thresholds(template_data: dict,

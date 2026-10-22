@@ -1,6 +1,8 @@
 """
-Unit tests for the "equipment test with no usable threshold → CRITICAL" rule
-in services/evaluation_service.py. Pure functions — no DB or server needed.
+Unit tests for the "equipment test with no usable threshold" rules in
+services/evaluation_service.py: no threshold values at all -> the tester's
+verdict decides (Fail -> CRITICAL, otherwise NORMAL); thresholds present but
+not applied / template missing -> CRITICAL. Pure functions — no DB or server needed.
 
     pytest tests/test_no_threshold_evaluation.py -p no:cacheprovider --noconftest
 """
@@ -25,12 +27,23 @@ NOTE = {"key": "note", "type": "text"}
 
 # ── scope ────────────────────────────────────────────────────────────────────
 
-def test_test_template_without_thresholds_is_critical():
-    ev = E.evaluate_test_data(_tpl(NOTE), {"note": "x"})
+def test_test_template_without_thresholds_tester_fail_is_critical():
+    ev = E.evaluate_test_data(_tpl(NOTE), {"note": "x", "overall_result": "fail"})
     assert ev["overall"] == "CRITICAL"
     assert ev["unassessed_reason"] == NO_THRESHOLD_VALUES
     assert ev["no_threshold_values"] is True
+    assert ev["tester_verdict"] == "fail"
     assert ev["fields"][0]["remedial_action_text"]
+
+
+def test_test_template_without_thresholds_tester_pass_is_normal():
+    for verdict in ("pass", "conditional", "retest", None):
+        data = {"note": "x"} if verdict is None else {"note": "x", "overall_result": verdict}
+        ev = E.evaluate_test_data(_tpl(NOTE), data)
+        assert ev["overall"] == "NORMAL", verdict
+        assert ev["no_threshold_values"] is True
+        # reports turn unassessed_reason into a CRITICAL alert - not for a Pass
+        assert "unassessed_reason" not in ev, verdict
 
 
 def test_non_test_templates_are_exempt():
@@ -43,8 +56,9 @@ def test_non_test_templates_are_exempt():
 def test_untyped_template_in_a_test_request_is_held_to_thresholds():
     # e.g. the static test_templates.py fallback — none carry template_type
     untyped = _tpl(NOTE, template_type=None)
-    ev = E.evaluate_test_data(untyped, {"note": "x"}, is_equipment_test=True)
+    ev = E.evaluate_test_data(untyped, {"note": "x", "overall_result": "fail"}, is_equipment_test=True)
     assert ev["unassessed_reason"] == NO_THRESHOLD_VALUES
+    assert ev["overall"] == "CRITICAL"
     assert E.evaluate_test_data(untyped, {"note": "x"}, is_equipment_test=False)["overall"] == "NORMAL"
 
 
@@ -164,7 +178,8 @@ class _Stored:
     template_key = "t"
     organization_id = None
     overall_result = "pass"
-    test_data = {"note": "x"}
+    # tester verdict Fail on a template with no thresholds -> CRITICAL
+    test_data = {"note": "x", "overall_result": "fail"}
     evaluation_result = {"overall": "NORMAL", "fields": [], "cumulative_lifecycle": {"status": "NORMAL"}}
 
 
