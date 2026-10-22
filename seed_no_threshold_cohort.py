@@ -4,7 +4,8 @@ seed_no_threshold_cohort.py
 -----------------------------------------------------------------------------
 Creates 5 equipment that form ONE fleet cohort (same type / make / voltage
 class / age band) plus a test type + template whose fields define NO
-threshold (no `evaluation` block), so results can never go ALERT/CRITICAL.
+threshold (no `evaluation` block), so the tester's verdict decides each
+result - these are all Fail, so CRITICAL.
 
 The cohort is what the "Equipment Failure Performance Analysis" report
 (query_key=equipment_failure_performance_report) aggregates on, so after
@@ -184,7 +185,7 @@ def seed(db):
             template_key=TEMPLATE_KEY,
             # Same result the app builds for a template with no thresholds:
             # tester's Fail verdict -> overall CRITICAL.
-            evaluation_result=EvaluationService._no_threshold_result(test_data),
+            evaluation_result=EvaluationService._no_threshold_verdict_result(test_data),
             tested_by=originator.id,
             tested_at=now,
         ))
