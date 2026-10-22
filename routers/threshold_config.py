@@ -48,7 +48,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
@@ -108,6 +108,24 @@ def _rescore_after_change() -> None:
         logging.getLogger(__name__).warning("threshold-config: rescore not started: %s", exc)
 
 
+def _reject_duplicate_band_threshold(db: Session, threshold, exclude_id=None) -> None:
+    """409 if another active health band already starts at this score: two
+    bands on one threshold make the risk level depend on row order. Compared
+    at the column's 2 dp, as stored."""
+    q = db.query(EquipmentHealthBandThreshold).filter(
+        EquipmentHealthBandThreshold.is_active == True,  # noqa: E712
+        EquipmentHealthBandThreshold.threshold == round(float(threshold), 2),
+    )
+    if exclude_id is not None:
+        q = q.filter(EquipmentHealthBandThreshold.id != exclude_id)
+    clash = q.first()
+    if clash:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Band '{clash.label}' already starts at {float(clash.threshold):g}",
+        )
+
+
 router = APIRouter(
     prefix="/threshold-config",
     tags=["threshold-config"],
@@ -117,16 +135,21 @@ router = APIRouter(
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
+# Each save rescores every organization's equipment straight away, so out-of-
+# range values are refused here. Health scores are 0-100, so a band's lower
+# bound must be too. Condition points may be negative (Poor = -100 pulls a
+# test's average down; the test score itself is floored at 0) but not above
+# 100, which would push health scores past 100.
 class HealthBandCreate(BaseModel):
     label: str
-    threshold: float
+    threshold: float = Field(ge=0, le=100)
     is_active: bool = True
     notes: Optional[str] = None
 
 
 class HealthBandUpdate(BaseModel):
     label: Optional[str] = None
-    threshold: Optional[float] = None
+    threshold: Optional[float] = Field(None, ge=0, le=100)
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -144,14 +167,14 @@ class HealthBandResponse(BaseModel):
 
 class ConditionScoreCreate(BaseModel):
     condition: str
-    score: float
+    score: float = Field(ge=-100, le=100)
     is_active: bool = True
     notes: Optional[str] = None
 
 
 class ConditionScoreUpdate(BaseModel):
     condition: Optional[str] = None
-    score: Optional[float] = None
+    score: Optional[float] = Field(None, ge=-100, le=100)
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -305,6 +328,8 @@ def create_health_band(
         EquipmentHealthBandThreshold.label == payload.label
     ).first():
         raise HTTPException(status_code=409, detail="A band with this label already exists")
+    if payload.is_active:
+        _reject_duplicate_band_threshold(db, payload.threshold)
 
     row = EquipmentHealthBandThreshold(
         label=payload.label,
@@ -340,6 +365,12 @@ def update_health_band(
             EquipmentHealthBandThreshold.id != band_id,
         ).first():
             raise HTTPException(status_code=409, detail="A band with this label already exists")
+    # Only when the threshold or active flag changes, so editing a label or
+    # notes never fails on existing data.
+    if "threshold" in data or "is_active" in data:
+        if data.get("is_active", row.is_active):
+            _reject_duplicate_band_threshold(
+                db, data.get("threshold", row.threshold), exclude_id=band_id)
     for field, value in data.items():
         setattr(row, field, value)
     row.modified_by = current_user.id
