@@ -39,6 +39,7 @@ from services.analytics_engine import accepted_test_result_ids
 from database import get_vendor_db
 from auth_utils import get_current_user
 from models import (
+    OUT_OF_SERVICE_EQUIPMENT_STATUSES,
     CategoryDetails,
     CategoryMaster,
     Equipment,
@@ -158,7 +159,7 @@ def get_filters(
     if type_ids:
         count_q = db.query(Equipment.equipment_type_id, func.count(Equipment.id)).filter(
             Equipment.equipment_type_id.in_(type_ids),
-            Equipment.status != "retired",
+            ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES),
         )
         if org_id:
             count_q = count_q.filter(Equipment.organization_id == org_id)
@@ -249,7 +250,7 @@ def get_dashboard(
     dept_ids = _collect_department_ids(effective_department_id, db) if effective_department_id else None
 
     # ── Equipment in scope ──────────────────────────────────────────────────
-    eq_q = db.query(Equipment.id, Equipment.department_id).filter(Equipment.status != "retired")
+    eq_q = db.query(Equipment.id, Equipment.department_id).filter(~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if org_id:
         eq_q = eq_q.filter(Equipment.organization_id == org_id)
     if equipment_type_id:
@@ -586,7 +587,7 @@ def get_equipment_for_slice(
     effective_department_id = department_id or (None if is_admin else user_dept_id)
     dept_ids = _collect_department_ids(effective_department_id, db) if effective_department_id else None
 
-    eq_q = db.query(Equipment).filter(Equipment.status != "retired")
+    eq_q = db.query(Equipment).filter(~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if org_id:
         eq_q = eq_q.filter(Equipment.organization_id == org_id)
     if equipment_type_id:

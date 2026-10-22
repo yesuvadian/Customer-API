@@ -403,8 +403,12 @@ class ParameterAnalyzer:
         evaluation: dict,
         current_value: Optional[float] = None,
         current_date:  Optional[datetime] = None,
+        tuning:        Optional[dict] = None,
     ) -> dict:
         """
+        tuning: the org's resolved settings (services.tunable_settings.
+          get_settings) - overrides the .env-based class constants below
+          for min trend points / trend window / stable fraction / min R^2.
         history  : [(tested_at, float_value), ...] sorted oldest-first
         evaluation: the field's `evaluation` dict from template
         current_value/current_date: the reading being analysed right now -
@@ -415,6 +419,12 @@ class ParameterAnalyzer:
         days_to_breach, is_anomaly, anomaly_type, anomaly_detail,
         history_count.
         """
+        _t = tuning or {}
+        _min_trend_points = _t.get("analytics_min_trend_points", ParameterAnalyzer.MIN_TREND_POINTS)
+        _trend_window     = _t.get("analytics_trend_window", ParameterAnalyzer.TREND_WINDOW)
+        _stable_fraction  = _t.get("analytics_stable_fraction", ParameterAnalyzer.STABLE_FRACTION)
+        _min_r_squared    = _t.get("analytics_min_trend_r_squared", ParameterAnalyzer.MIN_TREND_R_SQUARED)
+
         result: dict = {
             "history_count":      len(history) + 1,  # +1 for current reading
             "trend":              "Insufficient_Data",
@@ -455,7 +465,7 @@ class ParameterAnalyzer:
         if len(values) >= 4:
             ParameterAnalyzer._detect_anomaly(values, result)
 
-        if len(history) < ParameterAnalyzer.MIN_TREND_POINTS:
+        if len(history) < _min_trend_points:
             return result
 
         # Trend fit only looks at the most recent TREND_WINDOW readings
@@ -466,7 +476,7 @@ class ParameterAnalyzer:
         # readings naturally push old ones out of the fit. history_count in
         # the result above is still the TRUE lifetime count (unwindowed) —
         # only the regression inputs below are limited.
-        window = ParameterAnalyzer.TREND_WINDOW
+        window = _trend_window
         if len(values) > window:
             values = values[-window:]
             dates  = dates[-window:]
@@ -492,7 +502,7 @@ class ParameterAnalyzer:
                 result["pct_change_annual"] = round(annual_change / abs(prior_value) * 100, 2)
 
             val_range = abs(prior_value) or abs(values[-1]) or 1
-            stable_threshold = val_range * ParameterAnalyzer.STABLE_FRACTION
+            stable_threshold = val_range * _stable_fraction
             if annual_change > stable_threshold:
                 result["trend"] = "Increasing"
             elif annual_change < -stable_threshold:
@@ -529,8 +539,8 @@ class ParameterAnalyzer:
 
         # Trend classification
         val_range = max(values) - min(values) if len(values) > 1 else abs(values[0])
-        stable_threshold = (val_range or abs(values[-1]) or 1) * ParameterAnalyzer.STABLE_FRACTION
-        fit_is_reliable = r_sq >= ParameterAnalyzer.MIN_TREND_R_SQUARED
+        stable_threshold = (val_range or abs(values[-1]) or 1) * _stable_fraction
+        fit_is_reliable = r_sq >= _min_r_squared
         if not fit_is_reliable:
             # The line doesn't explain enough of the actual variance to
             # trust a direction from it, regardless of how large the
@@ -692,6 +702,30 @@ class HealthScorer:
         scores = scores if scores is not None else _DEFAULT_SCORE
         if not evaluation_result:
             return None, []
+
+        # Equipment test on a template with no threshold values
+        # (EvaluationService._no_threshold_result): no readings to score, so
+        # the tester's verdict decides. Fail (overall CRITICAL) scores 0 with a
+        # CRITICAL finding - _risk_from_score() then marks the test and the
+        # equipment Critical; a real 0, not None, because date-filtered views
+        # and the health-band charts drop scoreless snapshots as "not
+        # assessed". Pass / anything else: unscored, no findings - the
+        # equipment is not made Critical.
+        if evaluation_result.get("no_threshold_values"):
+            if evaluation_result.get("overall") != CRITICAL:
+                return None, []
+            return 0.0, [{
+                "key":          f.get("key"),
+                "label":        f.get("label"),
+                "condition":    condition_labels.get(CRITICAL, "Poor"),
+                "status":       CRITICAL,
+                "unit":         None,
+                "value":        f.get("value"),
+                "breach_limit": None,
+                "reason":       f.get("remedial_action_text")
+                                or "Tester marked this test as Fail",
+            } for f in evaluation_result.get("fields", [])
+              if isinstance(f, dict) and f.get("status") == CRITICAL]
 
         field_statuses: dict[str, str] = {
             f["key"]: f["status"]
@@ -964,6 +998,9 @@ class AnalyticsEngine:
         # not re-queried per field.
         condition_labels = _load_condition_labels(self.db)
         condition_scores = _load_condition_scores(self.db)
+        # Org's trend-analysis settings (Threshold Config -> Analytics & SLA).
+        from services.tunable_settings import get_settings as _ts
+        trend_tuning = _ts(self.db, organization_id)
 
         # Score the test
         health_score, critical_findings = HealthScorer.score_test(
@@ -1123,6 +1160,7 @@ class AnalyticsEngine:
                         history, ev,
                         current_value=current_val,
                         current_date=result.tested_at or result.cts,
+                        tuning=trend_tuning,
                     )
 
                     pa = self._upsert_parameter_analytics(
@@ -1324,6 +1362,7 @@ class AnalyticsEngine:
                                     history, {},
                                     current_value=current_val,
                                     current_date=result.tested_at or result.cts,
+                                    tuning=trend_tuning,
                                 )
 
                             pa = self._upsert_parameter_analytics(
@@ -1525,9 +1564,16 @@ class AnalyticsEngine:
 
         # Gather equipment from this department AND all descendants (single query)
         all_dept_ids = self._collect_descendant_dept_ids(department_id)
+        # In-service equipment only: a retired / replaced / condemned /
+        # decommissioned unit keeps its EquipmentAnalytics row (history), but
+        # must no longer pull down its zone's health or sit in its Critical
+        # tally.
+        from models import OUT_OF_SERVICE_EQUIPMENT_STATUSES
         eq_rows = (
             self.db.query(EquipmentAnalytics)
-            .filter(EquipmentAnalytics.department_id.in_(all_dept_ids))
+            .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
+            .filter(EquipmentAnalytics.department_id.in_(all_dept_ids),
+                    ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
             .all()
         )
 

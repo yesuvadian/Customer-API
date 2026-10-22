@@ -43,6 +43,7 @@ import config
 from database import get_vendor_db
 from auth_utils import get_current_user
 from models import (
+    OUT_OF_SERVICE_EQUIPMENT_STATUSES,
     CategoryMaster,
     Equipment,
     User,
@@ -478,7 +479,7 @@ def get_asset_breakdown(
     }
 
     # Active equipment — split into real assets vs test kits
-    active_q = db.query(Equipment).filter(Equipment.status != "retired")
+    active_q = db.query(Equipment).filter(~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if org_id:
         active_q = active_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
@@ -497,7 +498,7 @@ def get_asset_breakdown(
     )
 
     # Retired equipment for failure-year breakdown
-    retired_q = db.query(Equipment).filter(Equipment.status == "retired")
+    retired_q = db.query(Equipment).filter(Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if org_id:
         retired_q = retired_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
@@ -892,7 +893,7 @@ def get_analytics_dashboard(
     # Retired equipment keeps its EquipmentAnalytics row after retirement;
     # exclude it like /asset-breakdown and /dashboard/equipment do, so the
     # risk tiles and the Risk Equipment list count the same assets.
-    _retired_q = db.query(Equipment.id).filter(Equipment.status == "retired")
+    _retired_q = db.query(Equipment.id).filter(Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if org_id:
         _retired_q = _retired_q.filter(Equipment.organization_id == org_id)
     retired_eq_ids = {row[0] for row in _retired_q.all()}
@@ -906,7 +907,7 @@ def get_analytics_dashboard(
     _TERMINAL_STATUSES_KPI = ("completed", "closed")
 
     # All equipment IDs in scope (from Equipment table — includes untested equipment)
-    _scope_eq_q = db.query(Equipment.id).filter(Equipment.status != "retired")
+    _scope_eq_q = db.query(Equipment.id).filter(~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if org_id:
         _scope_eq_q = _scope_eq_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
@@ -1325,7 +1326,7 @@ def get_analytics_dashboard(
             .join(Equipment, Equipment.id == TestingRequest.equipment_id)
             .filter(
                 Equipment.department_id.in_(all_descendant_ids),
-                Equipment.status != "retired",
+                ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES),
                 TestingRequest.status.in_(("completed", "closed")),
             )
         )
@@ -1340,7 +1341,7 @@ def get_analytics_dashboard(
             db.query(Equipment.department_id, func.count(Equipment.id))
             .filter(
                 Equipment.department_id.in_(all_descendant_ids),
-                Equipment.status != "retired",
+                ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES),
             )
         )
         if testkit_type_ids:
@@ -1462,7 +1463,12 @@ def run_test_analytics(
         tr.template_key, db, org_id=tr.organization_id
     )
     if template_data:
-        fresh_eval = EvaluationService.evaluate_test_data(template_data, tr.test_data or {}, db)
+        from models import TestingRequest as _TReq
+        fresh_eval = EvaluationService.evaluate_test_data(
+            template_data, tr.test_data or {}, db,
+            require_thresholds=EvaluationService.requires_thresholds(
+                db.get(_TReq, tr.testing_request_id)),
+        )
         tr.evaluation_result = fresh_eval
         db.flush()
 
@@ -1781,7 +1787,7 @@ def get_dashboard_equipment(
     if _testkit_ids:
         eq_q = eq_q.filter((Equipment.equipment_type_id == None) | ~Equipment.equipment_type_id.in_(_testkit_ids))  # noqa: E711
     if not failure_year and not failure_unknown:
-        eq_q = eq_q.filter(Equipment.status != "retired")
+        eq_q = eq_q.filter(~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if search:
         _esc = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         eq_q = eq_q.filter(Equipment.ueic.ilike(f"%{_esc}%", escape="\\"))
@@ -1807,10 +1813,10 @@ def get_dashboard_equipment(
         eq_q = eq_q.filter(Equipment.commissioned_date == None)  # noqa: E711
     if failure_year:
         from sqlalchemy import extract as _extract
-        eq_q = eq_q.filter(Equipment.status == "retired")
+        eq_q = eq_q.filter(Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
         eq_q = eq_q.filter(_extract("year", Equipment.retired_date) == failure_year)
     elif failure_unknown:
-        eq_q = eq_q.filter(Equipment.status == "retired", Equipment.retired_date == None)  # noqa: E711
+        eq_q = eq_q.filter(Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES), Equipment.retired_date == None)  # noqa: E711
     all_eq: list[Equipment] = eq_q.all()
 
     # Year replaced = year the replacing equipment was commissioned, same
@@ -2191,7 +2197,7 @@ def get_department_equipment(
 
     equipment_rows = (
         db.query(Equipment)
-        .filter(Equipment.department_id.in_(dept_ids), Equipment.status != "retired")
+        .filter(Equipment.department_id.in_(dept_ids), ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
         .all()
     )
 
@@ -2244,7 +2250,7 @@ def get_condition_risk_matrix(
     # department-scoped user only within their departments.
     org_id, dept_ids = _resolve_dashboard_scope(db, user, department_id)
 
-    equipment_q = db.query(Equipment).filter(Equipment.status != "retired")
+    equipment_q = db.query(Equipment).filter(~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if org_id:
         equipment_q = equipment_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
@@ -2413,7 +2419,7 @@ def get_deterioration_watch_list(
     # department-scoped user only within their departments.
     org_id, dept_ids = _resolve_dashboard_scope(db, user, department_id)
 
-    equipment_q = db.query(Equipment).filter(Equipment.status != "retired")
+    equipment_q = db.query(Equipment).filter(~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if org_id:
         equipment_q = equipment_q.filter(Equipment.organization_id == org_id)
     if dept_ids:
@@ -2497,7 +2503,8 @@ def get_deterioration_watch_list(
     # well). Still the only signal available for a parameter with no
     # ParameterThresholdBand config at all; superseded by a real breach
     # forecast below wherever one is available.
-    _MIN_WATCH_HISTORY = config.ANALYTICS_MIN_WATCH_HISTORY
+    from services.tunable_settings import get_settings as _ts
+    _MIN_WATCH_HISTORY = _ts(db, org_id)["analytics_min_watch_history"]
 
     # Real breach-proximity check, using ParameterThresholdBand (see the
     # module-level helpers above) instead of the engine's own

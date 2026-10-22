@@ -85,7 +85,8 @@ class EvaluationService:
 
     @staticmethod
     def evaluate_test_data(template_data: dict, test_data: dict,
-                            db: Optional[Session] = None) -> dict:
+                            db: Optional[Session] = None,
+                            require_thresholds: bool = False) -> dict:
         """
         Walk every field in *template_data* that has evaluation enabled,
         read its value from *test_data*, compare against criteria, and return:
@@ -141,10 +142,14 @@ class EvaluationService:
                         overall_rank = rank
                     field_results.append(result)
 
-        # A test with no threshold values configured anywhere can't be
-        # assessed, so it must not pass silently as NORMAL — flag it CRITICAL.
-        if not EvaluationService.has_threshold_values(template_data):
-            return EvaluationService._no_threshold_result()
+        # An equipment test with no threshold values configured anywhere
+        # can't be assessed automatically, so the tester's verdict decides:
+        # Fail -> CRITICAL, anything else -> NORMAL. Only when the caller asks
+        # (require_thresholds — see requires_thresholds()): stage /
+        # failure-registry / audit forms have no thresholds by design and
+        # keep the plain field-based result.
+        if require_thresholds and not EvaluationService.has_threshold_values(template_data):
+            return EvaluationService._no_threshold_result(test_data)
 
         overall_labels = [NORMAL, ALERT, CRITICAL]
         return {
@@ -154,22 +159,31 @@ class EvaluationService:
         }
 
     @staticmethod
-    def _no_threshold_result() -> dict:
+    def _no_threshold_result(test_data: Optional[dict] = None) -> dict:
+        """Result for an equipment test whose template has no threshold
+        values: driven by the tester's verdict (test_data['overall_result'],
+        written by the test result form from the recommendation wizard).
+        Only an explicit Fail reacts (CRITICAL -> CAR, critical alert,
+        equipment Critical); Pass / Conditional / Retest / no verdict stay
+        NORMAL."""
+        verdict = str((test_data or {}).get("overall_result") or "").strip().lower()
+        failed = verdict in ("fail", "failed")
         return {
-            "overall": CRITICAL,
+            "overall": CRITICAL if failed else NORMAL,
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
             "no_threshold_values": True,
+            "tester_verdict": verdict or None,
             "fields": [{
-                "key": "_no_threshold_values",
-                "label": "Threshold configuration",
-                "type": "config",
-                "value": None,
-                "status": CRITICAL,
+                "key": "_tester_verdict",
+                "label": "Tester verdict (no thresholds configured)",
+                "type": "verdict",
+                "value": verdict.title() if verdict else None,
+                "status": CRITICAL if failed else NORMAL,
                 "remedial_action_text": (
-                    "No threshold values are configured for this test, so the "
-                    "results cannot be assessed. Configure thresholds for this "
-                    "test template and re-evaluate."
-                ),
+                    "Tester marked this test as Fail. No threshold values are "
+                    "configured for this test, so the result is based on the "
+                    "tester's assessment."
+                ) if failed else None,
             }],
         }
 
@@ -1215,12 +1229,28 @@ class EvaluationService:
         return current - baseline
 
     @staticmethod
-    def run(template_key: str, test_data: dict, db: Session, org_id=None) -> dict:
+    def run(template_key: str, test_data: dict, db: Session, org_id=None,
+            require_thresholds: bool = False) -> dict:
         """Convenience: resolve template then evaluate."""
         tpl = EvaluationService.get_template_data(template_key, db, org_id=org_id)
         if not tpl:
-            return EvaluationService._no_threshold_result()
-        return EvaluationService.evaluate_test_data(tpl, test_data, db)
+            if require_thresholds:
+                return EvaluationService._no_threshold_result(test_data)
+            return {"overall": NORMAL, "evaluated_at": datetime.now(timezone.utc).isoformat(), "fields": []}
+        return EvaluationService.evaluate_test_data(tpl, test_data, db, require_thresholds)
+
+    @staticmethod
+    def requires_thresholds(testing_request) -> bool:
+        """Whether results on this request must have thresholds configured
+        (else CRITICAL): equipment tests only, not failure-registry,
+        maintenance, inspection or other stage/form submissions. Calibration
+        tickets are request_category 'test' too, but their template has no
+        thresholds by design - calibration has its own pass/fail and due-date
+        logic (analytics_engine calibration fallback) - so they're excluded."""
+        if getattr(testing_request, "is_calibration", False):
+            return False
+        cat = getattr(testing_request, "request_category", None)
+        return getattr(cat, "value", cat) == "test"
 
 
 # ─── Utility ──────────────────────────────────────────────────────────────────

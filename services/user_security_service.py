@@ -101,10 +101,22 @@ class UserSecurityService(UTCDateTimeMixin):
     # Lock OTP
     # -------------------
     @classmethod
+    def _otp_policy(cls, db: Session, user_id) -> dict:
+        """OTP policy for this user's org (Threshold Config -> Login & Password
+        Policy, .env fallback) - replaces the class constants above, which
+        disagreed with routers/totp.py's own copies of the same settings."""
+        from services.tunable_settings import get_settings
+        org_id = None
+        if user_id:
+            org_id = (db.query(models.User.organization_id)
+                      .filter(models.User.id == user_id).scalar())
+        return get_settings(db, org_id)
+
+    @classmethod
     def lock_user_otp(cls, db: Session, user_id: str, now: datetime = None):
         user_sec = cls.get_user_security(db, user_id)
         now = cls._utc_now() if now is None else cls._make_aware(now)
-        locked_until = now + timedelta(minutes=cls.OTP_LOCK_MINUTES)
+        locked_until = now + timedelta(minutes=cls._otp_policy(db, user_id)["otp_lock_duration_min"])
 
         user_sec.otp_locked_until = locked_until
         user_sec.otp_attempts = 0
@@ -200,7 +212,8 @@ class UserSecurityService(UTCDateTimeMixin):
         user_security.last_otp_sent_at = cls._utc_now()
 
         # Update otp_expiry for new OTP
-        user_security.otp_expiry = cls._utc_now() + timedelta(minutes=cls.OTP_VALIDITY_MINUTES)
+        user_security.otp_expiry = cls._utc_now() + timedelta(
+            minutes=cls._otp_policy(db, user_id)["otp_validity_min"])
 
         # Increment otp_resend_count safely
         user_security.otp_resend_count = (user_security.otp_resend_count or 0) + 1
@@ -221,12 +234,16 @@ class UserSecurityService(UTCDateTimeMixin):
     # Increment OTP attempts
     # -------------------
     @classmethod
-    def increment_otp_attempts(cls, db: Session, user_id: str, lock_duration_minutes: int = 15):
+    def increment_otp_attempts(cls, db: Session, user_id: str, lock_duration_minutes: int = None):
         user_sec = cls.get_user_security(db, user_id)
         user_sec.otp_attempts += 1
 
-        if user_sec.otp_attempts >= cls.OTP_MAX_ATTEMPTS:
-            user_sec.otp_locked_until = cls._utc_now() + timedelta(minutes=lock_duration_minutes)
+        policy = cls._otp_policy(db, user_id)
+        if user_sec.otp_attempts >= policy["max_otp_attempts"]:
+            # Lock length used to be a hardcoded 15 (no caller passes one),
+            # ignoring OTP_LOCK_DURATION_MIN entirely.
+            user_sec.otp_locked_until = cls._utc_now() + timedelta(
+                minutes=lock_duration_minutes or policy["otp_lock_duration_min"])
             user_sec.otp_attempts = 0
 
         db.commit()

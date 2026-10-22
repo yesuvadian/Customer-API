@@ -749,11 +749,12 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         db: Session,
     ) -> dict:
 
-        try:
-            from config import (
-                SCHEDULE_ADVANCE_DAYS as _adv
-            )
-        except Exception:
+        # Advance window is per org (Threshold Config -> Analytics & SLA,
+        # .env fallback). The query looks ahead by the LARGEST window any org
+        # uses; each schedule is then checked against its own org's window.
+        from services.tunable_settings import get_settings as _ts, max_over_orgs
+        _adv = max_over_orgs(db, "schedule_advance_days")
+        if _adv is None:
             _adv = 15
 
         now = datetime.now(timezone.utc)
@@ -786,6 +787,10 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         )
 
         for schedule in due_schedules:
+
+            _org_adv = _ts(db, schedule.organization_id)["schedule_advance_days"]
+            if _org_adv is not None and schedule.next_run_date > now + timedelta(days=_org_adv + 1):
+                continue  # inside the global look-ahead, outside this org's own
 
             success = (
                 TestRequestScheduleService

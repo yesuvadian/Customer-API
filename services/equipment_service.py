@@ -811,7 +811,33 @@ class EquipmentService:
         db.flush()
         if was_active:
             cls._cascade_equipment_left_active(db, equipment, reason, modified_by)
+        cls._refresh_department_health(db, equipment)
         return equipment
+
+    @staticmethod
+    def _refresh_department_health(db: Session, equipment: Equipment) -> None:
+        """Recompute the department/zone health roll-up after a unit leaves
+        service - AnalyticsEngine.run_for_department skips out-of-service
+        units, but only runs when asked, so without this a retired Critical
+        unit kept dragging its zone down until the next test there.
+        Best-effort: never blocks the status change itself."""
+        try:
+            # Cached dashboard widgets (Redis, 15 min) would otherwise keep
+            # listing the unit as Critical until they expire.
+            from services.dashboard_service import invalidate_dashboard_cache
+            invalidate_dashboard_cache(equipment.organization_id)
+        except Exception:
+            pass
+        if not equipment.department_id:
+            return
+        try:
+            from services.analytics_engine import AnalyticsEngine
+            AnalyticsEngine(db).run_for_department(equipment.department_id)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "department health refresh failed for equipment %s", equipment.id,
+                exc_info=True)
 
     @classmethod
     def set_equipment_status(
@@ -875,6 +901,8 @@ class EquipmentService:
             cls._cascade_equipment_left_active(
                 db, equipment, reason or f"Marked {new_status}.", modified_by
             )
+        if new_status in terminal_statuses:
+            cls._refresh_department_health(db, equipment)
         return equipment
 
     @classmethod
@@ -1186,14 +1214,38 @@ class EquipmentService:
             float(_threshold_row.outlier_z_score) if _threshold_row is not None
             else _config.ANALYTICS_ANOMALY_Z
         )
-        limit     = _config.FAILURE_COHORT_DASHBOARD_LIMIT
+        # Display settings: DB row (Threshold Config -> Failure Cohorts),
+        # NULL column / no row -> .env.
+        _default_row = (
+            db.query(FailureCohortThresholdConfig)
+            .filter(FailureCohortThresholdConfig.organization_id.is_(None))
+            .first()
+        )
 
+        def _row_int(col, env_val):
+            # org row -> system default row -> .env
+            for r in (_threshold_row, _default_row):
+                v = getattr(r, col, None) if r is not None else None
+                if v is not None:
+                    return int(v)
+            return env_val
+        limit            = _row_int("dashboard_limit", _config.FAILURE_COHORT_DASHBOARD_LIMIT)
+        trend_years      = _row_int("trend_years", _config.FAILURE_COHORT_TREND_YEARS)
+        trend_max_series = _row_int("trend_max_series", _config.FAILURE_COHORT_TREND_MAX_SERIES)
+
+        # Every unit of the make/model, INCLUDING retired / replaced /
+        # condemned / decommissioned ones: this is a reliability history, and
+        # units are usually taken out of service *because* they failed.
+        # Dropping them (as this used to, via status != retired) erased a
+        # make's worst failures the moment its units were replaced - a bad
+        # make/model looked healthy right after the fix. Each unit carries its
+        # status, and active_unit_count says how many are still in service.
         equip_q = (
             db.query(Equipment.id, Equipment.ueic, Equipment.manufacturer, Equipment.model_number,
-                      CategoryMaster.name.label("equipment_type"))
+                      CategoryMaster.name.label("equipment_type"), Equipment.status,
+                      Equipment.replaced_by_id)
             .outerjoin(CategoryMaster, CategoryMaster.id == Equipment.equipment_type_id)
             .filter(Equipment.organization_id == organization_id,
-                    Equipment.status != EquipmentStatus.retired,
                     Equipment.manufacturer.isnot(None))
         )
         if department_ids:
@@ -1205,7 +1257,17 @@ class EquipmentService:
         cohorts: dict = {}
         equip_to_cohort: dict = {}
         unit_ueic_by_id: dict = {}
-        for eq_id, ueic, manufacturer, model_number, equipment_type in equip_rows:
+        unit_status_by_id: dict = {}
+        replaced_by_by_id: dict = {}
+        for eq_id, ueic, manufacturer, model_number, equipment_type, eq_status, replaced_by in equip_rows:
+            # replace_equipment() retires the old unit (status 'retired') and
+            # links it via replaced_by_id - report that as 'replaced' so a
+            # replacement reads differently from a plain retirement.
+            unit_status_by_id[eq_id] = (
+                "replaced" if replaced_by is not None
+                else eq_status.value if eq_status is not None else "active")
+            if replaced_by is not None:
+                replaced_by_by_id[eq_id] = replaced_by
             # None model_number groups every such unit of this type/make
             # into one coarser cohort (dict keys with a None component
             # still compare/hash consistently) rather than being excluded.
@@ -1222,6 +1284,13 @@ class EquipmentService:
             unit_ueic_by_id[eq_id] = ueic
 
         eq_ids = list(equip_to_cohort.keys())
+        # UEIC of each replacement unit (may be another make/model, i.e. in a
+        # different cohort or none at all, so looked up directly).
+        replacement_ueic_by_id = dict(
+            db.query(Equipment.id, Equipment.ueic)
+            .filter(Equipment.id.in_(set(replaced_by_by_id.values())))
+            .all()
+        ) if replaced_by_by_id else {}
         tr_rows = (
             db.query(TestingRequest.id, TestingRequest.equipment_id,
                       TestingRequest.completed_at, TestingRequest.requested_date,
@@ -1265,7 +1334,6 @@ class EquipmentService:
         # 12-month window (the calibration trend's convention) would show
         # almost nothing. Years are zero-filled across the whole window so
         # a line chart doesn't skip gaps between sparse years.
-        trend_years = _config.FAILURE_COHORT_TREND_YEARS
         current_year = datetime.now(timezone.utc).year
         trend_start_year = current_year - trend_years + 1
         trend_year_range = list(range(trend_start_year, current_year + 1))
@@ -1302,6 +1370,8 @@ class EquipmentService:
                 entry["equipment"].append({
                     "equipment_id": str(unit_id),
                     "ueic": unit_ueic_by_id.get(unit_id),
+                    "status": unit_status_by_id.get(unit_id),
+                    "replaced_by_ueic": replacement_ueic_by_id.get(replaced_by_by_id.get(unit_id)),
                     "failure_count": unit_failure_count,
                     "mtbf_days": round(unit_mtbf, 1) if unit_mtbf is not None else None,
                 })
@@ -1340,6 +1410,12 @@ class EquipmentService:
             entry["fr_count"] = fr_count
             entry["critical_only_count"] = critical_only_count
             entry["unit_count"] = len(entry["unit_ids"])
+            # Out of service = retired / replaced / condemned / decommissioned
+            # (under repair / maintenance still count as in service).
+            entry["active_unit_count"] = sum(
+                1 for u in entry["unit_ids"]
+                if unit_status_by_id.get(u) not in
+                ("retired", "replaced", "condemned", "decommissioned"))
             entry["mtbf_days"] = round(sum(unit_mtbfs) / len(unit_mtbfs), 1) if unit_mtbfs else None
             entry["yearly_trend"] = [
                 {"year": y, "failure_count": yearly_counts[y]} for y in trend_year_range
@@ -1371,7 +1447,6 @@ class EquipmentService:
         # Trend lines are capped to the worst N cohorts so the chart stays
         # readable — everything still gets a rate/MTBF row in the table,
         # just not a line on the trend chart.
-        trend_max_series = _config.FAILURE_COHORT_TREND_MAX_SERIES
         for i, entry in enumerate(results):
             if i >= trend_max_series:
                 entry["yearly_trend"] = None

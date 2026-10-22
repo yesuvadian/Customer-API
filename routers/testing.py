@@ -788,6 +788,35 @@ def get_test_template(
     return service.get_template(test_type_id, org_id=current_user.organization_id)
 
 
+@router.get("/{request_id}/threshold-status")
+def get_threshold_status(
+    request_id: UUID,
+    template_key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Whether submitting `template_key` on this request is decided by the
+    tester's verdict because the template has no threshold values (see
+    EvaluationService._no_threshold_result). The test result form shows a
+    notice before entry when `verdict_decides` is true - answered here with
+    the same functions submit uses, so the notice can't disagree with it."""
+    from services.evaluation_service import EvaluationService
+    request = TestingService(db)._get_request(request_id)
+    if (current_user.organization_id
+            and request.organization_id
+            and request.organization_id != current_user.organization_id):
+        raise HTTPException(status_code=404, detail="Testing request not found")
+    requires = EvaluationService.requires_thresholds(request)
+    tpl = EvaluationService.get_template_data(
+        template_key, db, org_id=request.organization_id) or {}
+    has = EvaluationService.has_threshold_values(tpl)
+    return {
+        "requires_thresholds": requires,
+        "has_threshold_values": has,
+        "verdict_decides": requires and not has,
+    }
+
+
 @router.post("/{request_id}/results/structured", response_model=TestResultStructuredResponse)
 def create_structured_result(
     request_id: UUID,

@@ -826,7 +826,10 @@ class TestingService:
         _car_pending = None  # (overall, evaluation) - acted on after the result is committed
         try:
             from services.evaluation_service import EvaluationService
-            ev = EvaluationService.run(template_key, test_data, self.db, org_id=request.organization_id)
+            ev = EvaluationService.run(
+                template_key, test_data, self.db, org_id=request.organization_id,
+                require_thresholds=EvaluationService.requires_thresholds(request),
+            )
             result.evaluation_result = ev
 
             # CRITICAL → override overall_result + pre-fill remedial recommendation

@@ -37,6 +37,7 @@ from services.analytics_engine import accepted_test_result_ids
 from database import get_vendor_db
 from auth_utils import get_current_user
 from models import (
+    OUT_OF_SERVICE_EQUIPMENT_STATUSES,
     CategoryMaster,
     Equipment,
     EquipmentAnalytics,
@@ -310,8 +311,8 @@ def _scoped_ea(
     q = (
         db.query(EquipmentAnalytics)
         .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
-        .filter((Equipment.status == "retired") if retired_only
-                else (Equipment.status != "retired"))
+        .filter((Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES)) if retired_only
+                else (~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES)))
     )
     if testkit_ids:
         q = q.filter((Equipment.equipment_type_id == None)  # noqa: E711
@@ -1226,7 +1227,7 @@ def get_grouped(
         _have = set(eq_ids)
         _testkit_ids = [c.id for c in db.query(CategoryMaster.id)
                         .filter(CategoryMaster.name.ilike("%testing kit%")).all() if c.id]
-        _rq = db.query(Equipment.id).filter(Equipment.status == "retired")
+        _rq = db.query(Equipment.id).filter(Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
         if user.organization_id:
             _rq = _rq.filter(Equipment.organization_id == user.organization_id)
         if dept_scope is not None:
