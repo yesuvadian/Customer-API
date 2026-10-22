@@ -45,6 +45,7 @@ from services.analytics_engine import (
 from database import get_vendor_db
 from auth_utils import get_current_user
 from models import (
+    OUT_OF_SERVICE_EQUIPMENT_STATUSES,
     CategoryMaster,
     Equipment,
     EquipmentAnalytics,

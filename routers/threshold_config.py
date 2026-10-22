@@ -220,12 +220,19 @@ class FailureCohortThresholdUpdate(BaseModel):
     min_failure_rate: Optional[float] = None
     min_cohort_units: Optional[int] = None
     outlier_z_score: Optional[float] = None
+    # Failure Reliability panel display (were .env-only)
+    dashboard_limit: Optional[int] = None
+    trend_years: Optional[int] = None
+    trend_max_series: Optional[int] = None
 
 
 class FailureCohortThresholdResponse(BaseModel):
     min_failure_rate: float
     min_cohort_units: int
     outlier_z_score: float
+    dashboard_limit: int
+    trend_years: int
+    trend_max_series: int
     # True when this org has its own override row; False means the value
     # shown is the inherited system-wide default -- lets the UI show
     # "(default)" vs "(customized)" without a second round trip.
@@ -693,6 +700,43 @@ def update_dqi_rule(
 # CRUD. See FailureCohortThresholdConfig's own docstring for the
 # org-override -> system-default lookup chain.
 
+_COHORT_DISPLAY_ENV = {
+    "dashboard_limit": "FAILURE_COHORT_DASHBOARD_LIMIT",
+    "trend_years": "FAILURE_COHORT_TREND_YEARS",
+    "trend_max_series": "FAILURE_COHORT_TREND_MAX_SERIES",
+}
+
+
+def _cohort_display(row, default_row) -> dict:
+    """Effective display settings: row -> default row -> .env."""
+    import config as _config
+    out = {}
+    for col, const in _COHORT_DISPLAY_ENV.items():
+        val = getattr(row, col, None) if row is not None else None
+        if val is None and default_row is not None:
+            val = getattr(default_row, col, None)
+        out[col] = int(val) if val is not None else int(getattr(_config, const))
+    return out
+
+
+def _cohort_response(row, default_row, is_override: bool) -> FailureCohortThresholdResponse:
+    return FailureCohortThresholdResponse(
+        min_failure_rate=float(row.min_failure_rate),
+        min_cohort_units=row.min_cohort_units,
+        outlier_z_score=float(row.outlier_z_score),
+        is_org_override=is_override,
+        **_cohort_display(row, default_row),
+    )
+
+
+def _cohort_default_row(db):
+    return (
+        db.query(FailureCohortThresholdConfig)
+        .filter(FailureCohortThresholdConfig.organization_id.is_(None))
+        .first()
+    )
+
+
 @router.get("/failure-cohort-thresholds", response_model=FailureCohortThresholdResponse)
 def get_failure_cohort_thresholds(
     db: Session = Depends(get_db),
@@ -703,30 +747,16 @@ def get_failure_cohort_thresholds(
         .filter(FailureCohortThresholdConfig.organization_id == current_user.organization_id)
         .first()
     )
+    default_row = _cohort_default_row(db)
     if org_row:
-        return FailureCohortThresholdResponse(
-            min_failure_rate=float(org_row.min_failure_rate),
-            min_cohort_units=org_row.min_cohort_units,
-            outlier_z_score=float(org_row.outlier_z_score),
-            is_org_override=True,
-        )
+        return _cohort_response(org_row, default_row, True)
 
-    default_row = (
-        db.query(FailureCohortThresholdConfig)
-        .filter(FailureCohortThresholdConfig.organization_id.is_(None))
-        .first()
-    )
     if not default_row:
         raise HTTPException(
             status_code=500,
             detail="No system-wide default configured -- run alter_failure_cohort_threshold_config.py",
         )
-    return FailureCohortThresholdResponse(
-        min_failure_rate=float(default_row.min_failure_rate),
-        min_cohort_units=default_row.min_cohort_units,
-        outlier_z_score=float(default_row.outlier_z_score),
-        is_org_override=False,
-    )
+    return _cohort_response(default_row, None, False)
 
 
 @router.put("/failure-cohort-thresholds", response_model=FailureCohortThresholdResponse)
@@ -754,6 +784,9 @@ def update_failure_cohort_thresholds(
             min_failure_rate=default_row.min_failure_rate if default_row else 1.0,
             min_cohort_units=default_row.min_cohort_units if default_row else 4,
             outlier_z_score=default_row.outlier_z_score if default_row else 3.0,
+            dashboard_limit=default_row.dashboard_limit if default_row else None,
+            trend_years=default_row.trend_years if default_row else None,
+            trend_max_series=default_row.trend_max_series if default_row else None,
         )
         db.add(row)
 
@@ -762,14 +795,14 @@ def update_failure_cohort_thresholds(
         setattr(row, field, value)
     row.modified_by = current_user.id
 
+    for col in ("dashboard_limit", "trend_years", "trend_max_series"):
+        val = getattr(row, col)
+        if val is not None and val < 1:
+            raise HTTPException(status_code=422, detail=f"{col} must be at least 1")
+
     db.commit()
     db.refresh(row)
-    return FailureCohortThresholdResponse(
-        min_failure_rate=float(row.min_failure_rate),
-        min_cohort_units=row.min_cohort_units,
-        outlier_z_score=float(row.outlier_z_score),
-        is_org_override=True,
-    )
+    return _cohort_response(row, _cohort_default_row(db), True)
 
 
 @router.delete("/failure-cohort-thresholds", status_code=status.HTTP_204_NO_CONTENT)
@@ -788,6 +821,166 @@ def reset_failure_cohort_thresholds(
     if row:
         db.delete(row)
         db.commit()
+
+
+# ── Analytics / SLA / scheduling / calibration-interval settings ────────────
+# Singleton per org like the failure-cohort thresholds above, but every value
+# is nullable: an org row overrides only the values it sets, the rest come
+# from the system default row, then .env (services/tunable_settings.py).
+
+class AnalyticsSettingsUpdate(BaseModel):
+    """Partial update of THIS org's overrides. A key sent as null clears
+    that one override (back to the system default)."""
+    analytics_min_trend_points: Optional[int] = None
+    analytics_stable_fraction: Optional[float] = None
+    analytics_min_trend_r_squared: Optional[float] = None
+    analytics_trend_window: Optional[int] = None
+    analytics_min_watch_history: Optional[int] = None
+    analytics_overdue_review_alert_days: Optional[int] = None
+    analytics_overdue_review_critical_days: Optional[int] = None
+    review_sla_hours_alert: Optional[int] = None
+    review_sla_hours_critical: Optional[int] = None
+    schedule_advance_days: Optional[int] = None
+    calibration_interval_min_cycles: Optional[int] = None
+    calibration_interval_extend_fail_rate_pct: Optional[float] = None
+    calibration_interval_shorten_fail_rate_pct: Optional[float] = None
+    calibration_interval_extend_months: Optional[int] = None
+    calibration_interval_shorten_months: Optional[int] = None
+    calibration_interval_max_months: Optional[int] = None
+    calibration_interval_min_months: Optional[int] = None
+    notif_digest_threshold: Optional[int] = None
+    notif_digest_window_minutes: Optional[int] = None
+    notif_max_retries: Optional[int] = None
+    notif_retry_delay_minutes: Optional[int] = None
+    tr_page_size: Optional[int] = None
+    dashboard_panel_page_size: Optional[int] = None
+    max_login_attempts: Optional[int] = None
+    login_lock_duration_min: Optional[int] = None
+    max_otp_attempts: Optional[int] = None
+    otp_lock_duration_min: Optional[int] = None
+    otp_validity_min: Optional[int] = None
+    password_history_limit: Optional[int] = None
+    reset_password_link_minutes: Optional[int] = None
+
+
+class AnalyticsSettingsResponse(BaseModel):
+    values: dict           # effective value of every setting for this org
+    defaults: dict         # what each falls back to without an org override
+    overridden: List[str]  # keys this org has its own value for
+    is_org_override: bool
+
+
+def _analytics_settings_response(db, org_id) -> AnalyticsSettingsResponse:
+    from services.tunable_settings import FIELDS, default_values, get_settings, invalidate
+    invalidate(org_id)
+    values = get_settings(db, org_id)
+    defaults = default_values(db)
+    row = None
+    if org_id:
+        row = (db.query(AnalyticsSettingsConfig)
+               .filter(AnalyticsSettingsConfig.organization_id == org_id).first())
+    overridden = [k for k in FIELDS if row is not None and getattr(row, k) is not None]
+    return AnalyticsSettingsResponse(
+        values=values, defaults=defaults, overridden=overridden,
+        is_org_override=bool(overridden),
+    )
+
+
+def _validate_analytics_settings(v: dict) -> None:
+    def err(msg):
+        raise HTTPException(status_code=422, detail=msg)
+    for k, val in v.items():
+        if val is None:
+            continue
+        if val < 0:
+            err(f"{k} cannot be negative")
+    for k in ("analytics_stable_fraction", "analytics_min_trend_r_squared"):
+        if v.get(k) is not None and not (0 <= v[k] <= 1):
+            err(f"{k} must be between 0 and 1")
+    for k in ("calibration_interval_extend_fail_rate_pct", "calibration_interval_shorten_fail_rate_pct"):
+        if v.get(k) is not None and v[k] > 100:
+            err(f"{k} must be between 0 and 100")
+    for k in ("analytics_min_trend_points", "analytics_trend_window",
+              "review_sla_hours_alert", "review_sla_hours_critical",
+              "calibration_interval_min_cycles", "calibration_interval_min_months",
+              "notif_digest_threshold", "notif_digest_window_minutes",
+              "notif_retry_delay_minutes",
+              "max_login_attempts", "login_lock_duration_min",
+              "max_otp_attempts", "otp_lock_duration_min", "otp_validity_min",
+              "reset_password_link_minutes"):
+        if v.get(k) is not None and v[k] < 1:
+            err(f"{k} must be at least 1")
+    for k in ("tr_page_size", "dashboard_panel_page_size"):
+        if v.get(k) is not None and not (1 <= v[k] <= 200):
+            err(f"{k} must be between 1 and 200")
+    if v.get("notif_max_retries") is not None and v["notif_max_retries"] > 20:
+        err("notif_max_retries must be at most 20")
+
+
+@router.get("/analytics-settings", response_model=AnalyticsSettingsResponse)
+def get_analytics_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _analytics_settings_response(db, current_user.organization_id)
+
+
+@router.put("/analytics-settings", response_model=AnalyticsSettingsResponse)
+def update_analytics_settings(
+    payload: AnalyticsSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Creates this org's override row on first edit; only the keys sent are
+    changed (null = clear that override)."""
+    from services.tunable_settings import get_settings, invalidate
+    org_id = current_user.organization_id
+    if not org_id:
+        raise HTTPException(status_code=403, detail="User must belong to an organization")
+    data = payload.model_dump(exclude_unset=True)
+    _validate_analytics_settings(data)
+
+    row = (db.query(AnalyticsSettingsConfig)
+           .filter(AnalyticsSettingsConfig.organization_id == org_id).first())
+    if not row:
+        row = AnalyticsSettingsConfig(organization_id=org_id)
+        db.add(row)
+    for k, v in data.items():
+        setattr(row, k, v)
+    row.modified_by = current_user.id
+    db.flush()
+
+    # Cross-field checks on the resulting effective values.
+    invalidate(org_id)
+    eff = get_settings(db, org_id)
+    if eff["analytics_overdue_review_critical_days"] < eff["analytics_overdue_review_alert_days"]:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Overdue review: critical days must be >= alert days")
+    if eff["calibration_interval_min_months"] > eff["calibration_interval_max_months"]:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Calibration interval: min months must be <= max months")
+    if eff["calibration_interval_extend_fail_rate_pct"] > eff["calibration_interval_shorten_fail_rate_pct"]:
+        db.rollback()
+        raise HTTPException(status_code=422,
+                            detail="Calibration interval: extend fail-rate % must be <= shorten fail-rate %")
+
+    db.commit()
+    return _analytics_settings_response(db, org_id)
+
+
+@router.delete("/analytics-settings", status_code=status.HTTP_204_NO_CONTENT)
+def reset_analytics_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Back to the system defaults (a no-op if there was no override)."""
+    from services.tunable_settings import invalidate
+    row = (db.query(AnalyticsSettingsConfig)
+           .filter(AnalyticsSettingsConfig.organization_id == current_user.organization_id).first())
+    if row:
+        db.delete(row)
+        db.commit()
+    invalidate(current_user.organization_id)
 
 
 @router.delete("/dqi-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)

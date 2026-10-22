@@ -1237,6 +1237,27 @@ def tr_wf_get_audit_log(
         ):
             stage_instances_by_stage.setdefault(str(si.stage_id), []).append(si)
 
+    # Result-review SLA by result severity - the same rule the dashboard's
+    # Result Review SLA tiles / breach lists use (CRITICAL / ALERT hours from
+    # Threshold Config -> Analytics & SLA). Without this the flow badge used
+    # the stage's own default_duration (e.g. 24h) while the dashboard used
+    # 2h for a CRITICAL result, so the same review showed "6.5h over" here
+    # and "1.2d over" there.
+    _review_sla_hours = None
+    if req is not None:
+        from models import TestResult as _TRes
+        from services.tunable_settings import get_settings as _ts
+        _rank = {"ALERT": 1, "CRITICAL": 2}
+        _worst = None
+        for (_ov,) in db.query(_TRes.evaluation_result["overall"].astext).filter(
+                _TRes.testing_request_id == req.id).all():
+            if _rank.get(_ov, 0) > _rank.get(_worst, 0):
+                _worst = _ov
+        if _worst:
+            _cfg = _ts(db, req.organization_id)
+            _review_sla_hours = (_cfg["review_sla_hours_critical"] if _worst == "CRITICAL"
+                                 else _cfg["review_sla_hours_alert"])
+
     def _sla_info(from_stage_id, action_at):
         """(is_breached, hours_over) for the stage instance this transition
         closed, or (None, None) when that stage has no SLA configured or
@@ -1260,6 +1281,8 @@ def tr_wf_get_audit_log(
             stage.default_duration_hours if stage.default_duration_hours is not None
             else stage.default_duration_days * 24
         )
+        if stage.is_result_stage and _review_sla_hours is not None:
+            duration_hours = _review_sla_hours
         # Result Review stages skip weekends (same add_business_hours the
         # escalation-matrix job / dashboard tile / compliance report use);
         # every other stage keeps plain calendar-time SLA math, matching the

@@ -461,7 +461,7 @@ class ReportingService:
                 ORDER  BY res.tested_at DESC NULLS LAST
                 LIMIT  1
             ) tr_latest ON true
-            WHERE  e.status != 'retired' {org}
+            WHERE  e.status::text NOT IN ('retired', 'replaced', 'condemned', 'decommissioned') {org}
             ORDER  BY e.ueic
         """)
         return self._exec(sql)

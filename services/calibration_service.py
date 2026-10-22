@@ -179,15 +179,16 @@ def compute_interval_advisories(db: Session, org_id, department_ids: Optional[li
     one. Leave it None for the org-wide view (the default every call site
     used before this parameter existed).
     """
-    import config as _config
-
-    min_cycles     = _config.CALIBRATION_INTERVAL_MIN_CYCLES
-    extend_at_pct  = _config.CALIBRATION_INTERVAL_EXTEND_FAIL_RATE_PCT
-    shorten_at_pct = _config.CALIBRATION_INTERVAL_SHORTEN_FAIL_RATE_PCT
-    extend_months  = _config.CALIBRATION_INTERVAL_EXTEND_MONTHS
-    shorten_months = _config.CALIBRATION_INTERVAL_SHORTEN_MONTHS
-    max_months     = _config.CALIBRATION_INTERVAL_MAX_MONTHS
-    min_months     = _config.CALIBRATION_INTERVAL_MIN_MONTHS
+    # Threshold Config -> Calibration -> Interval Advisory (per org, .env fallback).
+    from services.tunable_settings import get_settings as _ts
+    _t = _ts(db, org_id)
+    min_cycles     = _t["calibration_interval_min_cycles"]
+    extend_at_pct  = _t["calibration_interval_extend_fail_rate_pct"]
+    shorten_at_pct = _t["calibration_interval_shorten_fail_rate_pct"]
+    extend_months  = _t["calibration_interval_extend_months"]
+    shorten_months = _t["calibration_interval_shorten_months"]
+    max_months     = _t["calibration_interval_max_months"]
+    min_months     = _t["calibration_interval_min_months"]
 
     query = (
         db.query(

@@ -556,9 +556,10 @@ class WorkflowDispatchService:
             )
             return ""
 
-        try:
-            from config import SCHEDULE_ADVANCE_DAYS as _adv
-        except Exception:
+        # Per-org advance window (Threshold Config -> Analytics & SLA, .env fallback).
+        from services.tunable_settings import get_settings as _ts
+        _adv = _ts(self.db, tr.organization_id)["schedule_advance_days"]
+        if _adv is None:
             _adv = 15
 
         # Same rule as equipment onboarding (test_request_schedule_service.py

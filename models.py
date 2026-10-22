@@ -163,6 +163,13 @@ class EquipmentStatus(PyEnum):
     decommissioned = "decommissioned"
 
 
+# Out of service for good: no longer counted as current fleet (Critical
+# counts, health/risk dashboards, zone/department health, totals). Their
+# history stays - tests, CARs, and failures in the make/model cohort.
+# replace_equipment() retires the old unit (status 'retired' + replaced_by_id).
+OUT_OF_SERVICE_EQUIPMENT_STATUSES = ("retired", "replaced", "condemned", "decommissioned")
+
+
 # =============================================================================
 # Repair Workflow Models
 # =============================================================================
@@ -5821,6 +5828,76 @@ class FailureCohortThresholdConfig(Base):
     # per-unit time-series anomaly detector (config.py's ANALYTICS_ANOMALY_Z)
     # for consistency, not because the two are the same calculation.
     outlier_z_score = Column(Numeric(4, 2), nullable=False, default=3.0)
+    # Failure Reliability panel display settings (were .env-only:
+    # FAILURE_COHORT_DASHBOARD_LIMIT / _TREND_YEARS / _TREND_MAX_SERIES).
+    # NULL = use the .env value.
+    dashboard_limit = Column(Integer, nullable=True)
+    trend_years = Column(Integer, nullable=True)
+    trend_max_series = Column(Integer, nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AnalyticsSettingsConfig(Base):
+    """Admin-configurable analytics / review-SLA / scheduling / calibration-
+    interval-advisory settings (Threshold Config -> "Analytics & SLA" and
+    "Calibration" tabs) - previously .env-only constants in config.py.
+
+    Same lookup chain as FailureCohortThresholdConfig: the org's own row ->
+    the system-wide default row (organization_id NULL) -> the .env/config.py
+    constant. Every value column is nullable: NULL means "not set here,
+    fall through to the next level", so a row can override just one value.
+    Read through services/tunable_settings.py, never directly.
+    """
+    __tablename__ = "analytics_settings_configs"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # Parameter trend analysis (analytics_engine.ParameterAnalyzer)
+    analytics_min_trend_points = Column(Integer, nullable=True)
+    analytics_stable_fraction = Column(Numeric(6, 4), nullable=True)
+    analytics_min_trend_r_squared = Column(Numeric(5, 4), nullable=True)
+    analytics_trend_window = Column(Integer, nullable=True)
+    # Deterioration Watch List
+    analytics_min_watch_history = Column(Integer, nullable=True)
+    analytics_overdue_review_alert_days = Column(Integer, nullable=True)
+    analytics_overdue_review_critical_days = Column(Integer, nullable=True)
+    # Result Review SLA (hours)
+    review_sla_hours_alert = Column(Integer, nullable=True)
+    review_sla_hours_critical = Column(Integer, nullable=True)
+    # Test scheduling
+    schedule_advance_days = Column(Integer, nullable=True)
+    # Calibration interval advisory (calibration_service)
+    calibration_interval_min_cycles = Column(Integer, nullable=True)
+    calibration_interval_extend_fail_rate_pct = Column(Numeric(6, 2), nullable=True)
+    calibration_interval_shorten_fail_rate_pct = Column(Numeric(6, 2), nullable=True)
+    calibration_interval_extend_months = Column(Integer, nullable=True)
+    calibration_interval_shorten_months = Column(Integer, nullable=True)
+    calibration_interval_max_months = Column(Integer, nullable=True)
+    calibration_interval_min_months = Column(Integer, nullable=True)
+    # Notifications (notification_service)
+    notif_digest_threshold = Column(Integer, nullable=True)
+    notif_digest_window_minutes = Column(Integer, nullable=True)
+    notif_max_retries = Column(Integer, nullable=True)
+    notif_retry_delay_minutes = Column(Integer, nullable=True)
+    # Paging
+    tr_page_size = Column(Integer, nullable=True)
+    dashboard_panel_page_size = Column(Integer, nullable=True)
+    # Login & password policy (resolved by the user's own org)
+    max_login_attempts = Column(Integer, nullable=True)
+    login_lock_duration_min = Column(Integer, nullable=True)
+    max_otp_attempts = Column(Integer, nullable=True)
+    otp_lock_duration_min = Column(Integer, nullable=True)
+    otp_validity_min = Column(Integer, nullable=True)
+    password_history_limit = Column(Integer, nullable=True)
+    reset_password_link_minutes = Column(Integer, nullable=True)
     modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
     cts = Column(DateTime(timezone=True), server_default=func.now())
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

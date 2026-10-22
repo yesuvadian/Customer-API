@@ -1718,7 +1718,10 @@ def seed_modules(session):
  "description": "Manage organization subscription plans, billing cycles, and payment history.",
  "path": "subscription-billing",
  "group_name": "Organisation",
- "is_active": True,
+ # Hidden for now: inactive modules don't appear in the menu or the Role
+ # Permission grid. This upsert re-applies is_active on every seed run, so it
+ # must stay False here or re-seeding would bring the module back.
+ "is_active": False,
  "is_menu": True},
     ]
 

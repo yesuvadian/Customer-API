@@ -267,11 +267,17 @@ async def verify_otp_route(
 # Get OTP config
 # -------------------------------
 @totp_router.get("/config")
-async def get_otp_config(current_user: str = Depends(get_current_user)):
+async def get_otp_config(current_user: str = Depends(get_current_user), db=Depends(get_db)):
     try:
-        max_attempts = int(os.getenv("MAX_OTP_ATTEMPTS", 5))
-        lock_duration_min = int(os.getenv("OTP_LOCK_DURATION_MIN", 15))
-        validity_min = int(os.getenv("OTP_VALIDITY_MIN", 5))
+        # Same per-org policy the OTP checks enforce (Threshold Config ->
+        # Login & Password Policy, .env fallback).
+        from services.tunable_settings import get_settings
+        org_id = (current_user.get("organization_id") if isinstance(current_user, dict)
+                  else getattr(current_user, "organization_id", None))
+        policy = get_settings(db, org_id)
+        max_attempts = policy["max_otp_attempts"]
+        lock_duration_min = policy["otp_lock_duration_min"]
+        validity_min = policy["otp_validity_min"]
         totp_interval = int(os.getenv("TOTP_INTERVAL", 30))
 
         return JSONResponse({

@@ -1237,6 +1237,9 @@ class TestingRequestResponse(BaseModel):
     # ─────────────────────────────────────────────
     risk_level: Optional[str] = None
     critical_findings: Optional[List[dict]] = None
+    # active / under_repair / under_maintenance / retired / replaced /
+    # condemned / decommissioned ('replaced' = retired with a replacement).
+    equipment_status: Optional[str] = None
 
     created_by: Optional[UUID] = None
     modified_by: Optional[UUID] = None

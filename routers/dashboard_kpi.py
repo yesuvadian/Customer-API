@@ -29,6 +29,7 @@ import config
 from auth_utils import get_current_user
 from database import get_db
 from models import User
+from models import OUT_OF_SERVICE_EQUIPMENT_STATUSES
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
 from category_labels import TrWfOutcomeColors
 from utils.business_days import business_days_between, add_business_hours
@@ -92,13 +93,19 @@ def _equipment_scope_filters(db: Session, org_id, dept_ids=None) -> list:
     Dashboard's definition (routers/analytics.py's real_total_equipment) so
     this dashboard's equipment totals stop disagreeing with it."""
     from models import Equipment
-    filters = [Equipment.organization_id == org_id, Equipment.status != 'retired']
+    filters = [Equipment.organization_id == org_id, ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES)]
     testkit_ids = _testkit_type_ids(db)
     if testkit_ids:
         filters.append(~Equipment.equipment_type_id.in_(testkit_ids))
     if dept_ids:
         filters.append(Equipment.department_id.in_(dept_ids))
     return filters
+
+
+def _ts_panel(db, org_id) -> int:
+    """Dashboard panel page size for org_id (Threshold Config, .env fallback)."""
+    from services.tunable_settings import get_settings
+    return get_settings(db, org_id)["dashboard_panel_page_size"]
 
 
 def _critical_equipment_count(db: Session, org_id, dept_ids=None) -> int:
@@ -112,12 +119,18 @@ def _critical_equipment_count(db: Session, org_id, dept_ids=None) -> int:
     status='under_repair', so the old logic always showed 0. Matches the AI
     Analytics Dashboard's and _build_department_rollup's own critical_count
     definition."""
-    from models import EquipmentAnalytics
+    from models import EquipmentAnalytics, Equipment
     from sqlalchemy import func
-    filters = [EquipmentAnalytics.organization_id == org_id, EquipmentAnalytics.risk_level == 'Critical']
+    # In-service equipment only: a retired / replaced / condemned /
+    # decommissioned unit keeps its last risk snapshot as history, but is
+    # no longer a Critical asset to act on.
+    filters = [EquipmentAnalytics.organization_id == org_id, EquipmentAnalytics.risk_level == 'Critical',
+               ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES)]
     if dept_ids:
         filters.append(EquipmentAnalytics.department_id.in_(dept_ids))
-    return db.query(func.count(EquipmentAnalytics.id)).filter(*filters).scalar() or 0
+    return (db.query(func.count(EquipmentAnalytics.id))
+            .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
+            .filter(*filters).scalar() or 0)
 
 
 # ── Role view ──────────────────────────────────────────────────────────────
@@ -1028,12 +1041,15 @@ def _critical_equipment_list(db: Session, org_id, dept_ids_for_scope, limit=None
     Standalone module-level function for
     GET /dashboard/critical-equipment' "Load More" pagination.
     """
-    from models import EquipmentAnalytics as _CritEA
-    crit_filters = [_CritEA.organization_id == org_id, _CritEA.risk_level == 'Critical']
+    from models import EquipmentAnalytics as _CritEA, Equipment as _CritEq
+    # In-service only - same rule as _critical_equipment_count.
+    crit_filters = [_CritEA.organization_id == org_id, _CritEA.risk_level == 'Critical',
+                    ~_CritEq.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES)]
     if dept_ids_for_scope:
         crit_filters.append(_CritEA.department_id.in_(dept_ids_for_scope))
     rows = (
         db.query(_CritEA)
+        .join(_CritEq, _CritEq.id == _CritEA.equipment_id)
         .filter(*crit_filters)
         .order_by(_CritEA.health_score.asc().nulls_last())
         .all()
@@ -1517,13 +1533,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         # (a separate, manually-set workflow status). Using the wrong one
         # made this dashboard's critical count silently disagree with the
         # analytics dashboard's for the exact same scope.
-        critical_eq_filters = [EquipmentAnalytics.organization_id == svc.org_id,
-                                EquipmentAnalytics.risk_level == 'Critical']
-        if dept_ids_for_scope:
-            critical_eq_filters.append(EquipmentAnalytics.department_id.in_(dept_ids_for_scope))
-        critical_count = db.query(func.count(EquipmentAnalytics.id)).filter(
-            *critical_eq_filters,
-        ).scalar() or 0
+        # Same rule as _critical_equipment_count (in-service units only).
+        critical_count = _critical_equipment_count(db, svc.org_id, dept_ids_for_scope)
         # Compliance = closure rate over the last 90 days (completed /
         # total), not an on-time SLA rate — an on-time version was tried and
         # reverted: due_date is only ever populated on currently-open
@@ -1572,6 +1583,7 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                 TrWfStageInstance.completed_at,
                 TrWfStage.default_duration_hours,
                 TrWfStage.default_duration_days,
+                TestingRequest.id,
             )
             .join(TrWfStage, TrWfStage.id == TrWfStageInstance.stage_id)
             .join(TrWfInstance, TrWfInstance.id == TrWfStageInstance.wf_instance_id)
@@ -1591,13 +1603,23 @@ def _build_department_rollup(db: Session, svc: DashboardService,
         )
         review_sla_total = len(review_rows)
         review_sla_compliant = 0
-        for started_at, completed_at, dur_hours, dur_days in review_rows:
-            # Weekends don't count against the SLA clock -- same
-            # add_business_hours the escalation-matrix notification job and
-            # the Monthly Result Review Compliance Report use, so this tile
-            # agrees with what actually got flagged as overdue.
-            deadline = add_business_hours(
-                started_at, dur_hours if dur_hours is not None else dur_days * 24
+        from models import TestResult
+        _pct_sev = {}
+        _pct_req_ids = {r[4] for r in review_rows}
+        if _pct_req_ids:
+            _rank = {"CRITICAL": 2, "ALERT": 1}
+            for _rid, _ov in (
+                db.query(TestResult.testing_request_id, TestResult.evaluation_result["overall"].astext)
+                .filter(TestResult.testing_request_id.in_(_pct_req_ids)).all()
+            ):
+                if _rank.get(_ov, 0) > _rank.get(_pct_sev.get(_rid), 0):
+                    _pct_sev[_rid] = _ov
+        for started_at, completed_at, dur_hours, dur_days, _rid in review_rows:
+            # Same rule as every other review-SLA number (_review_sla_deadline).
+            deadline, _ = _review_sla_deadline(
+                db, svc.org_id, started_at,
+                dur_hours if dur_hours is not None else dur_days * 24,
+                _pct_sev.get(_rid),
             )
             if completed_at <= deadline:
                 review_sla_compliant += 1
@@ -1673,9 +1695,11 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                 if cur_rank is None or rank > cur_rank:
                     _worst_severity_by_req[req_id] = overall
 
+        from services.tunable_settings import get_settings as _ts
+        _tset = _ts(db, svc.org_id)
         _sla_hours = {
-            "ALERT": config.REVIEW_SLA_HOURS_ALERT,
-            "CRITICAL": config.REVIEW_SLA_HOURS_CRITICAL,
+            "ALERT": _tset["review_sla_hours_alert"],
+            "CRITICAL": _tset["review_sla_hours_critical"],
         }
         _sla_counts = {
             "ALERT": {"total": 0, "compliant": 0},
@@ -1687,7 +1711,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                 continue
             bucket = _sla_counts[severity]
             bucket["total"] += 1
-            deadline = started_at + timedelta(hours=_sla_hours[severity])
+            # Weekends don't count - same _review_sla_deadline rule as the rest.
+            deadline = add_business_hours(started_at, _sla_hours[severity])
             if completed_at <= deadline:
                 bucket["compliant"] += 1
 
@@ -1819,16 +1844,18 @@ def _build_department_rollup(db: Session, svc: DashboardService,
                 if cur_rank is None or rank > cur_rank:
                     worst_severity_by_req[req_id] = overall
 
+        from services.tunable_settings import get_settings as _ts
+        _tset = _ts(db, svc.org_id)
         sla_hours = {
-            "ALERT": config.REVIEW_SLA_HOURS_ALERT,
-            "CRITICAL": config.REVIEW_SLA_HOURS_CRITICAL,
+            "ALERT": _tset["review_sla_hours_alert"],
+            "CRITICAL": _tset["review_sla_hours_critical"],
         }[severity]
 
         reviewed = []
         for si, tr in rows:
             if worst_severity_by_req.get(tr.id) != severity:
                 continue
-            deadline = si.started_at + timedelta(hours=sla_hours)
+            deadline = add_business_hours(si.started_at, sla_hours)  # weekends excluded
             breached = si.completed_at > deadline
             eq = getattr(tr, "equipment", None)
             reviewed.append({
@@ -2230,7 +2257,8 @@ def _build_department_rollup(db: Session, svc: DashboardService,
 
     from sqlalchemy import or_ as _or_tl
 
-    def _ticket_lists(dept_ids_for_scope, limit=config.DASHBOARD_PANEL_PAGE_SIZE):
+    def _ticket_lists(dept_ids_for_scope, limit=None):
+        limit = limit or _ts_panel(db, svc.org_id)
         """This-week / open / closed-this-week / rejected-cancelled ticket
         rows, scoped exactly like _scope_counts' matching counts above —
         shared by both the leaf and branch shapes so a branch-scope KPI
@@ -2512,14 +2540,14 @@ def _build_department_rollup(db: Session, svc: DashboardService,
     # response bounded at a zone/org scope (potentially hundreds of
     # substations' worth of equipment), with the true total alongside so the
     # UI can say "showing N of TOTAL" rather than imply the list is complete.
-    _branch_dqi_issues, _branch_dqi_issues_total = _dqi_issues_list(svc.dept_ids, limit=config.DASHBOARD_PANEL_PAGE_SIZE)
+    _branch_dqi_issues, _branch_dqi_issues_total = _dqi_issues_list(svc.dept_ids, limit=_ts_panel(db, svc.org_id))
     _branch_overdue_tickets, _branch_overdue_tickets_total = _overdue_tickets_list(
-        db, svc.org_id, svc.dept_ids, limit=config.DASHBOARD_PANEL_PAGE_SIZE)
-    _branch_review_sla_breaches, _branch_review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids, limit=config.DASHBOARD_PANEL_PAGE_SIZE)
+        db, svc.org_id, svc.dept_ids, limit=_ts_panel(db, svc.org_id))
+    _branch_review_sla_breaches, _branch_review_sla_breaches_total = _review_sla_breaches_list(svc.dept_ids, limit=_ts_panel(db, svc.org_id))
     _branch_review_sla_reviews_alert, _branch_review_sla_reviews_alert_total = \
-        _review_sla_reviews_list_by_severity(svc.dept_ids, "ALERT", limit=config.DASHBOARD_PANEL_PAGE_SIZE)
+        _review_sla_reviews_list_by_severity(svc.dept_ids, "ALERT", limit=_ts_panel(db, svc.org_id))
     _branch_review_sla_reviews_critical, _branch_review_sla_reviews_critical_total = \
-        _review_sla_reviews_list_by_severity(svc.dept_ids, "CRITICAL", limit=config.DASHBOARD_PANEL_PAGE_SIZE)
+        _review_sla_reviews_list_by_severity(svc.dept_ids, "CRITICAL", limit=_ts_panel(db, svc.org_id))
     return {
         "shape": "branch",
         "scope_name": scope_name,
@@ -2595,7 +2623,7 @@ def get_dqi_issues_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    limit: Optional[int] = Query(None, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2610,6 +2638,8 @@ def get_dqi_issues_page(
     can be a lightweight, independently-cacheable call.
     """
     svc = _svc(db, current_user, org_id, dept_id)
+    # Default page size: Threshold Config -> Paging (per org, .env fallback).
+    limit = limit or _ts_panel(db, svc.org_id)
     key_scopes = _dqi_active_key_scopes(db)
     closed_expr = _dqi_closed_expr_for_org(db, svc.org_id)
     result = _dqi_compute_scope(db, svc.org_id, svc.dept_ids, key_scopes, closed_expr)
@@ -2630,7 +2660,7 @@ def get_overdue_tickets_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    limit: Optional[int] = Query(None, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2642,6 +2672,8 @@ def get_overdue_tickets_page(
     the whole rollup.
     """
     svc = _svc(db, current_user, org_id, dept_id)
+    # Default page size: Threshold Config -> Paging (per org, .env fallback).
+    limit = limit or _ts_panel(db, svc.org_id)
     tickets, total = _overdue_tickets_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
     return {
         "tickets": tickets,
@@ -2657,7 +2689,7 @@ def get_open_tickets_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    limit: Optional[int] = Query(None, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2666,6 +2698,8 @@ def get_open_tickets_page(
     KPI tile's own drill-down.
     """
     svc = _svc(db, current_user, org_id, dept_id)
+    # Default page size: Threshold Config -> Paging (per org, .env fallback).
+    limit = limit or _ts_panel(db, svc.org_id)
     tickets, total = _open_tickets_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
     return {
         "tickets": tickets,
@@ -2681,7 +2715,7 @@ def get_closed_tickets_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    limit: Optional[int] = Query(None, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2690,6 +2724,8 @@ def get_closed_tickets_page(
     Week KPI tile's own drill-down.
     """
     svc = _svc(db, current_user, org_id, dept_id)
+    # Default page size: Threshold Config -> Paging (per org, .env fallback).
+    limit = limit or _ts_panel(db, svc.org_id)
     tickets, total = _closed_this_week_tickets_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
     return {
         "tickets": tickets,
@@ -2705,7 +2741,7 @@ def get_rejected_cancelled_tickets_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    limit: Optional[int] = Query(None, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2714,6 +2750,8 @@ def get_rejected_cancelled_tickets_page(
     Cancelled KPI tile's own drill-down.
     """
     svc = _svc(db, current_user, org_id, dept_id)
+    # Default page size: Threshold Config -> Paging (per org, .env fallback).
+    limit = limit or _ts_panel(db, svc.org_id)
     tickets, total = _rejected_cancelled_tickets_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
     return {
         "tickets": tickets,
@@ -2729,7 +2767,7 @@ def get_critical_equipment_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    limit: Optional[int] = Query(None, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2738,6 +2776,8 @@ def get_critical_equipment_page(
     Equipment KPI tile's own drill-down.
     """
     svc = _svc(db, current_user, org_id, dept_id)
+    # Default page size: Threshold Config -> Paging (per org, .env fallback).
+    limit = limit or _ts_panel(db, svc.org_id)
     tickets, total = _critical_equipment_list(db, svc.org_id, svc.dept_ids, limit=limit, offset=offset)
     return {
         "tickets": tickets,
@@ -2746,6 +2786,28 @@ def get_critical_equipment_page(
         "limit": limit,
         "has_more": offset + limit < total,
     }
+
+
+def _review_sla_deadline(db, org_id, started_at, stage_hours, severity):
+    """(deadline, sla_hours) for a Result Review stage instance - the ONE
+    rule every review-SLA number uses (overall % tile, breach list + its
+    charts, ALERT/CRITICAL lists, workflow flow badge):
+      - result ALERT / CRITICAL -> the severity SLA hours (Threshold Config ->
+        Analytics & SLA: review_sla_hours_alert / _critical)
+      - otherwise (all NORMAL)  -> the stage's own configured duration
+    Weekends don't count (add_business_hours). These used to differ - stage
+    duration in some places, severity hours (calendar time) in others - so
+    one review showed "1.0h over", "6.5h over" and "1.2d over" at once.
+    """
+    hours = stage_hours
+    if severity in ("ALERT", "CRITICAL"):
+        from services.tunable_settings import get_settings
+        cfg = get_settings(db, org_id)
+        sev_hours = (cfg["review_sla_hours_critical"] if severity == "CRITICAL"
+                     else cfg["review_sla_hours_alert"])
+        if sev_hours is not None:
+            hours = sev_hours
+    return add_business_hours(started_at, hours), hours
 
 
 def _review_sla_judged_rows(db: Session, org_id, dept_ids):
@@ -2758,8 +2820,9 @@ def _review_sla_judged_rows(db: Session, org_id, dept_ids):
 
     `severity` is the worst ALERT/CRITICAL evaluation_result['overall']
     among the request's TestResults (same rule as the severity-split
-    tiles), or None when every result was NORMAL -- only used to colour
-    the compliance donut, never to change the deadline.
+    tiles), or None when every result was NORMAL. It sets the deadline via
+    _review_sla_deadline (severity hours for ALERT/CRITICAL) and colours
+    the compliance donut.
     """
     from sqlalchemy import or_
     from models import (TrWfStageInstance as _TrWfStageInstance, TrWfStage,
@@ -2804,11 +2867,10 @@ def _review_sla_judged_rows(db: Session, org_id, dept_ids):
 
     out = []
     for si, stage, tr in rows:
-        sla_hours = (stage.default_duration_hours if stage.default_duration_hours is not None
-                     else stage.default_duration_days * 24)
-        # Weekends don't count against the SLA clock -- same as
-        # review_sla_pct and the escalation-matrix job.
-        deadline = add_business_hours(si.started_at, sla_hours)
+        stage_hours = (stage.default_duration_hours if stage.default_duration_hours is not None
+                       else stage.default_duration_days * 24)
+        deadline, sla_hours = _review_sla_deadline(
+            db, org_id, si.started_at, stage_hours, worst_severity_by_req.get(tr.id))
         eq = getattr(tr, "equipment", None)
         out.append({
             "stage_instance_id": str(si.id),
@@ -2953,7 +3015,7 @@ def get_review_sla_breaches_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    limit: Optional[int] = Query(None, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2968,6 +3030,8 @@ def get_review_sla_breaches_page(
     safe and gives an identical result set.
     """
     svc = _svc(db, current_user, org_id, dept_id)
+    # Default page size: Threshold Config -> Paging (per org, .env fallback).
+    limit = limit or _ts_panel(db, svc.org_id)
     breaches = [_review_sla_public(r)
                 for r in _review_sla_judged_rows(db, svc.org_id, svc.dept_ids)
                 if r["breached"]]
@@ -2988,7 +3052,7 @@ def get_review_sla_reviews_page(
     org_id: Optional[UUID] = Query(None),
     dept_id: Optional[UUID] = Query(None),
     offset: int = Query(0, ge=0),
-    limit: int = Query(config.DASHBOARD_PANEL_PAGE_SIZE, ge=1, le=200),
+    limit: Optional[int] = Query(None, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2999,6 +3063,8 @@ def get_review_sla_reviews_page(
     """
     from models import TrWfStageInstance as _TrWfStageInstance, TrWfStage, TrWfInstance, TestingRequest, TestResult as _TestResult
     svc = _svc(db, current_user, org_id, dept_id)
+    # Default page size: Threshold Config -> Paging (per org, .env fallback).
+    limit = limit or _ts_panel(db, svc.org_id)
     _tr_filters = [TestingRequest.organization_id == svc.org_id]
     if svc.dept_ids:
         _tr_filters.append(TestingRequest.department_id.in_(svc.dept_ids))
@@ -3031,15 +3097,17 @@ def get_review_sla_reviews_page(
             cur_rank = sev_rank.get(worst_severity_by_req.get(req_id))
             if cur_rank is None or rank > cur_rank:
                 worst_severity_by_req[req_id] = overall
+    from services.tunable_settings import get_settings as _ts
+    _tset = _ts(db, svc.org_id)
     sla_hours = {
-        "ALERT": config.REVIEW_SLA_HOURS_ALERT,
-        "CRITICAL": config.REVIEW_SLA_HOURS_CRITICAL,
+        "ALERT": _tset["review_sla_hours_alert"],
+        "CRITICAL": _tset["review_sla_hours_critical"],
     }[severity]
     reviewed = []
     for si, tr in rows:
         if worst_severity_by_req.get(tr.id) != severity:
             continue
-        deadline = si.started_at + timedelta(hours=sla_hours)
+        deadline = add_business_hours(si.started_at, sla_hours)  # weekends excluded
         breached = si.completed_at > deadline
         eq = getattr(tr, "equipment", None)
         reviewed.append({
