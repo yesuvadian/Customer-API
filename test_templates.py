@@ -1023,6 +1023,10 @@ TEST_TEMPLATES = {
         "name": "Power Transformer Test Report",
         "equipment_type": "Power Transformer",
         "description": "Power transformer nameplate details and OLTC details",
+        # Nameplate record, not a threshold test - exempt from the
+        # no-threshold CRITICAL rule (EvaluationService.requires_thresholds)
+        # although its CategoryDetails row is typed "test".
+        "category_type": "nameplate",
         "context_bindings": {
             "location":           "nameplate.location",
             "make":               "equipment.manufacturer",
@@ -1100,6 +1104,9 @@ TEST_TEMPLATES = {
         "name": "Transformer Physical Inspection",
         "equipment_type": "Power Transformer",
         "description": "Physical inspection and megger test results for power transformers",
+        # Inspection checklist - exempt from the no-threshold CRITICAL rule
+        # although its CategoryDetails row is typed "test".
+        "category_type": "inspection",
         "context_bindings": {"manufacturer": "equipment.manufacturer", "serial_number": "equipment.factory_serial_number", "voltage_class": "equipment.voltage_class", "vector_group": "equipment.vector_group"},
         "sections": [
             {
@@ -2202,6 +2209,8 @@ TEST_TEMPLATES = {
         "key": "transformer_inspection",
         "name": "Transformer Annual Inspection",
         "equipment_type": "Power Transformer",
+        # Inspection / annual-audit checklist - never a threshold test.
+        "category_type": "inspection",
         "description": "Annual substation inspection observations and compliance record per SRS §6.1 (TA&QC Module). Captures observation category, severity, compliance and closure status.",
         "supports_multi_session": True,
         "typical_session_interval_days": 365,

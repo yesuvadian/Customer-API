@@ -16,7 +16,7 @@ from sqlalchemy import func, extract
 from database import get_db
 from auth_utils import get_current_user
 from models import CategoryDetails, CategoryMaster, Equipment, EquipmentTypeKitMapping, Module, OrgDepartment, User
-from middleware.org_auth import check_org_permission
+from middleware.org_auth import active_org_role_ids, check_org_permission, has_workflow_module_view
 from schemas import (
     EquipmentCreate,
     EquipmentUpdate,
@@ -60,7 +60,7 @@ def _dt(val) -> Optional[str]:
     return val.isoformat() if hasattr(val, "isoformat") else str(val)
 
 
-def _get_equipment_module_id(db: Session) -> int:
+def _get_equipment_module(db: Session) -> Module:
     """Resolve the Equipment module row; raises 500 if not seeded."""
     mod = db.query(Module).filter_by(path="equipment", is_active=True).first()
     if not mod:
@@ -68,22 +68,37 @@ def _get_equipment_module_id(db: Session) -> int:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Equipment module not configured. Run seed first.",
         )
-    return mod.id
+    return mod
 
 
-def _require_permission(db: Session, user: User, action: str) -> None:
-    """Check that *user* has *action* on the Equipment module."""
+def _get_equipment_module_id(db: Session) -> int:
+    return _get_equipment_module(db).id
+
+
+def _require_permission(
+    db: Session, user: User, action: str, allow_workflow_view: bool = False
+) -> None:
+    """Check that *user* has *action* on the Equipment module.
+
+    allow_workflow_view: for the equipment list/detail reads that workflow
+    screens (TA&QC, Calibration, Annual Audit, Repair/Overhaul result form,
+    ...) use to pick and show equipment — view on any workflow module in
+    WORKFLOW_MODULE_PATHS is accepted instead of Equipment Registry view.
+    """
     from auth_utils import has_org_admin_role
 
     if has_org_admin_role(user, db):
         return
 
-    module_id = _get_equipment_module_id(db)
-    if not check_org_permission(user.id, module_id, action, db):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission '{action}' required on Equipment module",
-        )
+    mod = _get_equipment_module(db)
+    if check_org_permission(user.id, mod.id, action, db):
+        return
+    if allow_workflow_view and has_workflow_module_view(active_org_role_ids(user.id, db), db):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Access denied for '{action}' on 'equipment' - grant it on the '{mod.name}' module in Role Permission",
+    )
 
 
 def _enforce_org_scope(user: User) -> UUID:
@@ -994,7 +1009,7 @@ def list_equipment(
 ):
     """List equipment with optional filters. Scoped to user's organization."""
     org_id = _enforce_org_scope(current_user)
-    _require_permission(db, current_user, "can_view")
+    _require_permission(db, current_user, "can_view", allow_workflow_view=True)
 
     from utils.common_service import get_user_dept_scope, get_dept_subtree_ids
     substation_id_list: Optional[list] = None
@@ -1602,7 +1617,8 @@ def get_substations(
 ):
     """Return leaf departments (substations) for the org."""
     org_id = _enforce_org_scope(current_user)
-    _require_permission(db, current_user, "can_view")
+    # No Equipment-module check: shared location lookup, see
+    # SHARED_LOOKUP_GETS in middleware/auth_privilege.py.
     from sqlalchemy import text
     sql = text(
         """
@@ -1643,7 +1659,8 @@ def get_divisions(
 ):
     """Return depth-2 departments (TLSS Divisions)."""
     org_id = _enforce_org_scope(current_user)
-    _require_permission(db, current_user, "can_view")
+    # No Equipment-module check: shared location lookup, see
+    # SHARED_LOOKUP_GETS in middleware/auth_privilege.py.
     return _get_departments_at_depth(db, org_id, depth=2)
 
 
@@ -1654,7 +1671,8 @@ def get_circles(
 ):
     """Return depth-1 departments (W&M Circles)."""
     org_id = _enforce_org_scope(current_user)
-    _require_permission(db, current_user, "can_view")
+    # No Equipment-module check: shared location lookup, see
+    # SHARED_LOOKUP_GETS in middleware/auth_privilege.py.
     return _get_departments_at_depth(db, org_id, depth=1)
 
 
@@ -1665,7 +1683,8 @@ def get_zones(
 ):
     """Return depth-0 departments (Transmission Zones / root)."""
     org_id = _enforce_org_scope(current_user)
-    _require_permission(db, current_user, "can_view")
+    # No Equipment-module check: shared location lookup, see
+    # SHARED_LOOKUP_GETS in middleware/auth_privilege.py.
     return _get_departments_at_depth(db, org_id, depth=0)
 
 _DEPT_HIERARCHY_COUNTS_CACHE_TTL = 300  # 5 minutes
@@ -2264,9 +2283,15 @@ def get_testing_kits(
     ),
 
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return testing kits (equipment with type 'Testing Kit') available at a station."""
+
+    # Shared lookup with no Equipment-module check (see SHARED_LOOKUP_GETS in
+    # middleware/auth_privilege.py), so the caller-supplied org_id must be
+    # the caller's own org.
+    if current_user.organization_id and org_id != current_user.organization_id:
+        raise HTTPException(status_code=403, detail="Cannot list testing kits of another organization")
 
     kit_master = (
         db.query(CategoryMaster)
@@ -2377,7 +2402,7 @@ def get_equipment(
     current_user: User = Depends(get_current_user),
 ):
     org_id = _enforce_org_scope(current_user)
-    _require_permission(db, current_user, "can_view")
+    _require_permission(db, current_user, "can_view", allow_workflow_view=True)
     equipment = EquipmentService.get_equipment(db, equipment_id)
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")

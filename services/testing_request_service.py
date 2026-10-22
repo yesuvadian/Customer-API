@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, or_, text
 from models import TestResult
+from models import OUT_OF_SERVICE_EQUIPMENT_STATUSES
 from datetime import datetime, timedelta
 from utils.sequence_locks import TESTING_REQUEST_NUMBER_LOCK
 
@@ -887,7 +888,7 @@ class TestingRequestService:
             include_direct_submissions=include_direct_submissions,
             include_scored=include_scored,
         )
-        return query.order_by(TestingRequest.cts.desc()).offset(skip).limit(limit).all()
+        return query.order_by(TestingRequest.cts.desc(), TestingRequest.id.desc()).offset(skip).limit(limit).all()
 
     def count_requests(
         self,
@@ -1115,7 +1116,7 @@ class TestingRequestService:
                     query = query.filter(False)
 
         return (
-            query.order_by(TestingRequest.cts.desc())
+            query.order_by(TestingRequest.cts.desc(), TestingRequest.id.desc())
             .offset(skip)
             .limit(limit)
             .all()
@@ -1581,7 +1582,7 @@ class TestingRequestService:
                     self.db.query(func.count(Equipment.id))
                     .filter(
                         Equipment.department_id == d.id,
-                        Equipment.status != EquipmentStatus.retired,
+                        ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES),
                     )
                     .scalar()
                 ) > 0,

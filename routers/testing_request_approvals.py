@@ -725,8 +725,9 @@ def tr_wf_get_pending_queue(
             OURModel.is_active.is_(True),
         ).all()
     ]
-    if not caller_role_ids:
-        return []
+    # No early return when the caller has no roles / no stage roles: a stage
+    # instance can be assigned straight to them (e.g. an @originator stage,
+    # which carries no role_id), and that alone must surface it here.
 
     # Stage IDs where caller has a role
     allowed_stage_ids = [
@@ -744,9 +745,6 @@ def tr_wf_get_pending_queue(
         ).all()
         if sr.stage_id not in allowed_stage_ids  # avoid duplicates
     ]
-
-    if not allowed_stage_ids and not act_as_tester_stage_ids:
-        return []
 
     # Department subtree for this caller — scope to caller's dept + descendants
     caller_dept_ids = _caller_dept_ids(db, current_user)
@@ -767,14 +765,22 @@ def tr_wf_get_pending_queue(
         if sr.stage and sr.stage.wf_definition_id
     ]
 
-    from sqlalchemy import or_
-    filters = []
+    from sqlalchemy import or_, and_, exists
+    from models import TrWfStageInstance
+    # Current stage instance assigned directly to the caller — visible
+    # regardless of their stage roles or department.
+    assigned_to_caller = exists().where(and_(
+        TrWfStageInstance.wf_instance_id == TrWfInstance.id,
+        TrWfStageInstance.stage_id == TrWfInstance.current_stage_id,
+        TrWfStageInstance.status == "in_progress",
+        TrWfStageInstance.assigned_user_id == current_user.id,
+    ))
+    filters = [assigned_to_caller]
     if all_visible_stage_ids:
         filters.append(TrWfInstance.current_stage_id.in_(all_visible_stage_ids))
     if tester_wf_def_ids:
         filters.append(TrWfInstance.wf_definition_id.in_(tester_wf_def_ids))
-    combined_filter = or_(*filters) if filters else or_(False)
-    from models import TrWfStageInstance
+    combined_filter = or_(*filters)
     instances_q = (
         db.query(TrWfInstance)
         .join(TestingRequest, TestingRequest.id == TrWfInstance.testing_request_id)
@@ -786,9 +792,10 @@ def tr_wf_get_pending_queue(
         )
     )
     if caller_dept_ids:
-        instances_q = instances_q.filter(
-            TestingRequest.department_id.in_(caller_dept_ids)
-        )
+        instances_q = instances_q.filter(or_(
+            TestingRequest.department_id.in_(caller_dept_ids),
+            assigned_to_caller,
+        ))
     instances = instances_q.all()
 
     from models import TrWfStage as TrWfStageModel
@@ -1230,6 +1237,27 @@ def tr_wf_get_audit_log(
         ):
             stage_instances_by_stage.setdefault(str(si.stage_id), []).append(si)
 
+    # Result-review SLA by result severity - the same rule the dashboard's
+    # Result Review SLA tiles / breach lists use (CRITICAL / ALERT hours from
+    # Threshold Config -> Analytics & SLA). Without this the flow badge used
+    # the stage's own default_duration (e.g. 24h) while the dashboard used
+    # 2h for a CRITICAL result, so the same review showed "6.5h over" here
+    # and "1.2d over" there.
+    _review_sla_hours = None
+    if req is not None:
+        from models import TestResult as _TRes
+        from services.tunable_settings import get_settings as _ts
+        _rank = {"ALERT": 1, "CRITICAL": 2}
+        _worst = None
+        for (_ov,) in db.query(_TRes.evaluation_result["overall"].astext).filter(
+                _TRes.testing_request_id == req.id).all():
+            if _rank.get(_ov, 0) > _rank.get(_worst, 0):
+                _worst = _ov
+        if _worst:
+            _cfg = _ts(db, req.organization_id)
+            _review_sla_hours = (_cfg["review_sla_hours_critical"] if _worst == "CRITICAL"
+                                 else _cfg["review_sla_hours_alert"])
+
     def _sla_info(from_stage_id, action_at):
         """(is_breached, hours_over) for the stage instance this transition
         closed, or (None, None) when that stage has no SLA configured or
@@ -1253,6 +1281,8 @@ def tr_wf_get_audit_log(
             stage.default_duration_hours if stage.default_duration_hours is not None
             else stage.default_duration_days * 24
         )
+        if stage.is_result_stage and _review_sla_hours is not None:
+            duration_hours = _review_sla_hours
         # Result Review stages skip weekends (same add_business_hours the
         # escalation-matrix job / dashboard tile / compliance report use);
         # every other stage keeps plain calendar-time SLA math, matching the

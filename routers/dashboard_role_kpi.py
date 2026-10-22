@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from auth_utils import get_current_user
 from database import get_db
 from models import User, RequestCategory
+from models import OUT_OF_SERVICE_EQUIPMENT_STATUSES
 from services.dashboard_service import DashboardService, invalidate_dashboard_cache
 from models import TestingRequestStatus
 from utils.business_days import business_days_between
@@ -366,7 +367,10 @@ def get_ae_dashboard(
         flagged = []
         for field in result.evaluation_result.get('fields', []):
             if field.get('status') in ['CRITICAL', 'ALERT']:
-                flagged.append(f"{field.get('label','')}: {field.get('value','')}{field.get('unit','')}")
+                if field.get('value') is None:
+                    flagged.append(field.get('label', ''))
+                else:
+                    flagged.append(f"{field.get('label','')}: {field.get('value')}{field.get('unit') or ''}")
         alerts_feed_ae.append({
             'id': str(result.id),
             'title': f"{overall} â€” {req.test_type.name if req.test_type else 'Test'} Â· {eq.ueic if eq else ''}",
@@ -1282,7 +1286,7 @@ def get_test_coordinator_dashboard(
         CategoryMaster.name.ilike("%testing kit%")).all()]
     total_equipment = db.query(func.count(Equipment.id)).filter(
         Equipment.organization_id == svc.org_id,
-        Equipment.status != 'retired',
+        ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES),
         ~Equipment.equipment_type_id.in_(_testkit_type_ids) if _testkit_type_ids else True,
     ).scalar() or 0
     

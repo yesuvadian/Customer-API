@@ -23,6 +23,11 @@ Data Quality Index rule toggles:
                                             (GET/PUT): default expected life,
                                             life-stage cutoffs, ageing radar
                                             benchmark — see alter_ageing_config.py
+    /threshold-config/health-scoring     -> HealthScoringConfig, global
+                                            singleton (GET/PUT): how results
+                                            tables are scored (worst row /
+                                            row average) — see
+                                            alter_health_scoring_config.py
 
 These replace the previously hardcoded _RISK_BANDS / _SCORE / _CONDITION
 constants in services/analytics_engine.py, the _condition_from_score
@@ -33,19 +38,27 @@ alter_test_status_condition.py, alter_equipment_condition_band_threshold.py,
 alter_dqi_rule_config.py for the seed history). Menu-level visibility is
 gated by the "Threshold Config" module (see seed_threshold_config_module.py);
 this router itself only requires an authenticated user, same as the other
-lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py).
+lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py) - except
+writes to the health bands, condition scores and status conditions, which
+rescore every organization and so need a platform super admin
+(_require_platform_admin).
 """
+import logging
 from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+from services.analytics_engine import (
+    TABLE_SCORING_MODES,
+    TABLE_SCORING_WORST_ROW,
+)
 from models import (
     AgeingConfig,
     DqiRuleConfig,
@@ -55,11 +68,63 @@ from models import (
     EquipmentExpectedLife,
     EquipmentHealthBandThreshold,
     FailureCohortThresholdConfig,
+    AnalyticsSettingsConfig,
+    HealthScoringConfig,
     ParameterConditionScore,
     TestStatusCondition,
     User,
     get_dqi_all_key_labels,
 )
+
+def _require_platform_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Write guard for the health bands, condition scores and status
+    conditions. Those tables have no organization column - one row set
+    scores every tenant - and each save rescores every organization (see
+    _rescore_after_change), so only a platform super admin may change them;
+    an org admin (who holds the Threshold Config module) would otherwise
+    rewrite every other organization's risk levels. Same super_admin test as
+    /analytics/recompute-all's all-organizations scope."""
+    usertype = (current_user.get("usertype") if isinstance(current_user, dict)
+                else getattr(current_user, "usertype", None))
+    if usertype != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="These settings apply to every organization - super admin only",
+        )
+    return current_user
+
+
+def _rescore_after_change() -> None:
+    """Health bands, condition scores and status conditions decide the stored
+    health score / risk level of every equipment, which the AI dashboards
+    count - re-run the scoring in the background after each change, or the
+    dashboards keep showing the old classification until someone presses
+    "Recompute All". These tables are global, so every organization is
+    rescored; saves made while a run is going coalesce into one more run."""
+    try:
+        from routers.analytics import start_recompute_job
+        start_recompute_job(None)
+    except Exception as exc:  # never fail the save over the rescore
+        logging.getLogger(__name__).warning("threshold-config: rescore not started: %s", exc)
+
+
+def _reject_duplicate_band_threshold(db: Session, threshold, exclude_id=None) -> None:
+    """409 if another active health band already starts at this score: two
+    bands on one threshold make the risk level depend on row order. Compared
+    at the column's 2 dp, as stored."""
+    q = db.query(EquipmentHealthBandThreshold).filter(
+        EquipmentHealthBandThreshold.is_active == True,  # noqa: E712
+        EquipmentHealthBandThreshold.threshold == round(float(threshold), 2),
+    )
+    if exclude_id is not None:
+        q = q.filter(EquipmentHealthBandThreshold.id != exclude_id)
+    clash = q.first()
+    if clash:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Band '{clash.label}' already starts at {float(clash.threshold):g}",
+        )
+
 
 router = APIRouter(
     prefix="/threshold-config",
@@ -70,16 +135,21 @@ router = APIRouter(
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
+# Each save rescores every organization's equipment straight away, so out-of-
+# range values are refused here. Health scores are 0-100, so a band's lower
+# bound must be too. Condition points may be negative (Poor = -100 pulls a
+# test's average down; the test score itself is floored at 0) but not above
+# 100, which would push health scores past 100.
 class HealthBandCreate(BaseModel):
     label: str
-    threshold: float
+    threshold: float = Field(ge=0, le=100)
     is_active: bool = True
     notes: Optional[str] = None
 
 
 class HealthBandUpdate(BaseModel):
     label: Optional[str] = None
-    threshold: Optional[float] = None
+    threshold: Optional[float] = Field(None, ge=0, le=100)
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -97,14 +167,14 @@ class HealthBandResponse(BaseModel):
 
 class ConditionScoreCreate(BaseModel):
     condition: str
-    score: float
+    score: float = Field(ge=-100, le=100)
     is_active: bool = True
     notes: Optional[str] = None
 
 
 class ConditionScoreUpdate(BaseModel):
     condition: Optional[str] = None
-    score: Optional[float] = None
+    score: Optional[float] = Field(None, ge=-100, le=100)
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -174,12 +244,19 @@ class FailureCohortThresholdUpdate(BaseModel):
     min_failure_rate: Optional[float] = None
     min_cohort_units: Optional[int] = None
     outlier_z_score: Optional[float] = None
+    # Failure Reliability panel display (were .env-only)
+    dashboard_limit: Optional[int] = None
+    trend_years: Optional[int] = None
+    trend_max_series: Optional[int] = None
 
 
 class FailureCohortThresholdResponse(BaseModel):
     min_failure_rate: float
     min_cohort_units: int
     outlier_z_score: float
+    dashboard_limit: int
+    trend_years: int
+    trend_max_series: int
     # True when this org has its own override row; False means the value
     # shown is the inherited system-wide default -- lets the UI show
     # "(default)" vs "(customized)" without a second round trip.
@@ -245,12 +322,14 @@ def list_health_bands(db: Session = Depends(get_db)):
 def create_health_band(
     payload: HealthBandCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.label == payload.label
     ).first():
         raise HTTPException(status_code=409, detail="A band with this label already exists")
+    if payload.is_active:
+        _reject_duplicate_band_threshold(db, payload.threshold)
 
     row = EquipmentHealthBandThreshold(
         label=payload.label,
@@ -261,6 +340,7 @@ def create_health_band(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -270,7 +350,7 @@ def update_health_band(
     band_id: int,
     payload: HealthBandUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.id == band_id
@@ -285,17 +365,28 @@ def update_health_band(
             EquipmentHealthBandThreshold.id != band_id,
         ).first():
             raise HTTPException(status_code=409, detail="A band with this label already exists")
+    # Only when the threshold or active flag changes, so editing a label or
+    # notes never fails on existing data.
+    if "threshold" in data or "is_active" in data:
+        if data.get("is_active", row.is_active):
+            _reject_duplicate_band_threshold(
+                db, data.get("threshold", row.threshold), exclude_id=band_id)
     for field, value in data.items():
         setattr(row, field, value)
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
 
 @router.delete("/health-bands/{band_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_health_band(band_id: int, db: Session = Depends(get_db)):
+def delete_health_band(
+    band_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.id == band_id
     ).first()
@@ -303,6 +394,7 @@ def delete_health_band(band_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Health band not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Condition scores ──────────────────────────────────────────────────────────
@@ -320,7 +412,7 @@ def list_condition_scores(db: Session = Depends(get_db)):
 def create_condition_score(
     payload: ConditionScoreCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(ParameterConditionScore).filter(
         ParameterConditionScore.condition == payload.condition
@@ -336,6 +428,7 @@ def create_condition_score(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -345,7 +438,7 @@ def update_condition_score(
     score_id: int,
     payload: ConditionScoreUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(ParameterConditionScore).filter(
         ParameterConditionScore.id == score_id
@@ -365,12 +458,17 @@ def update_condition_score(
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
 
 @router.delete("/condition-scores/{score_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_condition_score(score_id: int, db: Session = Depends(get_db)):
+def delete_condition_score(
+    score_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(ParameterConditionScore).filter(
         ParameterConditionScore.id == score_id
     ).first()
@@ -378,6 +476,7 @@ def delete_condition_score(score_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Condition score not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Status conditions ─────────────────────────────────────────────────────────
@@ -395,7 +494,7 @@ def list_status_conditions(db: Session = Depends(get_db)):
 def create_status_condition(
     payload: StatusConditionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(TestStatusCondition).filter(
         TestStatusCondition.status == payload.status
@@ -411,6 +510,7 @@ def create_status_condition(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -420,7 +520,7 @@ def update_status_condition(
     condition_id: int,
     payload: StatusConditionUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(TestStatusCondition).filter(
         TestStatusCondition.id == condition_id
@@ -440,12 +540,17 @@ def update_status_condition(
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
 
 @router.delete("/status-conditions/{condition_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_status_condition(condition_id: int, db: Session = Depends(get_db)):
+def delete_status_condition(
+    condition_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(TestStatusCondition).filter(
         TestStatusCondition.id == condition_id
     ).first()
@@ -453,6 +558,7 @@ def delete_status_condition(condition_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Status condition not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Condition bands (5-tier Excellent/Good/Fair/Poor/Critical scale used by
@@ -626,6 +732,43 @@ def update_dqi_rule(
 # CRUD. See FailureCohortThresholdConfig's own docstring for the
 # org-override -> system-default lookup chain.
 
+_COHORT_DISPLAY_ENV = {
+    "dashboard_limit": "FAILURE_COHORT_DASHBOARD_LIMIT",
+    "trend_years": "FAILURE_COHORT_TREND_YEARS",
+    "trend_max_series": "FAILURE_COHORT_TREND_MAX_SERIES",
+}
+
+
+def _cohort_display(row, default_row) -> dict:
+    """Effective display settings: row -> default row -> .env."""
+    import config as _config
+    out = {}
+    for col, const in _COHORT_DISPLAY_ENV.items():
+        val = getattr(row, col, None) if row is not None else None
+        if val is None and default_row is not None:
+            val = getattr(default_row, col, None)
+        out[col] = int(val) if val is not None else int(getattr(_config, const))
+    return out
+
+
+def _cohort_response(row, default_row, is_override: bool) -> FailureCohortThresholdResponse:
+    return FailureCohortThresholdResponse(
+        min_failure_rate=float(row.min_failure_rate),
+        min_cohort_units=row.min_cohort_units,
+        outlier_z_score=float(row.outlier_z_score),
+        is_org_override=is_override,
+        **_cohort_display(row, default_row),
+    )
+
+
+def _cohort_default_row(db):
+    return (
+        db.query(FailureCohortThresholdConfig)
+        .filter(FailureCohortThresholdConfig.organization_id.is_(None))
+        .first()
+    )
+
+
 @router.get("/failure-cohort-thresholds", response_model=FailureCohortThresholdResponse)
 def get_failure_cohort_thresholds(
     db: Session = Depends(get_db),
@@ -636,30 +779,16 @@ def get_failure_cohort_thresholds(
         .filter(FailureCohortThresholdConfig.organization_id == current_user.organization_id)
         .first()
     )
+    default_row = _cohort_default_row(db)
     if org_row:
-        return FailureCohortThresholdResponse(
-            min_failure_rate=float(org_row.min_failure_rate),
-            min_cohort_units=org_row.min_cohort_units,
-            outlier_z_score=float(org_row.outlier_z_score),
-            is_org_override=True,
-        )
+        return _cohort_response(org_row, default_row, True)
 
-    default_row = (
-        db.query(FailureCohortThresholdConfig)
-        .filter(FailureCohortThresholdConfig.organization_id.is_(None))
-        .first()
-    )
     if not default_row:
         raise HTTPException(
             status_code=500,
             detail="No system-wide default configured -- run alter_failure_cohort_threshold_config.py",
         )
-    return FailureCohortThresholdResponse(
-        min_failure_rate=float(default_row.min_failure_rate),
-        min_cohort_units=default_row.min_cohort_units,
-        outlier_z_score=float(default_row.outlier_z_score),
-        is_org_override=False,
-    )
+    return _cohort_response(default_row, None, False)
 
 
 @router.put("/failure-cohort-thresholds", response_model=FailureCohortThresholdResponse)
@@ -687,6 +816,9 @@ def update_failure_cohort_thresholds(
             min_failure_rate=default_row.min_failure_rate if default_row else 1.0,
             min_cohort_units=default_row.min_cohort_units if default_row else 4,
             outlier_z_score=default_row.outlier_z_score if default_row else 3.0,
+            dashboard_limit=default_row.dashboard_limit if default_row else None,
+            trend_years=default_row.trend_years if default_row else None,
+            trend_max_series=default_row.trend_max_series if default_row else None,
         )
         db.add(row)
 
@@ -695,14 +827,14 @@ def update_failure_cohort_thresholds(
         setattr(row, field, value)
     row.modified_by = current_user.id
 
+    for col in ("dashboard_limit", "trend_years", "trend_max_series"):
+        val = getattr(row, col)
+        if val is not None and val < 1:
+            raise HTTPException(status_code=422, detail=f"{col} must be at least 1")
+
     db.commit()
     db.refresh(row)
-    return FailureCohortThresholdResponse(
-        min_failure_rate=float(row.min_failure_rate),
-        min_cohort_units=row.min_cohort_units,
-        outlier_z_score=float(row.outlier_z_score),
-        is_org_override=True,
-    )
+    return _cohort_response(row, _cohort_default_row(db), True)
 
 
 @router.delete("/failure-cohort-thresholds", status_code=status.HTTP_204_NO_CONTENT)
@@ -721,6 +853,166 @@ def reset_failure_cohort_thresholds(
     if row:
         db.delete(row)
         db.commit()
+
+
+# ── Analytics / SLA / scheduling / calibration-interval settings ────────────
+# Singleton per org like the failure-cohort thresholds above, but every value
+# is nullable: an org row overrides only the values it sets, the rest come
+# from the system default row, then .env (services/tunable_settings.py).
+
+class AnalyticsSettingsUpdate(BaseModel):
+    """Partial update of THIS org's overrides. A key sent as null clears
+    that one override (back to the system default)."""
+    analytics_min_trend_points: Optional[int] = None
+    analytics_stable_fraction: Optional[float] = None
+    analytics_min_trend_r_squared: Optional[float] = None
+    analytics_trend_window: Optional[int] = None
+    analytics_min_watch_history: Optional[int] = None
+    analytics_overdue_review_alert_days: Optional[int] = None
+    analytics_overdue_review_critical_days: Optional[int] = None
+    review_sla_hours_alert: Optional[int] = None
+    review_sla_hours_critical: Optional[int] = None
+    schedule_advance_days: Optional[int] = None
+    calibration_interval_min_cycles: Optional[int] = None
+    calibration_interval_extend_fail_rate_pct: Optional[float] = None
+    calibration_interval_shorten_fail_rate_pct: Optional[float] = None
+    calibration_interval_extend_months: Optional[int] = None
+    calibration_interval_shorten_months: Optional[int] = None
+    calibration_interval_max_months: Optional[int] = None
+    calibration_interval_min_months: Optional[int] = None
+    notif_digest_threshold: Optional[int] = None
+    notif_digest_window_minutes: Optional[int] = None
+    notif_max_retries: Optional[int] = None
+    notif_retry_delay_minutes: Optional[int] = None
+    tr_page_size: Optional[int] = None
+    dashboard_panel_page_size: Optional[int] = None
+    max_login_attempts: Optional[int] = None
+    login_lock_duration_min: Optional[int] = None
+    max_otp_attempts: Optional[int] = None
+    otp_lock_duration_min: Optional[int] = None
+    otp_validity_min: Optional[int] = None
+    password_history_limit: Optional[int] = None
+    reset_password_link_minutes: Optional[int] = None
+
+
+class AnalyticsSettingsResponse(BaseModel):
+    values: dict           # effective value of every setting for this org
+    defaults: dict         # what each falls back to without an org override
+    overridden: List[str]  # keys this org has its own value for
+    is_org_override: bool
+
+
+def _analytics_settings_response(db, org_id) -> AnalyticsSettingsResponse:
+    from services.tunable_settings import FIELDS, default_values, get_settings, invalidate
+    invalidate(org_id)
+    values = get_settings(db, org_id)
+    defaults = default_values(db)
+    row = None
+    if org_id:
+        row = (db.query(AnalyticsSettingsConfig)
+               .filter(AnalyticsSettingsConfig.organization_id == org_id).first())
+    overridden = [k for k in FIELDS if row is not None and getattr(row, k) is not None]
+    return AnalyticsSettingsResponse(
+        values=values, defaults=defaults, overridden=overridden,
+        is_org_override=bool(overridden),
+    )
+
+
+def _validate_analytics_settings(v: dict) -> None:
+    def err(msg):
+        raise HTTPException(status_code=422, detail=msg)
+    for k, val in v.items():
+        if val is None:
+            continue
+        if val < 0:
+            err(f"{k} cannot be negative")
+    for k in ("analytics_stable_fraction", "analytics_min_trend_r_squared"):
+        if v.get(k) is not None and not (0 <= v[k] <= 1):
+            err(f"{k} must be between 0 and 1")
+    for k in ("calibration_interval_extend_fail_rate_pct", "calibration_interval_shorten_fail_rate_pct"):
+        if v.get(k) is not None and v[k] > 100:
+            err(f"{k} must be between 0 and 100")
+    for k in ("analytics_min_trend_points", "analytics_trend_window",
+              "review_sla_hours_alert", "review_sla_hours_critical",
+              "calibration_interval_min_cycles", "calibration_interval_min_months",
+              "notif_digest_threshold", "notif_digest_window_minutes",
+              "notif_retry_delay_minutes",
+              "max_login_attempts", "login_lock_duration_min",
+              "max_otp_attempts", "otp_lock_duration_min", "otp_validity_min",
+              "reset_password_link_minutes"):
+        if v.get(k) is not None and v[k] < 1:
+            err(f"{k} must be at least 1")
+    for k in ("tr_page_size", "dashboard_panel_page_size"):
+        if v.get(k) is not None and not (1 <= v[k] <= 200):
+            err(f"{k} must be between 1 and 200")
+    if v.get("notif_max_retries") is not None and v["notif_max_retries"] > 20:
+        err("notif_max_retries must be at most 20")
+
+
+@router.get("/analytics-settings", response_model=AnalyticsSettingsResponse)
+def get_analytics_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _analytics_settings_response(db, current_user.organization_id)
+
+
+@router.put("/analytics-settings", response_model=AnalyticsSettingsResponse)
+def update_analytics_settings(
+    payload: AnalyticsSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Creates this org's override row on first edit; only the keys sent are
+    changed (null = clear that override)."""
+    from services.tunable_settings import get_settings, invalidate
+    org_id = current_user.organization_id
+    if not org_id:
+        raise HTTPException(status_code=403, detail="User must belong to an organization")
+    data = payload.model_dump(exclude_unset=True)
+    _validate_analytics_settings(data)
+
+    row = (db.query(AnalyticsSettingsConfig)
+           .filter(AnalyticsSettingsConfig.organization_id == org_id).first())
+    if not row:
+        row = AnalyticsSettingsConfig(organization_id=org_id)
+        db.add(row)
+    for k, v in data.items():
+        setattr(row, k, v)
+    row.modified_by = current_user.id
+    db.flush()
+
+    # Cross-field checks on the resulting effective values.
+    invalidate(org_id)
+    eff = get_settings(db, org_id)
+    if eff["analytics_overdue_review_critical_days"] < eff["analytics_overdue_review_alert_days"]:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Overdue review: critical days must be >= alert days")
+    if eff["calibration_interval_min_months"] > eff["calibration_interval_max_months"]:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Calibration interval: min months must be <= max months")
+    if eff["calibration_interval_extend_fail_rate_pct"] > eff["calibration_interval_shorten_fail_rate_pct"]:
+        db.rollback()
+        raise HTTPException(status_code=422,
+                            detail="Calibration interval: extend fail-rate % must be <= shorten fail-rate %")
+
+    db.commit()
+    return _analytics_settings_response(db, org_id)
+
+
+@router.delete("/analytics-settings", status_code=status.HTTP_204_NO_CONTENT)
+def reset_analytics_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Back to the system defaults (a no-op if there was no override)."""
+    from services.tunable_settings import invalidate
+    row = (db.query(AnalyticsSettingsConfig)
+           .filter(AnalyticsSettingsConfig.organization_id == current_user.organization_id).first())
+    if row:
+        db.delete(row)
+        db.commit()
+    invalidate(current_user.organization_id)
 
 
 @router.delete("/dqi-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1221,3 +1513,85 @@ def update_ageing_config(
     db.commit()
     db.refresh(row)
     return _ageing_response(row)
+
+
+# ── Health scoring (HealthScorer.score_test's table scoring mode) ───────────
+# Global like the condition scores whose points it combines, so the same
+# platform-admin write guard and automatic rescore apply. Created by
+# alter_health_scoring_config.py; until it's run GET answers the built-in
+# default and PUT answers 503 (the scorer keeps using "worst_row").
+
+_HEALTH_SCORING_SETUP_HINT = (
+    "Health scoring table doesn't exist yet -- run alter_health_scoring_config.py"
+)
+
+
+class HealthScoringConfigUpdate(BaseModel):
+    table_scoring_mode: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class HealthScoringConfigResponse(BaseModel):
+    # "worst_row" | "row_average"
+    table_scoring_mode: str
+    notes: Optional[str] = None
+    # False = no row saved yet; the value shown is the built-in default.
+    is_configured: bool
+
+
+def _health_scoring_response(row: Optional[HealthScoringConfig]) -> HealthScoringConfigResponse:
+    if row is None:
+        return HealthScoringConfigResponse(
+            table_scoring_mode=TABLE_SCORING_WORST_ROW, notes=None, is_configured=False)
+    return HealthScoringConfigResponse(
+        table_scoring_mode=row.table_scoring_mode, notes=row.notes, is_configured=True)
+
+
+@router.get("/health-scoring", response_model=HealthScoringConfigResponse)
+def get_health_scoring_config(db: Session = Depends(get_db)):
+    try:
+        row = db.query(HealthScoringConfig).order_by(HealthScoringConfig.id.asc()).first()
+    except ProgrammingError:
+        db.rollback()
+        row = None
+    return _health_scoring_response(row)
+
+
+@router.put("/health-scoring", response_model=HealthScoringConfigResponse)
+def update_health_scoring_config(
+    payload: HealthScoringConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
+    """Partial update of the single global row (created on first save).
+    Changing the mode rescores every organization in the background, same
+    as a condition-score change."""
+    data = payload.model_dump(exclude_unset=True)
+    mode = data.get("table_scoring_mode")
+    if "table_scoring_mode" in data and mode not in TABLE_SCORING_MODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"table_scoring_mode must be one of: {', '.join(TABLE_SCORING_MODES)}",
+        )
+    try:
+        row = db.query(HealthScoringConfig).order_by(HealthScoringConfig.id.asc()).first()
+    except ProgrammingError:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=_HEALTH_SCORING_SETUP_HINT)
+
+    old_mode = row.table_scoring_mode if row else TABLE_SCORING_WORST_ROW
+    if row is None:
+        row = HealthScoringConfig(table_scoring_mode=TABLE_SCORING_WORST_ROW,
+                                  created_by=current_user.id)
+        db.add(row)
+    if mode is not None:
+        row.table_scoring_mode = mode
+    if "notes" in data:
+        row.notes = data["notes"]
+    row.modified_by = current_user.id
+
+    db.commit()
+    if row.table_scoring_mode != old_mode:
+        _rescore_after_change()
+    db.refresh(row)
+    return _health_scoring_response(row)

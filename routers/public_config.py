@@ -21,9 +21,32 @@ from config import MAX_DOCUMENT_UPLOAD_MB, ALLOWED_UPLOAD_TYPES
 router = APIRouter(tags=["Public Config"])
 
 
+BILLING_MODULE_NAME = "Subscription & Billing"
+
+
+def _billing_enabled() -> bool:
+    """Billing UI on/off = is_active of the Subscription & Billing module
+    (alter_hide_subscription_billing_module.py flips it). The frontend hides
+    the menu entry, the Organisation page's Billing tab and the billing
+    banners when this is false. True if the module row is missing or the
+    lookup fails, so billing never silently disappears on an error."""
+    try:
+        from database import SessionLocal
+        from models import Module
+        db = SessionLocal()
+        try:
+            mod = db.query(Module.is_active).filter(Module.name == BILLING_MODULE_NAME).first()
+            return True if mod is None else bool(mod[0])
+        finally:
+            db.close()
+    except Exception:
+        return True
+
+
 @router.get("/public-config")
 def get_public_config():
     return {
+        "billing_enabled": _billing_enabled(),
         "max_upload_mb": int(os.getenv("MAX_UPLOAD_MB", 5)),
         "max_document_upload_mb": MAX_DOCUMENT_UPLOAD_MB,
         "allowed_upload_types": {

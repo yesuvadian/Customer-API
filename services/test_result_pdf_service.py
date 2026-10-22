@@ -1093,6 +1093,9 @@ class TestResultPDFService:
             eval_data = result.evaluation_result
             overall_eval = eval_data.get('overall', 'N/A')
             alerts = eval_data.get('alerts', [])
+            # A test that couldn't be assessed shows why it is CRITICAL
+            if not alerts and eval_data.get('unassessed_reason'):
+                alerts = [{'level': 'CRITICAL', 'message': eval_data.get('summary', '')}]
 
             # Overall evaluation badge
             eval_color = colors.HexColor('#4CAF50') if overall_eval == 'OK' else \

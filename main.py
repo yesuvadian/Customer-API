@@ -1559,6 +1559,11 @@ def _check_deterioration_watch_overdue():
                 logger.warning(f"[DeteriorationWatch] watch-list fetch failed org={org.id}: {_oe}")
                 continue
 
+            # Overdue-review thresholds are per org (Threshold Config ->
+            # Analytics & SLA), falling back to .env.
+            from services.tunable_settings import get_settings as _ts
+            _org_alert_days = _ts(db, org.id)["analytics_overdue_review_alert_days"]
+
             for eq in result.get("equipment", []):
                 for p in eq.get("parameters", []):
                     if p.get("is_reviewed"):
@@ -1570,7 +1575,7 @@ def _check_deterioration_watch_overdue():
                         days_pending = (today - _date.fromisoformat(tested_at[:10])).days
                     except ValueError:
                         continue
-                    if days_pending < config.ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS:
+                    if days_pending < _org_alert_days:
                         continue
 
                     # Dedup by (source, event): NotificationLog has no

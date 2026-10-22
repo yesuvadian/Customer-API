@@ -75,15 +75,19 @@ class EmailService:
             server.login(self.username, self.password)
             server.send_message(msg)
 
-    def send_password_reset(self, to_email: str, token: str):
+    def send_password_reset(self, to_email: str, token: str, expiry_minutes: int = None):
         universal_link = f"{self.base_url}/reset-password?token={token}&email={to_email}"
+        # expiry_minutes = the real token lifetime (auth_utils passes it);
+        # the old RESETPASSWORD_TOKEN_EXPIRE value is only a fallback.
+        expiry_text = (f"{expiry_minutes} minute(s)" if expiry_minutes
+                       else f"{self.reset_token_expiry} seconds")
         body = f"""
             <h3>Password Reset / Contact Request</h3>
             <p>Click the link below to continue:</p>
             <a href="{universal_link}" style="color:#004080; text-decoration:none; font-weight:bold;">
                 Reset Password
             </a>
-            <p>This link will expire in {self.reset_token_expiry} seconds.</p>
+            <p>This link will expire in {expiry_text}.</p>
         """
         self.send_email_starttls(to_email, "Congniwatt-Action Required: Password Reset", body)
 

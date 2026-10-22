@@ -119,6 +119,35 @@ def _load_risk_bands(db: Optional[Session]) -> list[tuple[float, str]]:
     return [(float(r.threshold), r.label) for r in rows]
 
 
+# The four risk slots every dashboard counts into (KPI tiles, department
+# cards, summary-table columns, AI Graph critical/high), worst first.
+RISK_SLOTS = ("Critical", "High", "Medium", "Low")
+
+
+def risk_slot_mapper(db: Optional[Session]):
+    """Returns slot(label) -> one of RISK_SLOTS, or None for a missing /
+    unrecognised label. The standard names map to themselves; any other
+    label (a band an admin renamed or added, e.g. "Severe") maps by its
+    position in the configured bands, worst first: 1st -> Critical,
+    2nd -> High, 3rd -> Medium, the rest -> Low. Counting by the literal
+    names made such equipment vanish from every tile.
+    """
+    worst_first = [label for _, label in reversed(_load_risk_bands(db))]
+    by_rank = {
+        label: RISK_SLOTS[min(i, len(RISK_SLOTS) - 1)]
+        for i, label in enumerate(worst_first)
+    }
+
+    def slot(label):
+        if not label:
+            return None
+        label = str(label).strip()
+        if label in RISK_SLOTS:
+            return label
+        return by_rank.get(label)
+    return slot
+
+
 def _load_condition_labels(db: Optional[Session]) -> dict[str, str]:
     """Admin-configured {status: condition_label} map. Falls back to
     _DEFAULT_CONDITION if no db session was given or the table has no
@@ -188,31 +217,56 @@ def _load_band_rank_words(db: Optional[Session]) -> dict[str, int]:
     return {r.phrase.lower(): r.rank for r in rows}
 
 
+def _worst_band_label(db: Optional[Session]) -> Optional[str]:
+    """Label of the lowest-threshold risk band (Critical by default) when it
+    is active, else None (disabled). Looks at inactive bands too, so turning
+    the worst band off is told apart from renaming it."""
+    if db is None:
+        return _DEFAULT_RISK_BANDS[-1][1]
+    from models import EquipmentHealthBandThreshold
+    row = (
+        db.query(EquipmentHealthBandThreshold)
+        .order_by(EquipmentHealthBandThreshold.threshold.asc())
+        .first()
+    )
+    if row is None:  # table not seeded - defaults apply
+        return _DEFAULT_RISK_BANDS[-1][1]
+    return row.label if row.is_active else None
+
+
 def _risk_from_score(
     score: Optional[float],
     critical_findings: list | None = None,
     db: Optional[Session] = None,
 ) -> str:
     bands = _load_risk_bands(db)
-    band_labels = {label for _, label in bands}
-    # If any finding has CRITICAL status, the equipment risk is at least
-    # Critical, regardless of its composite health score - but only while
-    # a "Critical" band is actually active. An admin who disables the
-    # Critical band expects it to stop appearing anywhere, including here;
-    # without this guard a single CRITICAL-status finding force-labels the
-    # equipment "Critical" no matter what the (now Critical-less) bands say,
-    # which is why disabling that band appeared to do nothing.
+    # If any finding has CRITICAL status, the equipment risk is the worst
+    # band, regardless of its composite health score - but only while that
+    # band is actually active. An admin who disables the Critical band
+    # expects it to stop appearing anywhere, including here; without this
+    # guard a single CRITICAL-status finding force-labels the equipment
+    # "Critical" no matter what the (now Critical-less) bands say, which is
+    # why disabling that band appeared to do nothing. The worst band is
+    # found by position, not by the literal name "Critical", so renaming it
+    # (e.g. to "Severe") keeps the override instead of silently dropping
+    # findings-only equipment to a milder band.
+    worst = _worst_band_label(db)
     if (
         critical_findings
-        and "Critical" in band_labels
+        and worst is not None
         and any(
             isinstance(f, dict) and f.get("status") == "CRITICAL"
             for f in critical_findings
         )
     ):
-        return "Critical"
+        return worst
     if score is None:
         return "Unknown"
+    return _band_for_score(score, bands)
+
+
+def _band_for_score(score: float, bands: list[tuple[float, str]]) -> str:
+    """The risk band a score alone falls in (no critical-finding override)."""
     for threshold, label in bands:
         if score >= threshold:
             return label
@@ -223,6 +277,51 @@ def _risk_from_score(
     # being labeled Critical instead of silently keeping the old label via
     # a hardcoded fallback.
     return bands[-1][1] if bands else "Unknown"
+
+
+def risk_by_finding_checker(db: Optional[Session]):
+    """Returns check(score, risk_level) -> True when risk_level is the worst
+    band only because of a CRITICAL finding (_risk_from_score's override),
+    i.e. the score on its own would land in a milder band - shown in the app
+    as e.g. "85.7 · Critical — by finding". Bands are loaded once, so call
+    this once per request and reuse the check for every row."""
+    bands = _load_risk_bands(db)
+    worst = _worst_band_label(db)
+
+    def check(score, risk_level) -> bool:
+        if worst is None or score is None or risk_level != worst:
+            return False
+        return _band_for_score(float(score), bands) != worst
+
+    return check
+
+
+TABLE_SCORING_WORST_ROW = "worst_row"
+TABLE_SCORING_ROW_AVERAGE = "row_average"
+TABLE_SCORING_MODES = (TABLE_SCORING_WORST_ROW, TABLE_SCORING_ROW_AVERAGE)
+
+
+def _load_table_scoring_mode(db: Optional[Session]) -> str:
+    """HealthScoringConfig.table_scoring_mode (Threshold Config "Table
+    scoring"). "worst_row" — the original behaviour — when there's no db
+    session, no row saved yet, or the table doesn't exist
+    (alter_health_scoring_config.py not run). The query runs in a SAVEPOINT
+    so a missing table doesn't poison the caller's transaction."""
+    if db is None:
+        return TABLE_SCORING_WORST_ROW
+    from sqlalchemy.exc import ProgrammingError
+    from models import HealthScoringConfig
+    try:
+        with db.begin_nested():
+            row = (
+                db.query(HealthScoringConfig.table_scoring_mode)
+                .order_by(HealthScoringConfig.id.asc())
+                .first()
+            )
+    except ProgrammingError:
+        return TABLE_SCORING_WORST_ROW
+    mode = row[0] if row else None
+    return mode if mode in TABLE_SCORING_MODES else TABLE_SCORING_WORST_ROW
 
 
 def accepted_test_result_ids(db: Session):
@@ -403,8 +502,12 @@ class ParameterAnalyzer:
         evaluation: dict,
         current_value: Optional[float] = None,
         current_date:  Optional[datetime] = None,
+        tuning:        Optional[dict] = None,
     ) -> dict:
         """
+        tuning: the org's resolved settings (services.tunable_settings.
+          get_settings) - overrides the .env-based class constants below
+          for min trend points / trend window / stable fraction / min R^2.
         history  : [(tested_at, float_value), ...] sorted oldest-first
         evaluation: the field's `evaluation` dict from template
         current_value/current_date: the reading being analysed right now -
@@ -415,6 +518,12 @@ class ParameterAnalyzer:
         days_to_breach, is_anomaly, anomaly_type, anomaly_detail,
         history_count.
         """
+        _t = tuning or {}
+        _min_trend_points = _t.get("analytics_min_trend_points", ParameterAnalyzer.MIN_TREND_POINTS)
+        _trend_window     = _t.get("analytics_trend_window", ParameterAnalyzer.TREND_WINDOW)
+        _stable_fraction  = _t.get("analytics_stable_fraction", ParameterAnalyzer.STABLE_FRACTION)
+        _min_r_squared    = _t.get("analytics_min_trend_r_squared", ParameterAnalyzer.MIN_TREND_R_SQUARED)
+
         result: dict = {
             "history_count":      len(history) + 1,  # +1 for current reading
             "trend":              "Insufficient_Data",
@@ -455,7 +564,7 @@ class ParameterAnalyzer:
         if len(values) >= 4:
             ParameterAnalyzer._detect_anomaly(values, result)
 
-        if len(history) < ParameterAnalyzer.MIN_TREND_POINTS:
+        if len(history) < _min_trend_points:
             return result
 
         # Trend fit only looks at the most recent TREND_WINDOW readings
@@ -466,7 +575,7 @@ class ParameterAnalyzer:
         # readings naturally push old ones out of the fit. history_count in
         # the result above is still the TRUE lifetime count (unwindowed) —
         # only the regression inputs below are limited.
-        window = ParameterAnalyzer.TREND_WINDOW
+        window = _trend_window
         if len(values) > window:
             values = values[-window:]
             dates  = dates[-window:]
@@ -492,7 +601,7 @@ class ParameterAnalyzer:
                 result["pct_change_annual"] = round(annual_change / abs(prior_value) * 100, 2)
 
             val_range = abs(prior_value) or abs(values[-1]) or 1
-            stable_threshold = val_range * ParameterAnalyzer.STABLE_FRACTION
+            stable_threshold = val_range * _stable_fraction
             if annual_change > stable_threshold:
                 result["trend"] = "Increasing"
             elif annual_change < -stable_threshold:
@@ -529,8 +638,8 @@ class ParameterAnalyzer:
 
         # Trend classification
         val_range = max(values) - min(values) if len(values) > 1 else abs(values[0])
-        stable_threshold = (val_range or abs(values[-1]) or 1) * ParameterAnalyzer.STABLE_FRACTION
-        fit_is_reliable = r_sq >= ParameterAnalyzer.MIN_TREND_R_SQUARED
+        stable_threshold = (val_range or abs(values[-1]) or 1) * _stable_fraction
+        fit_is_reliable = r_sq >= _min_r_squared
         if not fit_is_reliable:
             # The line doesn't explain enough of the actual variance to
             # trust a direction from it, regardless of how large the
@@ -675,9 +784,17 @@ class HealthScorer:
         test_data: dict | None = None,
         condition_labels: dict[str, str] | None = None,
         scores: dict[str, float] | None = None,
+        table_scoring_mode: str = TABLE_SCORING_WORST_ROW,
     ) -> tuple[float, list[dict]]:
         """
         Returns (health_score 0–100, critical_findings list).
+
+        table_scoring_mode (_load_table_scoring_mode, Threshold Config
+        "Table scoring"): "worst_row" scores a results-table field as one
+        field at its overall (worst-row) status; "row_average" splits the
+        table's weight equally over its evaluated rows (see
+        _table_row_statuses). Critical findings are built the same way in
+        both modes, so risk level is unaffected.
 
         evaluation_result is the JSONB stored in TestResult.evaluation_result,
         which has {overall, fields: [{key, label, status, ...}]}.
@@ -692,6 +809,30 @@ class HealthScorer:
         scores = scores if scores is not None else _DEFAULT_SCORE
         if not evaluation_result:
             return None, []
+
+        # Equipment test on a template with no threshold values
+        # (EvaluationService._no_threshold_result): no readings to score, so
+        # the tester's verdict decides. Fail (overall CRITICAL) scores 0 with a
+        # CRITICAL finding - _risk_from_score() then marks the test and the
+        # equipment Critical; a real 0, not None, because date-filtered views
+        # and the health-band charts drop scoreless snapshots as "not
+        # assessed". Pass / anything else: unscored, no findings - the
+        # equipment is not made Critical.
+        if evaluation_result.get("no_threshold_values"):
+            if evaluation_result.get("overall") != CRITICAL:
+                return None, []
+            return 0.0, [{
+                "key":          f.get("key"),
+                "label":        f.get("label"),
+                "condition":    condition_labels.get(CRITICAL, "Poor"),
+                "status":       CRITICAL,
+                "unit":         None,
+                "value":        f.get("value"),
+                "breach_limit": None,
+                "reason":       f.get("remedial_action_text")
+                                or "Tester marked this test as Fail",
+            } for f in evaluation_result.get("fields", [])
+              if isinstance(f, dict) and f.get("status") == CRITICAL]
 
         field_statuses: dict[str, str] = {
             f["key"]: f["status"]
@@ -757,7 +898,21 @@ class HealthScorer:
             condition = condition_labels.get(status, _DEFAULT_CONDITION.get(status, "Poor"))
             score     = scores.get(condition, _DEFAULT_SCORE.get(condition, 0.0))
 
-            weighted_sum  += score  * weight
+            row_statuses = (
+                HealthScorer._table_row_statuses(ef, status)
+                if table_scoring_mode == TABLE_SCORING_ROW_AVERAGE
+                and (field.get("type") == "table" or ef.get("type") == "table")
+                else []
+            )
+            if row_statuses:
+                # Row average: the table keeps its total weight, each
+                # evaluated row gets an equal share of it.
+                share = weight / len(row_statuses)
+                for rs in row_statuses:
+                    rc = condition_labels.get(rs, _DEFAULT_CONDITION.get(rs, "Poor"))
+                    weighted_sum += scores.get(rc, _DEFAULT_SCORE.get(rc, 0.0)) * share
+            else:
+                weighted_sum += score * weight
             total_weight  += weight
 
             # "Poor" (CRITICAL overall) or "Fair" (ALERT overall) - gating on
@@ -856,12 +1011,42 @@ class HealthScorer:
                         critical_findings.append({
                             "key":          f"{fkey}.{name}",
                             "label":        display_name,
-                            "condition":    "Poor",
+                            # The row's own condition - an ALERT row is
+                            # "Fair", not the "Poor" this used to hardcode.
+                            "condition":    condition_labels.get(rs, _DEFAULT_CONDITION.get(rs, "Poor")),
                             "status":       rs,
                             "unit":         ru or None,
                             "value":        rv,
                             "breach_limit": rl,
                             "reason":       r_reason,
+                        })
+                    # The table's own verdict can be worse than every row -
+                    # a Duval Triangle zone (e.g. D2/T3) or an aggregate rule
+                    # with only ALERT gas rows. Without a finding for it
+                    # nothing carries that CRITICAL to _risk_from_score: under
+                    # worst-row scoring the score (0) still made the asset
+                    # Critical, but under row-average it lost Critical
+                    # altogether (seen on 3 dev DGA tests).
+                    _rank = HealthScorer._ROW_STATUS_RANK
+                    if _rank.get(status, 0) > max(
+                        _rank.get(str(r.get("status", "")).upper(), 0)
+                        for r in critical_rows
+                    ):
+                        table_label = field.get("label") or fkey
+                        if ef.get("duval_zone"):
+                            t_label = f"{table_label} — Duval zone {ef['duval_zone']}"
+                        else:
+                            t_label = table_label
+                        critical_findings.append({
+                            "key":          fkey,
+                            "label":        t_label,
+                            "condition":    condition,
+                            "status":       status,
+                            "unit":         None,
+                            "value":        None,
+                            "breach_limit": None,
+                            "reason":       ef.get("remedial_action_text")
+                                            or f"{table_label} — evaluated as {status}",
                         })
                 else:
                     # Non-table field
@@ -870,12 +1055,16 @@ class HealthScorer:
                         reason = f"Value {value}{u} exceeds the critical limit of {breach_limit}{u}"
                     elif value is not None:
                         reason = f"Value {value} {unit or ''} triggered {status} evaluation".strip()
+                    elif not field and ef.get("remedial_action_text"):
+                        # Synthetic "not assessed" finding (no template field
+                        # behind it) — its text is the reason.
+                        reason = ef["remedial_action_text"]
                     else:
                         reason = f"Evaluated as {status} based on test result"
 
                     critical_findings.append({
                         "key":           fkey,
-                        "label":         field.get("label", fkey),
+                        "label":         field.get("label") or ef.get("label") or fkey,
                         "condition":     condition,
                         "status":        status,
                         "unit":          unit,
@@ -889,6 +1078,73 @@ class HealthScorer:
 
         raw = weighted_sum / total_weight
         return round(max(0.0, raw), 2), critical_findings
+
+    _ROW_STATUS_RANK = {"NORMAL": 0, "ALERT": 1, "CRITICAL": 2}
+
+    @staticmethod
+    def _table_row_statuses(ef: dict, field_status: str) -> list[str]:
+        """One status per evaluated row of a table field's evaluation, for
+        "row_average" scoring. Empty list = no row detail (e.g. an old
+        stored evaluation) - the caller then falls back to worst-row.
+
+          - THRESHOLD tables (DGA, oil, BDV): row_results, one per row.
+          - Column-rule tables (tan δ, DFR, functional tests):
+            column_results, one per CELL - grouped by row index, each row
+            at its worst cell, so a row isn't weighted by its column count.
+          - Rows with no status (blank readings, no threshold for that row)
+            aren't in either list, so they aren't counted.
+          - A table-level verdict that isn't any single row - a Duval
+            Triangle zone or an aggregate rule raising the table above its
+            worst row - counts as one extra row at that status; otherwise a
+            DGA table in a Critical Duval zone with every gas Normal would
+            score 100.
+        """
+        rank = HealthScorer._ROW_STATUS_RANK
+
+        def _norm(s) -> str:
+            # Template severity maps aren't always upper-case (see
+            # evaluation_service._has_severity), and the evaluator ranks an
+            # unrecognised cell status as NORMAL when it picks the table's
+            # worst row - match both here, or a "normal" cell would fall
+            # through condition_labels to "Poor".
+            s = str(s).upper()
+            return s if s in rank else "NORMAL"
+
+        statuses = [
+            _norm(r["status"]) for r in (ef.get("row_results") or [])
+            if isinstance(r, dict) and r.get("status")
+        ]
+        if not statuses:
+            by_row: dict = {}
+            for cr in ef.get("column_results") or []:
+                if not isinstance(cr, dict) or not cr.get("status"):
+                    continue
+                idx = cr.get("row")
+                st = _norm(cr["status"])
+                cur = by_row.get(idx)
+                if cur is None or rank[st] > rank[cur]:
+                    by_row[idx] = st
+            statuses = list(by_row.values())
+        if not statuses:
+            return []
+        worst_row = max(rank.get(s, 0) for s in statuses)
+        if rank.get(field_status, 0) > worst_row:
+            statuses.append(field_status)
+        return statuses
+
+
+def _last_test_date(ta_rows):
+    """Date of the latest test among TestAnalytics rows: tested_at (the test
+    result's date, or the request's requested_date), not calculated_at, which
+    is when the row was last (re)scored - a recompute moved every equipment's
+    "last tested" to today. calculated_at only for a row with no test date.
+    Naive values read as UTC (code writes UTC), same as the dashboards."""
+    dates = [r.tested_at or r.calculated_at for r in ta_rows]
+    return max(
+        (d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc)
+         for d in dates if d),
+        default=None,
+    )
 
 
 # ── Main analytics engine ─────────────────────────────────────────────────────
@@ -946,10 +1202,20 @@ class AnalyticsEngine:
             return None
 
         # Load template
-        template_data = self._load_template(template_key, organization_id)
+        template_data = self._load_template(template_key, organization_id) if template_key else None
         if not template_data:
-            logger.warning("run_for_test: template '%s' not found", template_key)
-            return None
+            # An equipment test stored CRITICAL because its template is
+            # missing (EvaluationService TEMPLATE_NOT_FOUND) still counts
+            # against the equipment: score it from that stored evaluation
+            # (its config finding scores 0 / Critical) instead of leaving a
+            # failed test out of the health score. Anything else has nothing
+            # to score.
+            from services.evaluation_service import TEMPLATE_NOT_FOUND
+            if evaluation_result.get("unassessed_reason") != TEMPLATE_NOT_FOUND:
+                logger.warning("run_for_test: template '%s' not found", template_key)
+                return None
+            template_key  = template_key or TEMPLATE_NOT_FOUND
+            template_data = {}
 
         # Load historical test data for trend analysis
         history_map, categorical_history_map = self._fetch_history_map(
@@ -964,11 +1230,16 @@ class AnalyticsEngine:
         # not re-queried per field.
         condition_labels = _load_condition_labels(self.db)
         condition_scores = _load_condition_scores(self.db)
+        # Org's trend-analysis settings (Threshold Config -> Analytics & SLA).
+        from services.tunable_settings import get_settings as _ts
+        trend_tuning = _ts(self.db, organization_id)
+        table_scoring_mode = _load_table_scoring_mode(self.db)
 
         # Score the test
         health_score, critical_findings = HealthScorer.score_test(
             template_data, evaluation_result, test_data=test_data,
             condition_labels=condition_labels, scores=condition_scores,
+            table_scoring_mode=table_scoring_mode,
         )
 
         # An explicit tester recommendation of "Fail" overrides both the
@@ -1123,6 +1394,7 @@ class AnalyticsEngine:
                         history, ev,
                         current_value=current_val,
                         current_date=result.tested_at or result.cts,
+                        tuning=trend_tuning,
                     )
 
                     pa = self._upsert_parameter_analytics(
@@ -1324,6 +1596,7 @@ class AnalyticsEngine:
                                     history, {},
                                     current_value=current_val,
                                     current_date=result.tested_at or result.cts,
+                                    tuning=trend_tuning,
                                 )
 
                             pa = self._upsert_parameter_analytics(
@@ -1464,10 +1737,7 @@ class AnalyticsEngine:
             .count()
         ) if _latest_result_ids else 0
 
-        last_test = max(
-            (r.calculated_at for r in latest_per_template if r.calculated_at),
-            default=None,
-        )
+        last_test = _last_test_date(latest_per_template)
 
         ea = self._upsert_equipment_analytics(
             equipment_id        = equipment_id,
@@ -1525,9 +1795,16 @@ class AnalyticsEngine:
 
         # Gather equipment from this department AND all descendants (single query)
         all_dept_ids = self._collect_descendant_dept_ids(department_id)
+        # In-service equipment only: a retired / replaced / condemned /
+        # decommissioned unit keeps its EquipmentAnalytics row (history), but
+        # must no longer pull down its zone's health or sit in its Critical
+        # tally.
+        from models import OUT_OF_SERVICE_EQUIPMENT_STATUSES
         eq_rows = (
             self.db.query(EquipmentAnalytics)
-            .filter(EquipmentAnalytics.department_id.in_(all_dept_ids))
+            .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
+            .filter(EquipmentAnalytics.department_id.in_(all_dept_ids),
+                    ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
             .all()
         )
 

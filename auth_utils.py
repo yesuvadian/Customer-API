@@ -76,9 +76,16 @@ def verify_reset_token(token: str) -> Optional[str]:
         )
 
 
-def generate_reset_token(user_id: str) -> str:
+def _login_policy(db, user) -> dict:
+    """Login / password policy for this user's org (Threshold Config ->
+    Login & Password Policy, .env fallback)."""
+    from services.tunable_settings import get_settings
+    return get_settings(db, getattr(user, "organization_id", None))
+
+
+def generate_reset_token(user_id: str, expire_minutes: Optional[int] = None) -> str:
     """Create a short-lived JWT token for password reset."""
-    expire = UTCDateTimeMixin._utc_now() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+    expire = UTCDateTimeMixin._utc_now() + timedelta(minutes=expire_minutes or RESET_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(user_id),
         "exp": expire,
@@ -685,12 +692,12 @@ def login_user(db: Session, email: str, password: str):
             db.rollback()  # clear any dirty state before writing
             security.failed_login_attempts = (security.failed_login_attempts or 0) + 1
 
-            if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
-                security.login_locked_until = now + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
+            if security.failed_login_attempts >= _login_policy(db, user)["max_login_attempts"]:
+                security.login_locked_until = now + timedelta(minutes=_login_policy(db, user)["login_lock_duration_min"])
                 db.commit()
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Too many failed attempts. Account locked for {LOGIN_LOCK_DURATION_MIN} minute(s)."
+                    detail=f"Too many failed attempts. Account locked for {_login_policy(db, user)['login_lock_duration_min']} minute(s)."
                 )
 
             db.commit()
@@ -937,13 +944,13 @@ def authenticate_user(db: Session, username: str, password: str, request=None):
         db.rollback()  # clear dirty state before writing
         security.failed_login_attempts = (security.failed_login_attempts or 0) + 1
 
-        if security.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
-            security.login_locked_until = now + timedelta(minutes=LOGIN_LOCK_DURATION_MIN)
+        if security.failed_login_attempts >= _login_policy(db, user)["max_login_attempts"]:
+            security.login_locked_until = now + timedelta(minutes=_login_policy(db, user)["login_lock_duration_min"])
             security.failed_login_attempts = 0
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Too many failed attempts. Account locked for {LOGIN_LOCK_DURATION_MIN} minute(s)."
+                detail=f"Too many failed attempts. Account locked for {_login_policy(db, user)['login_lock_duration_min']} minute(s)."
             )
 
         db.commit()
@@ -1053,14 +1060,18 @@ def requestpasswordreset(db: Session, email: str, request: Request) -> str:
     db.commit()
 
     # Generate new token
-    reset_token = generate_reset_token(user.id)
+    # One setting for the link lifetime AND the expiry the email states
+    # (Threshold Config -> Login & Password Policy; they used to disagree:
+    # token 300 min vs an email saying 3600 seconds).
+    reset_minutes = _login_policy(db, user)["reset_password_link_minutes"]
+    reset_token = generate_reset_token(user.id, reset_minutes)
 
     # Store token
     token_entry = PasswordResetToken(
         user_id=user.id,
         token=reset_token,
         cts=UTCDateTimeMixin._utc_now(),
-        expires_at=UTCDateTimeMixin._utc_now() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES),
+        expires_at=UTCDateTimeMixin._utc_now() + timedelta(minutes=reset_minutes),
         used=False
     )
     db.add(token_entry)
@@ -1068,7 +1079,8 @@ def requestpasswordreset(db: Session, email: str, request: Request) -> str:
 
     # Send email
     email_service = EmailService()
-    email_service.send_password_reset(to_email=user.email, token=reset_token)
+    email_service.send_password_reset(to_email=user.email, token=reset_token,
+                                      expiry_minutes=reset_minutes)
 
     reset_link = f"{email_service.base_url}/reset-password?token={reset_token}&email={user.email}"
     return reset_link
@@ -1130,7 +1142,7 @@ def resetpassword(db: Session, token: str, new_password: str):
         db.query(PasswordHistory)
         .filter_by(user_id=user_id)
         .order_by(PasswordHistory.cts.desc())
-        .limit(PASSWORD_HISTORY_LIMIT)
+        .limit(_login_policy(db, user)["password_history_limit"])
         .all()
     )
 
@@ -1138,7 +1150,7 @@ def resetpassword(db: Session, token: str, new_password: str):
         if verify_password(new_password, old_pw.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"New password cannot be one of your last {PASSWORD_HISTORY_LIMIT} passwords."
+                detail=f"New password cannot be one of your last {_login_policy(db, user)['password_history_limit']} passwords."
             )
 
     # Update password
@@ -1175,8 +1187,8 @@ def resetpassword(db: Session, token: str, new_password: str):
         .order_by(PasswordHistory.cts.desc())
         .all()
     )
-    if len(total_history) > PASSWORD_HISTORY_LIMIT:
-        for old_entry in total_history[PASSWORD_HISTORY_LIMIT:]:
+    if len(total_history) > _login_policy(db, user)["password_history_limit"]:
+        for old_entry in total_history[_login_policy(db, user)["password_history_limit"]:]:
             db.delete(old_entry)
 
     db.commit()

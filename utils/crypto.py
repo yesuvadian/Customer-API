@@ -11,12 +11,15 @@ import base64
 import hashlib
 import os
 
-from cryptography.fernet import Fernet, InvalidToken
-
 _KEY_ENV = "INTEGRATION_SECRET_KEY"
 
 
-def _fernet() -> Fernet:
+def _fernet():
+    # Imported here, not at module level: this module is pulled in at app
+    # startup via routers/integration_settings.py, so a server missing the
+    # `cryptography` package would otherwise crash the whole API instead of
+    # just failing SMTP/SMS credential handling.
+    from cryptography.fernet import Fernet
     raw = os.getenv(_KEY_ENV)
     if not raw:
         raise RuntimeError(
@@ -47,6 +50,7 @@ def decrypt_secret(ciphertext: str | None) -> str | None:
     plaintext-looking garbage string an SMTP client would try to use)."""
     if not ciphertext:
         return None
+    from cryptography.fernet import InvalidToken
     try:
         return _fernet().decrypt(ciphertext.encode()).decode()
     except (InvalidToken, ValueError):

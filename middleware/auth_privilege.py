@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import (
     Module, UserRole, RoleModulePrivilege, User, OrgUserRole, OrgRolePermission,
-    TestingRequest, TrWfInstance, TrWfStageRole,
+    TestingRequest, TestResult, TestResultImage, TrWfInstance, TrWfStage,
+    TrWfStageInstance, TrWfStageRole,
 )
 import auth_utils
+from middleware.org_auth import has_workflow_module_view
 from fastapi import Request
 
 _UUID_RE = re.compile(
@@ -27,8 +29,65 @@ _UUID_RE = re.compile(
 # --------------------------------------------------
 STAGE_BASED_MODULES = {"testing", "testing_requests", "equipment"}
 
+# --------------------------------------------------
+# Shared read-only lookups under the testing / testing_requests / equipment
+# routers — GET only, matched on the path's second segment.
+#
+# These routers were built for CM Testing, but TA&QC Inspection, Failure
+# Registry, Pre/Post Commissioning, and the Repair / Overhaul / Calibration
+# stage forms all reuse them for form templates and reference lists. Since
+# the module is resolved from the first path segment alone, a role with full
+# access to its own workflow module still got "Access denied for 'can_view'
+# on 'testing'" just loading its form. Every endpoint listed here is a
+# template or reference list scoped to the caller's own org — no testing
+# request, result or asset record is returned. Writes and record-level reads
+# on these routers still go through the normal OrgRolePermission check.
+# Matching handler-level checks in routers/equipment.py are skipped for the
+# same endpoints.
+# --------------------------------------------------
+SHARED_LOOKUP_GETS = {
+    "testing": {"templates"},
+    "testing_requests": {
+        "department_hierarchy", "department_search", "department_ancestors",
+        "equipment_types", "kit-subtypes", "request-categories",
+        "test-evaluation-statuses", "lifecycle-types", "all-test-types",
+        "dropdown",
+    },
+    "equipment": {
+        "types-by-category", "types-by-test-type", "testing-kits",
+        "substations", "divisions", "circles", "zones",
+    },
+}
 
-def _find_stage_gate(db, parts, org_role_ids):
+# Read-only per-request lookups (/<module>/<request_id>/<name>) that anyone
+# who can open the request's test result form may call - they reveal only
+# configuration, never results, and the endpoint itself still checks the
+# caller's organisation. Without this the stage gate below limited them to
+# the stage's active tester, so e.g. an L2/L3 approver filling in results
+# never saw the "No thresholds" badge (threshold-status got 403).
+SHARED_REQUEST_LOOKUP_GETS = {
+    "testing": {"threshold-status"},
+}
+
+
+def _assigned_current_stage(db, instance, user_id):
+    """True if the instance's current in-progress stage is assigned to
+    user_id (e.g. an @originator stage, which has no real role to hold) —
+    the same rule the approvals queue lists it by."""
+    return user_id is not None and (
+        db.query(TrWfStageInstance.id)
+        .filter(
+            TrWfStageInstance.wf_instance_id == instance.id,
+            TrWfStageInstance.stage_id == instance.current_stage_id,
+            TrWfStageInstance.status == "in_progress",
+            TrWfStageInstance.assigned_user_id == user_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def _find_stage_gate(db, parts, org_role_ids, user_id=None, method=None):
     """
     Look for a TestingRequest.id among the URL's path segments. If one is
     found, return True/False for whether the caller's org role(s) are the
@@ -36,6 +95,10 @@ def _find_stage_gate(db, parts, org_role_ids):
     REPLACES the OrgRolePermission check entirely for that call. Returns
     None if no TestingRequest is named in the path, meaning the caller
     should fall back to the normal OrgRolePermission check.
+
+    The user the current stage is assigned to may also read (GET) the
+    request, so the item the approvals queue shows them can be opened.
+    Writes still need a tester role.
 
     Checks can_edit OR can_act_as_tester on tr_wf_stage_roles. can_edit is
     the flag the rest of the app already treats as "is the tester for this
@@ -81,8 +144,114 @@ def _find_stage_gate(db, parts, org_role_ids):
             )
             .first()
         )
-        return bool(allowed)
+        if allowed:
+            return True
+        return method == "GET" and _assigned_current_stage(db, instance, user_id)
     return None
+
+
+def _denied_detail(action, module_name, module):
+    """403 text naming the Role Permission module that actually gates the call.
+
+    The URL segment alone ('testing', 'equipment') hid that these routers are
+    shared by other features, so whoever configured a role couldn't tell which
+    module to grant. The original "Access denied for '<action>' on '<segment>'"
+    prefix is kept for anything matching on it.
+    """
+    return (
+        f"Access denied for '{action}' on '{module_name}' - grant it on the "
+        f"'{module.name}' module in Role Permission"
+    )
+
+
+def _workflow_viewer(db, testing_request_id, org_role_ids, user_id):
+    """True if the caller has a part in the request's workflow: a stage role
+    on any stage of its definition (any status, so reviewers and approvers
+    who are never the active tester qualify, as do closed requests), or a
+    stage instance of it assigned to them (e.g. an @originator stage)."""
+    instance = (
+        db.query(TrWfInstance)
+        .filter(TrWfInstance.testing_request_id == testing_request_id)
+        .first()
+    )
+    if not instance:
+        return False
+    if instance.wf_definition_id and (
+        db.query(TrWfStageRole.id)
+        .join(TrWfStage, TrWfStage.id == TrWfStageRole.stage_id)
+        .filter(
+            TrWfStage.wf_definition_id == instance.wf_definition_id,
+            TrWfStageRole.role_id.in_(org_role_ids),
+            or_(
+                TrWfStageRole.can_view == True,
+                TrWfStageRole.can_edit == True,
+                TrWfStageRole.can_approve == True,
+                TrWfStageRole.can_assign == True,
+                TrWfStageRole.can_act_as_tester == True,
+            ),
+        )
+        .first()
+        is not None
+    ):
+        return True
+    return user_id is not None and (
+        db.query(TrWfStageInstance.id)
+        .filter(
+            TrWfStageInstance.wf_instance_id == instance.id,
+            TrWfStageInstance.assigned_user_id == user_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def _record_access_via_workflow(db, method, parts, org_role_ids, user_id):
+    """
+    Result and report records that workflow screens (Result Review, the
+    approvals queue, Failure Registry, the Repair/Overhaul/Calibration result
+    form) read or attach to, granted by the caller's part in the request's
+    workflow instead of Testing / CM Testing Request permission:
+
+    - GET /testing/results/{result_id}/preview|pdf
+    - GET /testing/results/images/{image_id}
+    - GET /testing_requests/{request_id}/report/preview|pdf
+        -> _workflow_viewer
+    - POST /testing/results/{result_id}/images
+        -> active tester on the request's current stage, the same rule
+           _find_stage_gate applies to saving the result itself
+
+    The result / image id isn't a TestingRequest id, so _find_stage_gate
+    never matched those; the report path names the request, but the gate
+    only lets the active tester through. False means "not granted this
+    way" — the caller then falls through to the normal checks, so roles
+    with Testing / CM Testing Request permission keep working.
+    """
+    n = len(parts)
+    tr_id = None
+    if parts[0] == "testing" and n >= 3 and parts[1] == "results":
+        if method == "GET" and n == 4 and parts[2] == "images" and _UUID_RE.match(parts[3]):
+            image = db.query(TestResultImage).filter_by(id=parts[3]).first()
+            result = image and db.query(TestResult).filter_by(id=image.test_result_id).first()
+        elif n == 4 and _UUID_RE.match(parts[2]) and (
+            (method == "GET" and parts[3] in ("preview", "pdf"))
+            or (method == "POST" and parts[3] == "images")
+        ):
+            result = db.query(TestResult).filter_by(id=parts[2]).first()
+        else:
+            return False
+        tr_id = result.testing_request_id if result else None
+    elif (
+        parts[0] == "testing_requests" and method == "GET" and n == 4
+        and _UUID_RE.match(parts[1]) and parts[2] == "report"
+        and parts[3] in ("preview", "pdf")
+    ):
+        tr_id = parts[1]
+    if not tr_id:
+        return False
+
+    if method == "POST":
+        return bool(_find_stage_gate(db, ["testing", str(tr_id)], org_role_ids))
+    return _workflow_viewer(db, tr_id, org_role_ids, user_id)
 
 async def auth_and_privilege_middleware(request: Request, call_next):
 
@@ -396,6 +565,26 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             return await call_next(request)
 
         # --------------------------------------------------
+        # Shared template / reference lookups — see SHARED_LOOKUP_GETS
+        # --------------------------------------------------
+        if (
+            request.method == "GET"
+            and len(parts) >= 2
+            and parts[1] in SHARED_LOOKUP_GETS.get(module_name, ())
+        ):
+            db.close()
+            return await call_next(request)
+
+        # Per-request read-only lookups — see SHARED_REQUEST_LOOKUP_GETS
+        if (
+            request.method == "GET"
+            and len(parts) == 3
+            and parts[2] in SHARED_REQUEST_LOOKUP_GETS.get(module_name, ())
+        ):
+            db.close()
+            return await call_next(request)
+
+        # --------------------------------------------------
         # Allow list endpoints (GET /products)
         # --------------------------------------------------
         if request.method == "GET" and len(parts) == 1:
@@ -451,7 +640,15 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             org_role_ids = [r.org_role_id for r in org_user_roles]
 
             if module_name in STAGE_BASED_MODULES:
-                stage_verdict = _find_stage_gate(db, parts, org_role_ids)
+                # Before the stage gate: the report path names the request,
+                # and the gate alone would refuse its reviewers.
+                if _record_access_via_workflow(db, request.method, parts,
+                                               org_role_ids, user.id):
+                    db.close()
+                    return await call_next(request)
+
+                stage_verdict = _find_stage_gate(db, parts, org_role_ids,
+                                                 user.id, request.method)
                 if stage_verdict is not None:
                     if not stage_verdict:
                         raise HTTPException(
@@ -475,10 +672,28 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                 )
                 .first()
             )
+
+            # GET /equipment/{id} — workflow screens (TA&QC, Calibration,
+            # Annual Audit, the Repair/Overhaul result form, ...) load the
+            # equipment they work on; view on any workflow module is accepted
+            # instead of Equipment Registry view. Same rule as the handler's
+            # _require_permission(allow_workflow_view=True) in
+            # routers/equipment.py (GET /equipment/ never reaches here —
+            # single-segment GETs are let through above).
+            if (
+                not allowed
+                and module_name == "equipment"
+                and request.method == "GET"
+                and len(parts) == 2
+                and _UUID_RE.match(parts[1])
+                and has_workflow_module_view(org_role_ids, db)
+            ):
+                allowed = True
+
             if not allowed:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"Access denied for '{action}' on '{module_name}'",
+                    detail=_denied_detail(action, module_name, module),
                 )
             db.close()
             return await call_next(request)
@@ -505,7 +720,7 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             if not allowed:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"Access denied for '{action}' on '{module_name}'",
+                    detail=_denied_detail(action, module_name, module),
                 )
         except Exception as e:
             print(f"[INFO] Role system error in middleware: {e}")

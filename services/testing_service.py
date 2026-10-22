@@ -117,6 +117,9 @@ def _build_threshold_config_html(ev: dict) -> str:
             f"{ev.get('summary', '')}</p>"
         )
 
+    # "Not assessed" findings (type=config) carry a message, not a reading
+    unassessed    = [f for f in all_fields if f.get("type") == "config"]
+    all_fields    = [f for f in all_fields if f.get("type") != "config"]
     # Discriminate by source marker stamped on every cross-session field
     per_session   = [f for f in all_fields if f.get("source") != "cross_session"]
     cross_session = [f for f in all_fields if f.get("source") == "cross_session"]
@@ -137,7 +140,11 @@ def _build_threshold_config_html(ev: dict) -> str:
             return f"≤ {hi}"
         return "—"
 
-    html = ""
+    html = "".join(
+        f"<p style='color:#d32f2f;font-size:12px'><strong>{f.get('label', '')}:</strong> "
+        f"{f.get('remedial_action_text') or f.get('status', '')}</p>"
+        for f in unassessed
+    )
 
     # ── Per-session threshold table ────────────────────────────────────────────
     if per_session:
@@ -659,6 +666,13 @@ class TestingService:
         if _org_tmpl and "key" not in template_data:
             template_data["key"] = _org_tmpl.template_key
 
+        # Untyped templates (all static test_templates.py ones) served for a
+        # test-category type are equipment tests - tag them so the result
+        # form warns about missing thresholds just as evaluation will
+        # (EvaluationService.requires_thresholds).
+        if not template_data.get("template_type") and detail.category_type == "test":
+            template_data = {**template_data, "template_type": "test"}
+
         # Normalise field types so the result form understands them:
         #   toggle  → boolean  (designer calls it toggle; form renders boolean)
         #   columns: List[str] → List[{key, label, type}]  (designer saves str list)
@@ -826,8 +840,44 @@ class TestingService:
         _car_pending = None  # (overall, evaluation) - acted on after the result is committed
         try:
             from services.evaluation_service import EvaluationService
-            ev = EvaluationService.run(template_key, test_data, self.db, org_id=request.organization_id)
-            result.evaluation_result = ev
+            ev = EvaluationService.run(
+                template_key, test_data, self.db, org_id=request.organization_id,
+                is_equipment_test=EvaluationService.is_equipment_test_request(request),
+            )
+            _base_overall = ev["overall"]
+
+            # ── Cross-session comparison (generic — driven by enable_cross_session flag) ──
+            # Merged before the CRITICAL/ALERT handling below so that acts on
+            # the final severity, and so a baseline comparison that assessed
+            # something replaces a "not assessed" per-session result.
+            try:
+                if test_session_id:
+                    from models import TestSession as _TS
+                    _session = self.db.query(_TS).filter(_TS.id == test_session_id).first()
+                    if _session:
+                        _tpl_data = EvaluationService.get_template_data(
+                            template_key, self.db, org_id=request.organization_id
+                        )
+                        if _tpl_data and _tpl_data.get("enable_cross_session"):
+                            _baseline_result = _resolve_baseline_result(
+                                self.db, request_id, template_key, _session, _tpl_data
+                            )
+                            if _baseline_result and _baseline_result.test_data:
+                                _cross_ev = EvaluationService.evaluate_cross_session(
+                                    _tpl_data,
+                                    _baseline_result.test_data,
+                                    test_data,
+                                )
+                                EvaluationService.merge_cross_session(ev, _cross_ev)
+            except Exception as _cs_err:
+                logger.warning(f"Cross-session comparison failed: {_cs_err}")
+
+            # Sync overall_result when the comparison escalated the severity
+            if ev["overall"] != _base_overall:
+                if ev["overall"] == "CRITICAL" and result.overall_result != "fail":
+                    result.overall_result = "fail"
+                elif ev["overall"] == "ALERT" and result.overall_result not in ("fail", "conditional"):
+                    result.overall_result = "conditional"
 
             # CRITICAL → override overall_result + pre-fill remedial recommendation
             if ev["overall"] == "CRITICAL":
@@ -849,41 +899,8 @@ class TestingService:
                 revised = EvaluationService.get_min_revised_interval(ev)
                 if revised is not None:
                     ev["revised_interval_days"] = revised
-                    result.evaluation_result = ev
 
-            # ── Cross-session comparison (generic — driven by enable_cross_session flag) ──
-            try:
-                if test_session_id:
-                    from models import TestSession as _TS
-                    _session = self.db.query(_TS).filter(_TS.id == test_session_id).first()
-                    if _session:
-                        _tpl_data = EvaluationService.get_template_data(
-                            template_key, self.db, org_id=request.organization_id
-                        )
-                        if _tpl_data and _tpl_data.get("enable_cross_session"):
-                            _baseline_result = _resolve_baseline_result(
-                                self.db, request_id, template_key, _session, _tpl_data
-                            )
-                            if _baseline_result and _baseline_result.test_data:
-                                _cross_ev = EvaluationService.evaluate_cross_session(
-                                    _tpl_data,
-                                    _baseline_result.test_data,
-                                    test_data,
-                                )
-                                if _cross_ev["fields"]:
-                                    ev["fields"].extend(_cross_ev["fields"])
-                                    ev["cross_session_comparison"] = _cross_ev
-                                    from services.evaluation_service import _STATUS_RANK as _sr
-                                    if _sr.get(_cross_ev["overall"], 0) > _sr.get(ev["overall"], 0):
-                                        ev["overall"] = _cross_ev["overall"]
-                                    # Sync overall_result with escalated severity
-                                    if ev["overall"] == "CRITICAL" and result.overall_result != "fail":
-                                        result.overall_result = "fail"
-                                    elif ev["overall"] == "ALERT" and result.overall_result not in ("fail", "conditional"):
-                                        result.overall_result = "conditional"
-                                    result.evaluation_result = ev
-            except Exception as _cs_err:
-                logger.warning(f"Cross-session comparison failed: {_cs_err}")
+            result.evaluation_result = ev
 
             # CAR hook input, captured here and run after the commit below
             # (see "CAR auto-creation hook" there). run_car_hook=False

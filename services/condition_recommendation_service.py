@@ -186,6 +186,7 @@ def evaluate_for_equipment(db: Session, equipment_id: UUID) -> dict:
             "equipment_id":    str(equipment_id),
             "health_score":    None,
             "risk_level":      None,
+            "risk_by_finding": False,
             "recommendations": [],
         }
 
@@ -260,10 +261,14 @@ def evaluate_for_equipment(db: Session, equipment_id: UUID) -> dict:
             "schedule":          schedule_info,
         })
 
+    # Worst band only because of a critical finding, not the score - the
+    # popup shows it as "Critical — by finding" next to the score.
+    from services.analytics_engine import risk_by_finding_checker
     return {
         "equipment_id":    str(equipment_id),
         "health_score":    health_score,
         "risk_level":      ea.risk_level,
+        "risk_by_finding": risk_by_finding_checker(db)(health_score, ea.risk_level),
         "recommendations": items,
     }
 

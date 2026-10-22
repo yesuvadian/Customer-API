@@ -43,9 +43,13 @@ from utils.email_service import EmailService
 
 logger = logging.getLogger(__name__)
 
-# ── Constants (loaded from .env — override without code change) ───────────────
+# ── Settings ───────────────────────────────────────────────────────────────────
+# Digest threshold/window, retry delay and max retries are per-org settings in
+# Threshold Config -> Notifications (services/tunable_settings.py), with these
+# .env values as the fallback. Read through _ts(db, org_id), not the names below.
 
 import os as _os
+from services.tunable_settings import get_settings as _ts
 
 DIGEST_THRESHOLD      = int(_os.getenv("NOTIF_DIGEST_THRESHOLD",      "10"))
 DIGEST_WINDOW_MINUTES = int(_os.getenv("NOTIF_DIGEST_WINDOW_MINUTES",  "5"))
@@ -1533,8 +1537,9 @@ class EmailDispatcher(ChannelDispatcher):
             log.status      = "failed"
             log.error_message = str(exc)[:500]
             log.retry_count  = (log.retry_count or 0) + 1
-            if log.retry_count < (log.max_retries or 3):
-                log.next_retry_at = now + timedelta(minutes=RETRY_DELAY_MINUTES)
+            if log.retry_count < (log.max_retries or _ts(db, log.organization_id)["notif_max_retries"]):
+                log.next_retry_at = now + timedelta(
+                    minutes=_ts(db, log.organization_id)["notif_retry_delay_minutes"])
             for r in pending:
                 if r.delivery_status == "pending":
                     r.delivery_status = "failed"
@@ -1713,8 +1718,9 @@ class SmsDispatcher(ChannelDispatcher):
                 r.delivery_status = "failed"
                 r.error_message   = str(exc)[:500]
                 log.retry_count   = (log.retry_count or 0) + 1
-                if log.retry_count < (log.max_retries or 3):
-                    log.next_retry_at = now + timedelta(minutes=RETRY_DELAY_MINUTES)
+                if log.retry_count < (log.max_retries or _ts(db, log.organization_id)["notif_max_retries"]):
+                    log.next_retry_at = now + timedelta(
+                        minutes=_ts(db, log.organization_id)["notif_retry_delay_minutes"])
                 logger.warning(f"[Notif] SMS to {phone} failed ({provider}): {exc}")
 
         EmailDispatcher._update_log_status_from_recipients(log, now)
@@ -1904,8 +1910,9 @@ def _create_inapp(
 # ── Digest detection ──────────────────────────────────────────────────────────
 
 def _should_digest(db: Session, event_type: str, organization_id: Optional[UUID]) -> bool:
-    """Return True if there are >DIGEST_THRESHOLD pending logs for this event_type in the last window."""
-    window_start = datetime.now(timezone.utc) - timedelta(minutes=DIGEST_WINDOW_MINUTES)
+    """Return True if there are >= the org's digest threshold pending logs for this event_type in the last window."""
+    _cfg = _ts(db, organization_id)
+    window_start = datetime.now(timezone.utc) - timedelta(minutes=_cfg["notif_digest_window_minutes"])
     count = (
         db.query(sa_func.count(NotificationLog.id))
         .filter(
@@ -1916,7 +1923,7 @@ def _should_digest(db: Session, event_type: str, organization_id: Optional[UUID]
         )
         .scalar()
     ) or 0
-    return count >= DIGEST_THRESHOLD
+    return count >= _cfg["notif_digest_threshold"]
 
 
 def _collapse_digest(db: Session, event_type: str, organization_id: Optional[UUID]) -> None:
@@ -1925,7 +1932,7 @@ def _collapse_digest(db: Session, event_type: str, organization_id: Optional[UUI
     recipient address (collected from NotificationLogRecipient rows).
     """
     now = datetime.now(timezone.utc)
-    window_start = now - timedelta(minutes=DIGEST_WINDOW_MINUTES)
+    window_start = now - timedelta(minutes=_ts(db, organization_id)["notif_digest_window_minutes"])
     pending = (
         db.query(NotificationLog)
         .filter(
@@ -2466,6 +2473,7 @@ class NotificationService:
 
                 batch_log = NotificationLog(
                     organization_id=organization_id,
+                    max_retries=_ts(self.db, organization_id)["notif_max_retries"],
                     event_type=event_type,
                     channel=tmpl.channel,
                     subject=_base_subj,
@@ -3427,8 +3435,8 @@ class NotificationService:
         """
         Fired automatically by main.py's daily scheduler when a
         Deterioration Watch List advisory has sat unreviewed past the SLA
-        (config.ANALYTICS_OVERDUE_REVIEW_ALERT_DAYS/_CRITICAL_DAYS, .env-
-        tunable — NOT a NotificationScheduleRule row, since that engine only
+        (analytics_overdue_review_alert_days/_critical_days, Threshold
+        Config -> Analytics & SLA, .env fallback — NOT a NotificationScheduleRule row, since that engine only
         evaluates TestingRequest.due_date-shaped triggers and this is a
         ParameterAnalytics row with no due_date) — the same escalation
         pattern §5/§8 already use for overdue tests and result review,
@@ -3436,7 +3444,8 @@ class NotificationService:
         same way eval_critical/eval_alert do: past the critical threshold is
         "critical", past just the alert threshold is "alert".
         """
-        import config
+        from services.tunable_settings import get_settings as _ts
+        _critical_days = _ts(self.db, organization_id)["analytics_overdue_review_critical_days"]
         self.fire(
             event_type="deterioration_watch_overdue_review",
             context={
@@ -3451,7 +3460,7 @@ class NotificationService:
             source_id=analytics_id,
             source_type="parameter_analytics",
             severity=(
-                "critical" if days_pending >= config.ANALYTICS_OVERDUE_REVIEW_CRITICAL_DAYS
+                "critical" if days_pending >= _critical_days
                 else "alert"
             ),
         )
