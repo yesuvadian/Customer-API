@@ -1450,11 +1450,46 @@ _RECOMPUTE_JOBS: dict = {}
 _RECOMPUTE_LOCK = threading.Lock()
 
 
+def _recompute_result_ids(db: Session, org_id, skip_statuses) -> list:
+    """TestResult ids a recompute rescores for org_id (None = every
+    organization): requests not in skip_statuses and not in an active
+    workflow."""
+    from models import TestResult, TestingRequest, TrWfInstance
+    # TRs that are wf-active (not yet completed). Doc Support instances share
+    # tr_wf_instances with no testing_request_id - and NOT IN (..., NULL)
+    # matches nothing in SQL, so one active Doc Support request used to make
+    # Recompute All rescore 0 results.
+    wf_active_ids = {
+        row.testing_request_id
+        for row in db.query(TrWfInstance.testing_request_id).filter(
+            TrWfInstance.status == "active",
+            TrWfInstance.testing_request_id.isnot(None),
+        ).all()
+    }
+    _res_q = (
+        db.query(TestResult.id)
+        .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
+        .filter(TestingRequest.status.notin_(skip_statuses))
+    )
+    if org_id:
+        # organization_id is nullable on TestResult/TestingRequest for
+        # legacy rows - fall back to the equipment's organization.
+        _res_q = (
+            _res_q.outerjoin(Equipment, Equipment.id == TestingRequest.equipment_id)
+            .filter((TestResult.organization_id == org_id)
+                    | (TestingRequest.organization_id == org_id)
+                    | (Equipment.organization_id == org_id))
+        )
+    if wf_active_ids:
+        _res_q = _res_q.filter(TestResult.testing_request_id.notin_(wf_active_ids))
+    return [r[0] for r in _res_q.all()]
+
+
 def _run_recompute_job(job_id: str, org_id) -> None:
     """Body of /recompute-all, on a background thread with its own session -
     rescoring a whole organization inside one HTTP request timed out."""
     from database import BackgroundSessionLocal
-    from models import TestResult, TestingRequest, TestingRequestStatus, TrWfInstance
+    from models import TestingRequestStatus
     from models import EquipmentAnalytics as _EA
 
     job = _RECOMPUTE_JOBS[job_id]
@@ -1469,30 +1504,7 @@ def _run_recompute_job(job_id: str, org_id) -> None:
             TestingRequestStatus.accepted,
             TestingRequestStatus.in_progress,
         }
-        # IDs of TRs that are wf-active (not yet completed)
-        wf_active_ids = {
-            row.testing_request_id
-            for row in db.query(TrWfInstance.testing_request_id).filter(
-                TrWfInstance.status == "active"
-            ).all()
-        }
-        _res_q = (
-            db.query(TestResult.id)
-            .join(TestingRequest, TestingRequest.id == TestResult.testing_request_id)
-            .filter(TestingRequest.status.notin_(_SKIP_STATUSES))
-        )
-        if org_id:
-            # organization_id is nullable on TestResult/TestingRequest for
-            # legacy rows - fall back to the equipment's organization.
-            _res_q = (
-                _res_q.outerjoin(Equipment, Equipment.id == TestingRequest.equipment_id)
-                .filter((TestResult.organization_id == org_id)
-                        | (TestingRequest.organization_id == org_id)
-                        | (Equipment.organization_id == org_id))
-            )
-        if wf_active_ids:
-            _res_q = _res_q.filter(TestResult.testing_request_id.notin_(wf_active_ids))
-        result_ids = [r[0] for r in _res_q.all()]
+        result_ids = _recompute_result_ids(db, org_id, _SKIP_STATUSES)
 
         _ea_q = db.query(_EA.equipment_id)
         if org_id:
