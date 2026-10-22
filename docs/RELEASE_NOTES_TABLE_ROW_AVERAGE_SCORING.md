@@ -16,19 +16,23 @@ How rows are counted in row-average mode:
 - **Column-level weights inside a table are ignored.** Rows share the table's weight equally.
 - **Stored results without row detail** still score as worst row.
 
-**Risk level is unchanged.** A CRITICAL row still produces a critical finding, so the asset is still Critical whatever its score.
+**Critical stays Critical.** A CRITICAL row still produces a critical finding, so the asset is still Critical whatever its score.
+
+**Other risk levels follow the new score.** Only CRITICAL rows hold the risk level. A table whose worst row is ALERT now scores from the average of its rows, so the test and the asset can land in a milder band than before: for example, one ALERT row out of ten scores 95 (Low) instead of 50 (Medium). On dev data (13 Oct 2026) Critical / Medium / Low went from 27 / 4 / 24 to 27 / 0 / 28.
 
 **New label: "Critical — by finding"** appears where an asset is Critical because of a finding and not because of its score:
 
 - AI Analytics: the Critical risk sheet (opened from the tile), the drill-down rows, and the equipment detail sheet header
 - AI Graph: the equipment detail sheet
 - Asset Dashboard: the equipment rows and the detail sheet
+- Equipment recommendations popup (equipment actions menu → Recommendations): the risk badge beside the health score
 
 The API now returns a `risk_by_finding` flag on these endpoints:
 
 - `/analytics/dashboard/equipment`
 - `/analytics/equipment/{id}/test-types`
 - `/analytics/ai-graph/life-left`
+- the equipment recommendations endpoint used by that popup
 
 **Fix:** a critical finding for an ALERT table row now reports condition "Fair" instead of always "Poor".
 
