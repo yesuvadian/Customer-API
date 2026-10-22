@@ -13,7 +13,9 @@ from collections import Counter
 
 import pytest
 
-from models import Equipment, EquipmentAnalytics, EquipmentHealthBandThreshold
+from models import (
+    OUT_OF_SERVICE_EQUIPMENT_STATUSES, Equipment, EquipmentAnalytics, EquipmentHealthBandThreshold,
+)
 from routers import analytics as A
 from services.analytics_engine import AnalyticsEngine, risk_slot_mapper, RISK_SLOTS
 from test_ai_dashboard_scope import call, db, top_org, org_admin  # noqa: F401 (fixtures)
@@ -48,7 +50,8 @@ def snapshot(db, user):
 def scope_ea(db, user):
     """EquipmentAnalytics rows the tiles count: the user's organization,
     active equipment."""
-    retired = {e for (e,) in db.query(Equipment.id).filter(Equipment.status == "retired")}
+    retired = {e for (e,) in db.query(Equipment.id)
+               .filter(Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))}
     return [ea for ea in db.query(EquipmentAnalytics)
             .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
             .filter(Equipment.organization_id == user.organization_id).all()

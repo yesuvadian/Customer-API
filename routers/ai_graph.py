@@ -360,7 +360,7 @@ def _scoped_ea(
     retired_only: bool = False,
 ) -> list[EquipmentAnalytics]:
     """EquipmentAnalytics rows of the real assets in scope: same asset set as
-    the AI Analytics dashboard - no Testing Kits, no retired equipment, and
+    the AI Analytics dashboard - no Testing Kits, no out-of-service equipment, and
     scoped by the equipment's CURRENT department (EquipmentAnalytics'
     denormalized department_id lags behind a move until the next recompute)."""
     q = (
@@ -378,8 +378,10 @@ def _equipment_scope_filter(q, dept_ids, db, organization_id, equipment_id, reti
         c.id for c in db.query(CategoryMaster.id)
         .filter(CategoryMaster.name.ilike("%testing kit%")).all() if c.id
     ]
-    q = q.filter((Equipment.status == "retired") if retired_only
-                 else (Equipment.status != "retired"))
+    # Out of service = retired, replaced, condemned or decommissioned, as on
+    # the AI Analytics dashboard.
+    q = q.filter(Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES) if retired_only
+                 else ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
     if testkit_ids:
         q = q.filter((Equipment.equipment_type_id == None)  # noqa: E711
                      | ~Equipment.equipment_type_id.in_(testkit_ids))
