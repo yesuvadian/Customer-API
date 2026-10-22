@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import (
     Module, UserRole, RoleModulePrivilege, User, OrgUserRole, OrgRolePermission,
-    TestingRequest, TestResult, TrWfInstance, TrWfStage, TrWfStageRole,
+    TestingRequest, TestResult, TestResultImage, TrWfInstance, TrWfStage,
+    TrWfStageInstance, TrWfStageRole,
 )
 import auth_utils
 from middleware.org_auth import has_workflow_module_view
@@ -59,7 +60,24 @@ SHARED_LOOKUP_GETS = {
 }
 
 
-def _find_stage_gate(db, parts, org_role_ids):
+def _assigned_current_stage(db, instance, user_id):
+    """True if the instance's current in-progress stage is assigned to
+    user_id (e.g. an @originator stage, which has no real role to hold) —
+    the same rule the approvals queue lists it by."""
+    return user_id is not None and (
+        db.query(TrWfStageInstance.id)
+        .filter(
+            TrWfStageInstance.wf_instance_id == instance.id,
+            TrWfStageInstance.stage_id == instance.current_stage_id,
+            TrWfStageInstance.status == "in_progress",
+            TrWfStageInstance.assigned_user_id == user_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def _find_stage_gate(db, parts, org_role_ids, user_id=None, method=None):
     """
     Look for a TestingRequest.id among the URL's path segments. If one is
     found, return True/False for whether the caller's org role(s) are the
@@ -67,6 +85,10 @@ def _find_stage_gate(db, parts, org_role_ids):
     REPLACES the OrgRolePermission check entirely for that call. Returns
     None if no TestingRequest is named in the path, meaning the caller
     should fall back to the normal OrgRolePermission check.
+
+    The user the current stage is assigned to may also read (GET) the
+    request, so the item the approvals queue shows them can be opened.
+    Writes still need a tester role.
 
     Checks can_edit OR can_act_as_tester on tr_wf_stage_roles. can_edit is
     the flag the rest of the app already treats as "is the tester for this
@@ -112,7 +134,9 @@ def _find_stage_gate(db, parts, org_role_ids):
             )
             .first()
         )
-        return bool(allowed)
+        if allowed:
+            return True
+        return method == "GET" and _assigned_current_stage(db, instance, user_id)
     return None
 
 
@@ -130,40 +154,19 @@ def _denied_detail(action, module_name, module):
     )
 
 
-def _result_view_via_workflow(db, method, parts, org_role_ids):
-    """
-    GET /testing/results/{result_id}/preview|pdf — True if the caller's org
-    role(s) hold any stage role on the workflow of the result's own
-    TestingRequest (any stage, any status, so reviewers and approvers who are
-    never the active tester still qualify, as do closed requests). The
-    result_id isn't a TestingRequest id, so _find_stage_gate never matches
-    these and Result Review / Approval roles needed Testing view instead.
-    False means "not granted this way" — the caller then falls through to
-    the normal OrgRolePermission check, so roles with Testing view keep
-    working.
-    """
-    if not (
-        method == "GET"
-        and len(parts) == 4
-        and parts[0] == "testing"
-        and parts[1] == "results"
-        and _UUID_RE.match(parts[2])
-        and parts[3] in ("preview", "pdf")
-    ):
-        return False
-
-    result = db.query(TestResult).filter_by(id=parts[2]).first()
-    if not result:
-        return False
+def _workflow_viewer(db, testing_request_id, org_role_ids, user_id):
+    """True if the caller has a part in the request's workflow: a stage role
+    on any stage of its definition (any status, so reviewers and approvers
+    who are never the active tester qualify, as do closed requests), or a
+    stage instance of it assigned to them (e.g. an @originator stage)."""
     instance = (
         db.query(TrWfInstance)
-        .filter(TrWfInstance.testing_request_id == result.testing_request_id)
+        .filter(TrWfInstance.testing_request_id == testing_request_id)
         .first()
     )
-    if not instance or not instance.wf_definition_id:
+    if not instance:
         return False
-
-    return (
+    if instance.wf_definition_id and (
         db.query(TrWfStageRole.id)
         .join(TrWfStage, TrWfStage.id == TrWfStageRole.stage_id)
         .filter(
@@ -179,7 +182,66 @@ def _result_view_via_workflow(db, method, parts, org_role_ids):
         )
         .first()
         is not None
+    ):
+        return True
+    return user_id is not None and (
+        db.query(TrWfStageInstance.id)
+        .filter(
+            TrWfStageInstance.wf_instance_id == instance.id,
+            TrWfStageInstance.assigned_user_id == user_id,
+        )
+        .first()
+        is not None
     )
+
+
+def _record_access_via_workflow(db, method, parts, org_role_ids, user_id):
+    """
+    Result and report records that workflow screens (Result Review, the
+    approvals queue, Failure Registry, the Repair/Overhaul/Calibration result
+    form) read or attach to, granted by the caller's part in the request's
+    workflow instead of Testing / CM Testing Request permission:
+
+    - GET /testing/results/{result_id}/preview|pdf
+    - GET /testing/results/images/{image_id}
+    - GET /testing_requests/{request_id}/report/preview|pdf
+        -> _workflow_viewer
+    - POST /testing/results/{result_id}/images
+        -> active tester on the request's current stage, the same rule
+           _find_stage_gate applies to saving the result itself
+
+    The result / image id isn't a TestingRequest id, so _find_stage_gate
+    never matched those; the report path names the request, but the gate
+    only lets the active tester through. False means "not granted this
+    way" — the caller then falls through to the normal checks, so roles
+    with Testing / CM Testing Request permission keep working.
+    """
+    n = len(parts)
+    tr_id = None
+    if parts[0] == "testing" and n >= 3 and parts[1] == "results":
+        if method == "GET" and n == 4 and parts[2] == "images" and _UUID_RE.match(parts[3]):
+            image = db.query(TestResultImage).filter_by(id=parts[3]).first()
+            result = image and db.query(TestResult).filter_by(id=image.test_result_id).first()
+        elif n == 4 and _UUID_RE.match(parts[2]) and (
+            (method == "GET" and parts[3] in ("preview", "pdf"))
+            or (method == "POST" and parts[3] == "images")
+        ):
+            result = db.query(TestResult).filter_by(id=parts[2]).first()
+        else:
+            return False
+        tr_id = result.testing_request_id if result else None
+    elif (
+        parts[0] == "testing_requests" and method == "GET" and n == 4
+        and _UUID_RE.match(parts[1]) and parts[2] == "report"
+        and parts[3] in ("preview", "pdf")
+    ):
+        tr_id = parts[1]
+    if not tr_id:
+        return False
+
+    if method == "POST":
+        return bool(_find_stage_gate(db, ["testing", str(tr_id)], org_role_ids))
+    return _workflow_viewer(db, tr_id, org_role_ids, user_id)
 
 async def auth_and_privilege_middleware(request: Request, call_next):
 
@@ -559,7 +621,15 @@ async def auth_and_privilege_middleware(request: Request, call_next):
             org_role_ids = [r.org_role_id for r in org_user_roles]
 
             if module_name in STAGE_BASED_MODULES:
-                stage_verdict = _find_stage_gate(db, parts, org_role_ids)
+                # Before the stage gate: the report path names the request,
+                # and the gate alone would refuse its reviewers.
+                if _record_access_via_workflow(db, request.method, parts,
+                                               org_role_ids, user.id):
+                    db.close()
+                    return await call_next(request)
+
+                stage_verdict = _find_stage_gate(db, parts, org_role_ids,
+                                                 user.id, request.method)
                 if stage_verdict is not None:
                     if not stage_verdict:
                         raise HTTPException(
@@ -573,10 +643,6 @@ async def auth_and_privilege_middleware(request: Request, call_next):
                     return await call_next(request)
                 # No TestingRequest named in this path (list/reference call) —
                 # fall through to the normal OrgRolePermission check below.
-
-                if _result_view_via_workflow(db, request.method, parts, org_role_ids):
-                    db.close()
-                    return await call_next(request)
 
             allowed = (
                 db.query(OrgRolePermission)

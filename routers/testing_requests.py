@@ -381,6 +381,16 @@ def _enrich(req, dept_path_map: dict | None = None, analytics_map: dict | None =
 
 
 # ─── Department Hierarchy (for location dropdowns) ───────────────────
+def _require_own_org(current_user: User, org_id: Optional[UUID]) -> None:
+    """403 when an org user names another organization's org_id. The
+    department lookups skip the module check, so they must not take the
+    caller's word for the org."""
+    if (current_user.organization_id and org_id is not None
+            and org_id != current_user.organization_id):
+        raise HTTPException(status_code=403,
+                            detail="Cannot read departments of another organization")
+
+
 @router.get("/department_hierarchy")
 def get_department_hierarchy(
     org_id: Optional[UUID] = None,
@@ -404,6 +414,15 @@ def get_department_hierarchy(
     sync with the date range filter applied elsewhere on the page.
     """
     svc = TestingRequestService(db)
+
+    # Shared lookup with no module check (SHARED_LOOKUP_GETS in
+    # middleware/auth_privilege.py): an org user only sees their own org.
+    own_org = current_user.organization_id
+    if own_org:
+        _require_own_org(current_user, org_id)
+        if org_id is None:
+            return [o for o in svc.get_department_hierarchy(None)
+                    if o["id"] == str(own_org)]
 
     def _parse_date(s: Optional[str]):
         try:
@@ -453,7 +472,10 @@ def get_department_ancestors(
         from models import OrgDepartment
         chain = []
         current = db.query(OrgDepartment).filter_by(id=dept_id).first()
-        if not current:
+        # Another org's department reads as not found (shared lookup, see
+        # SHARED_LOOKUP_GETS in middleware/auth_privilege.py).
+        if not current or (current_user.organization_id
+                           and current.organization_id != current_user.organization_id):
             raise HTTPException(status_code=404, detail="Department not found")
         # walk up, collect ancestors (not the dept itself)
         node = current
@@ -493,6 +515,7 @@ def search_departments(
     from models import OrgDepartment
     from utils.common_service import get_dept_subtree_ids
 
+    _require_own_org(current_user, org_id)
     resolved_org_id = org_id or current_user.organization_id
     if resolved_org_id is None:
         return []
