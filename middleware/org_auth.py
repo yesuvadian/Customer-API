@@ -174,6 +174,54 @@ def check_org_permission(
     return False
 
 
+# Field-operation workflow modules (modules.path) whose screens pick and show
+# equipment through the Equipment Registry endpoints. View on any of these
+# also allows GET /equipment/ and GET /equipment/{id}, so a role configured
+# for its own workflow doesn't silently need Equipment Registry as well.
+WORKFLOW_MODULE_PATHS = (
+    "taqc_inspections",
+    "annual-audit-workflows",
+    "failure_registry",
+    "precommission-requests",
+    "precommission-workflows",
+    "surveillance-workflows",
+    "calibration-workflows",
+    "repair-workflows",
+    "overhaul-workflows",
+    "tr-wf/approval-queue",
+    "tr-wf/result-review",
+)
+
+
+def active_org_role_ids(user_id: UUID, db: Session) -> list:
+    return [
+        r.org_role_id
+        for r in db.query(OrgUserRole).filter(
+            OrgUserRole.user_id == user_id, OrgUserRole.is_active == True
+        )
+    ]
+
+
+def has_workflow_module_view(org_role_ids, db: Session) -> bool:
+    """True if any of the given org roles has can_view on a WORKFLOW_MODULE_PATHS module."""
+    from models import Module, OrgRolePermission
+
+    if not org_role_ids:
+        return False
+    return (
+        db.query(OrgRolePermission.id)
+        .join(Module, Module.id == OrgRolePermission.module_id)
+        .filter(
+            OrgRolePermission.org_role_id.in_(org_role_ids),
+            OrgRolePermission.can_view == True,
+            Module.path.in_(WORKFLOW_MODULE_PATHS),
+            Module.is_active == True,
+        )
+        .first()
+        is not None
+    )
+
+
 def require_module_permission(module_id: int, permission_type: str):
     """
     Dependency factory to check module-level permissions.

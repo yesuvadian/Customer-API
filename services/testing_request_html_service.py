@@ -436,6 +436,9 @@ class TestingRequestHTMLService:
                     s_clr = "#1a7340" if s == "normal" else "#b71c1c" if s == "critical" else "#c75b00"
                     if field.get("type") == "table":
                         val = self._table_eval_value(field)
+                    elif field.get("type") == "config":
+                        # "Not assessed" finding — the reason stands in for a reading
+                        val = field.get("remedial_action_text") or "—"
                     else:
                         raw_val = field.get("value")
                         unit = (field.get("unit") or "").strip()

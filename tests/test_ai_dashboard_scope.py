@@ -179,6 +179,59 @@ def test_tiles_cards_and_risk_list_agree(db, org_admin, dated):
     assert sum(c["test_count"] for c in cards) == k["total_tests"]
 
 
+@pytest.mark.parametrize("dated", [False, True])
+def test_tiles_and_summary_table_agree(db, org_admin, dated):
+    """The summary table's Critical/High/Medium/Low columns (/asset-breakdown,
+    any view) add up to the KPI tiles, and a group's tested drill rows carry
+    the same risk split as its row."""
+    from collections import Counter
+    from datetime import date
+    kw = dict(date_from=date(2024, 1, 1), date_to=date.today()) if dated else {}
+    k = call(A.get_analytics_dashboard, db=db, user=org_admin, **kw)["kpi_summary"]
+    bd = call(A.get_asset_breakdown, db=db, user=org_admin, **kw)
+    for view in ("by_type_health", "by_voltage_class_health", "by_make_health"):
+        rows = bd[view]
+        for band in ("critical", "high", "medium", "low"):
+            assert sum(r[band] for r in rows.values()) == k[band], f"{view} {band}"
+    rows = bd["by_type_health"]
+    if not rows:
+        pytest.skip("no equipment types in scope")
+    group = max(rows, key=lambda g: sum(rows[g][b] for b in ("critical", "high", "medium", "low")))
+    if group in ("Unknown", "Not Specified"):
+        pytest.skip("largest group is the unknown bucket")
+    items = call(A.get_dashboard_equipment, db=db, user=org_admin,
+                 equipment_type=group, tested_only=True, page_size=1000, **kw)["items"]
+    got = Counter(i["risk_level"] for i in items)
+    for band in ("Critical", "High", "Medium", "Low"):
+        assert got[band] == rows[group][band.lower()], f"{group} {band} drill vs row"
+
+
+@pytest.mark.parametrize("view,param", [
+    ("by_type", "equipment_type"), ("by_make", "manufacturer"),
+    ("by_voltage_class", "voltage_class"),
+])
+def test_group_drill_lists_every_asset_in_the_row(db, org_admin, view, param):
+    """The drill-down (tested_only off, as the app now sends it) lists as many
+    assets as the row's Total Assets - placeholder groups ("N/A", "-", blank,
+    ...) included, which the app merges into "Not Specified" and drills with
+    the "unknown" sentinel."""
+    bd = call(A.get_asset_breakdown, db=db, user=org_admin)
+    rows = bd[view]
+    if not rows:
+        pytest.skip(f"no {view} groups")
+    unknown_total = sum(n for g, n in rows.items() if A._is_placeholder_group(g))
+    if unknown_total:
+        got = call(A.get_dashboard_equipment, db=db, user=org_admin,
+                   tested_only=False, page_size=1, **{param: "unknown"})["total"]
+        assert got == unknown_total, "Not Specified drill vs row"
+    real = [g for g in rows if not A._is_placeholder_group(g)]
+    if real:
+        g = max(real, key=rows.get)
+        got = call(A.get_dashboard_equipment, db=db, user=org_admin,
+                   tested_only=False, page_size=1, **{param: g})["total"]
+        assert got == rows[g], f"{g} drill vs row"
+
+
 def test_search_wildcards_are_literal(db, org_admin):
     r = call(A.get_dashboard_equipment, db=db, user=org_admin, search="%_%")
     assert all("%_%" in (i["ueic"] or "") for i in r["items"])
