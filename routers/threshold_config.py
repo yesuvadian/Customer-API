@@ -39,9 +39,9 @@ alter_dqi_rule_config.py for the seed history). Menu-level visibility is
 gated by the "Threshold Config" module (see seed_threshold_config_module.py);
 this router itself only requires an authenticated user, same as the other
 lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py) - except
-writes to the health bands, condition scores and status conditions, which
-rescore every organization and so need a platform super admin
-(_require_platform_admin).
+writes to the health bands, condition scores, status conditions and Table
+scoring, which rescore every organization and need an org admin, Threshold
+Config edit permission or a super admin (_require_scoring_admin).
 """
 import logging
 from typing import List, Optional
@@ -53,7 +53,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
-from auth_utils import get_current_user
+from auth_utils import get_current_user, has_org_admin_role
 from database import get_db
 from services.analytics_engine import (
     TABLE_SCORING_MODES,
@@ -76,20 +76,33 @@ from models import (
     get_dqi_all_key_labels,
 )
 
-def _require_platform_admin(current_user: User = Depends(get_current_user)) -> User:
-    """Write guard for the health bands, condition scores and status
-    conditions. Those tables have no organization column - one row set
-    scores every tenant - and each save rescores every organization (see
-    _rescore_after_change), so only a platform super admin may change them;
-    an org admin (who holds the Threshold Config module) would otherwise
-    rewrite every other organization's risk levels. Same super_admin test as
-    /analytics/recompute-all's all-organizations scope."""
+def _require_scoring_admin(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """Write guard for the health bands, condition scores, status conditions
+    and Table scoring: a super admin, an org admin (has_org_admin_role), or a
+    role with edit rights on the Threshold Config module - the same people
+    as /analytics/recompute-all, and the ones the page shows the edit
+    buttons to.
+
+    Those tables have no organization column - one row set scores every
+    tenant - and each save rescores every organization (see
+    _rescore_after_change), so such a save changes every other
+    organization's health scores and risk levels too."""
+    from routers.car import has_module_permission
     usertype = (current_user.get("usertype") if isinstance(current_user, dict)
                 else getattr(current_user, "usertype", None))
-    if usertype != "super_admin":
+    if usertype == "super_admin":
+        return current_user
+    user_id = (current_user.get("id") if isinstance(current_user, dict)
+               else getattr(current_user, "id", None))
+    if not user_id or not (has_org_admin_role(user_id, db)
+                           or has_module_permission(db, current_user,
+                                                    "threshold_config", "can_edit")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="These settings apply to every organization - super admin only",
+            detail="Requires org admin or Threshold Config edit permission",
         )
     return current_user
 
@@ -322,7 +335,7 @@ def list_health_bands(db: Session = Depends(get_db)):
 def create_health_band(
     payload: HealthBandCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     if db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.label == payload.label
@@ -350,7 +363,7 @@ def update_health_band(
     band_id: int,
     payload: HealthBandUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     row = db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.id == band_id
@@ -385,7 +398,7 @@ def update_health_band(
 def delete_health_band(
     band_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     row = db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.id == band_id
@@ -412,7 +425,7 @@ def list_condition_scores(db: Session = Depends(get_db)):
 def create_condition_score(
     payload: ConditionScoreCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     if db.query(ParameterConditionScore).filter(
         ParameterConditionScore.condition == payload.condition
@@ -438,7 +451,7 @@ def update_condition_score(
     score_id: int,
     payload: ConditionScoreUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     row = db.query(ParameterConditionScore).filter(
         ParameterConditionScore.id == score_id
@@ -467,7 +480,7 @@ def update_condition_score(
 def delete_condition_score(
     score_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     row = db.query(ParameterConditionScore).filter(
         ParameterConditionScore.id == score_id
@@ -494,7 +507,7 @@ def list_status_conditions(db: Session = Depends(get_db)):
 def create_status_condition(
     payload: StatusConditionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     if db.query(TestStatusCondition).filter(
         TestStatusCondition.status == payload.status
@@ -520,7 +533,7 @@ def update_status_condition(
     condition_id: int,
     payload: StatusConditionUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     row = db.query(TestStatusCondition).filter(
         TestStatusCondition.id == condition_id
@@ -549,7 +562,7 @@ def update_status_condition(
 def delete_status_condition(
     condition_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     row = db.query(TestStatusCondition).filter(
         TestStatusCondition.id == condition_id
@@ -1561,7 +1574,7 @@ def get_health_scoring_config(db: Session = Depends(get_db)):
 def update_health_scoring_config(
     payload: HealthScoringConfigUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_require_platform_admin),
+    current_user: User = Depends(_require_scoring_admin),
 ):
     """Partial update of the single global row (created on first save).
     Changing the mode rescores every organization in the background, same
