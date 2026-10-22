@@ -1230,6 +1230,9 @@ class AnalyticsEngine:
         # not re-queried per field.
         condition_labels = _load_condition_labels(self.db)
         condition_scores = _load_condition_scores(self.db)
+        # Org's trend-analysis settings (Threshold Config -> Analytics & SLA).
+        from services.tunable_settings import get_settings as _ts
+        trend_tuning = _ts(self.db, organization_id)
         table_scoring_mode = _load_table_scoring_mode(self.db)
 
         # Score the test

@@ -68,6 +68,7 @@ from models import (
     EquipmentExpectedLife,
     EquipmentHealthBandThreshold,
     FailureCohortThresholdConfig,
+    AnalyticsSettingsConfig,
     HealthScoringConfig,
     ParameterConditionScore,
     TestStatusCondition,
