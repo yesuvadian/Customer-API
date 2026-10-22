@@ -6001,6 +6001,37 @@ class HealthScoringConfig(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class RecomputeJob(Base):
+    """Shared copy of a /analytics/recompute-all background job's state
+    (routers/analytics.py), so a status poll answered by another API
+    process - the DR server behind the same address, or a second uvicorn
+    worker - still finds the job, and a job lost to a restart reports an
+    error instead of a bare 404.
+
+    The process running the job writes progress here every few seconds
+    (heartbeat_at); a "running" row whose heartbeat stopped is reported as
+    interrupted. rerun / rerun_org_id let a Threshold Config save on another
+    process flag the running job for one more pass. org_id is the scope as
+    a string, NULL = every organization. Created by alter_recompute_jobs.py.
+    """
+    __tablename__ = "recompute_jobs"
+    __table_args__ = {"schema": "public"}
+
+    job_id       = Column(String(32), primary_key=True)
+    status       = Column(String(20), nullable=False, default="running", index=True)
+    org_id       = Column(String(36), nullable=True)
+    total        = Column(Integer, nullable=True)
+    processed    = Column(Integer, nullable=False, default=0)
+    recomputed   = Column(Integer, nullable=False, default=0)
+    failed       = Column(Integer, nullable=False, default=0)
+    error        = Column(Text, nullable=True)
+    rerun        = Column(Boolean, nullable=False, default=False)
+    rerun_org_id = Column(String(36), nullable=True)
+    started_at   = Column(DateTime(timezone=True), nullable=False)
+    finished_at  = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class EquipmentConditionBandThreshold(Base):
     """Admin-configurable score-to-band mapping for the AI Graph Dashboard's
     5-tier condition scale (Excellent/Good/Fair/Poor/Critical) — a
