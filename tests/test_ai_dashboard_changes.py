@@ -306,25 +306,72 @@ def test_unknown_or_vanished_job_status(fake_jobs, org_admin):
     assert A.get_current_recompute_job(user=org_admin) == {}
 
 
-# ── Global scoring config is super-admin only ───────────────────────────────
+# ── Global scoring config: org admin, Threshold Config edit, or super admin ─
 
-def test_global_scoring_config_writes_need_super_admin():
+def test_global_scoring_config_writes_need_admin_or_edit(db, org_admin):
     import inspect
     from fastapi import HTTPException
+    from auth_utils import has_org_admin_role
+    from models import User
     from routers import threshold_config as TC
-    with pytest.raises(HTTPException) as exc:
-        TC._require_platform_admin(type("U", (), {"id": None, "usertype": "org_admin"})())
-    assert exc.value.status_code == 403
-    with pytest.raises(HTTPException):
-        TC._require_platform_admin({"id": None, "usertype": "user"})
+    from routers.car import has_module_permission
+    assert TC._require_scoring_admin(org_admin, db) is org_admin
     su = type("U", (), {"id": None, "usertype": "super_admin"})()
-    assert TC._require_platform_admin(su) is su
-    # Every write route of the three rescoring tables is guarded.
+    assert TC._require_scoring_admin(su, db) is su
+    with pytest.raises(HTTPException) as exc:
+        TC._require_scoring_admin({"id": None, "usertype": "user"}, db)
+    assert exc.value.status_code == 403
+    # Non-admins of the org: allowed exactly when a role gives them edit on
+    # the Threshold Config module (the same rule as Recompute All).
+    users = [u for u in db.query(User)
+             .filter(User.organization_id == org_admin.organization_id,
+                     User.usertype.is_(None)).limit(200)
+             if not has_org_admin_role(u.id, db)]
+    for u in users:
+        if has_module_permission(db, u, "threshold_config", "can_edit"):
+            assert TC._require_scoring_admin(u, db) is u
+        else:
+            with pytest.raises(HTTPException):
+                TC._require_scoring_admin(u, db)
+    # Every write route of the rescoring tables and Table scoring is guarded.
     for fn in (TC.create_health_band, TC.update_health_band, TC.delete_health_band,
                TC.create_condition_score, TC.update_condition_score, TC.delete_condition_score,
-               TC.create_status_condition, TC.update_status_condition, TC.delete_status_condition):
+               TC.create_status_condition, TC.update_status_condition, TC.delete_status_condition,
+               TC.update_health_scoring_config):
         dep = inspect.signature(fn).parameters["current_user"].default
-        assert dep.dependency is TC._require_platform_admin, fn.__name__
+        assert dep.dependency is TC._require_scoring_admin, fn.__name__
+
+
+def test_threshold_config_edit_grants_scoring_saves(db, org_admin):
+    """A non-admin whose role is given edit on Threshold Config passes;
+    view alone doesn't (rolled back)."""
+    from fastapi import HTTPException
+    from auth_utils import has_org_admin_role
+    from models import Module, OrgRolePermission, OrgUserRole, User
+    from routers import threshold_config as TC
+    module = db.query(Module).filter(Module.path == "threshold_config").first()
+    if not module:
+        pytest.skip("no Threshold Config module")
+    pick = next(((u, ur) for u, ur in db.query(User, OrgUserRole)
+                 .join(OrgUserRole, OrgUserRole.user_id == User.id)
+                 .filter(User.organization_id == org_admin.organization_id,
+                         User.usertype.is_(None), OrgUserRole.is_active == True)  # noqa: E712
+                 .limit(200)
+                 if not has_org_admin_role(u.id, db)), None)
+    if not pick:
+        pytest.skip("no non-admin user with a role")
+    user, ur = pick
+    db.query(OrgRolePermission).filter(
+        OrgRolePermission.org_role_id == ur.org_role_id,
+        OrgRolePermission.module_id == module.id).delete()
+    perm = OrgRolePermission(org_role_id=ur.org_role_id, module_id=module.id, can_view=True)
+    db.add(perm)
+    db.flush()
+    with pytest.raises(HTTPException):
+        TC._require_scoring_admin(user, db)
+    perm.can_edit = True
+    db.flush()
+    assert TC._require_scoring_admin(user, db) is user
 
 
 # ── Summary-table row drill lists every asset the row counts ────────────────

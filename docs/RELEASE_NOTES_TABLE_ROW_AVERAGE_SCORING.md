@@ -42,7 +42,7 @@ The API now returns a `risk_by_finding` flag on these endpoints:
 
 1. Deploy the API and run `python alter_health_scoring_config.py`. It creates the `health_scoring_config` table and seeds no row, so behaviour stays "worst row".
 2. Deploy the app.
-3. To switch modes: a **platform super admin** picks "Row average" in Threshold Config. Saving rescores every organization in the background. A manual Recompute All is only needed if that background rescore didn't start (it is logged as a warning).
+3. To switch modes: an **org admin**, a role with **Threshold Config edit** permission, or a super admin picks "Row average" in Threshold Config. The setting is shared by every organization, so saving it rescores every organization in the background. A manual Recompute All is only needed if that background rescore didn't start (it is logged as a warning).
 
 ## Side effects of switching to Row average
 
