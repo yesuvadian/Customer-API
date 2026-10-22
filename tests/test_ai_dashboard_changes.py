@@ -198,6 +198,7 @@ def test_settings_save_starts_one_coalesced_rescore(db, monkeypatch):
 
     monkeypatch.setattr(A.threading, "Thread", FakeThread)
     monkeypatch.setattr(A, "_RECOMPUTE_JOBS", {})
+    monkeypatch.setattr(A, "_JOB_STORE_ENABLED", False)  # its own sessions commit
     monkeypatch.setattr(db, "commit", db.flush)  # never commit to the dev DB
 
     from routers import threshold_config as TC
@@ -228,6 +229,7 @@ def fake_jobs(monkeypatch):
 
     monkeypatch.setattr(A.threading, "Thread", FakeThread)
     monkeypatch.setattr(A, "_RECOMPUTE_JOBS", {})
+    monkeypatch.setattr(A, "_JOB_STORE_ENABLED", False)
     return started
 
 
@@ -304,6 +306,84 @@ def test_unknown_or_vanished_job_status(fake_jobs, org_admin):
     assert exc.value.status_code == 404
     assert exc.value.detail == "Recompute job not found"
     assert A.get_current_recompute_job(user=org_admin) == {}
+
+
+# ── Shared job copy: a poll reaching another process (DR, other worker) ─────
+
+def _shared_job(org_id=None, **kw):
+    return {"status": "running", "org_id": org_id, "total": 10, "processed": 4,
+            "recomputed": 4, "failed": 0, "error": None, "started_at": None,
+            "finished_at": None, "rerun": False, "rerun_org_id": None, **kw}
+
+
+ORG_A_ADMIN = {"id": None, "organization_id": ORG_A, "usertype": None}
+
+
+def test_poll_falls_back_to_shared_copy(fake_jobs, monkeypatch):
+    """A job another process runs is answered from recompute_jobs, not 404."""
+    jid = "a" * 32
+    monkeypatch.setattr(A, "_db_get_job", lambda j: _shared_job() if j == jid else None)
+    monkeypatch.setattr(A, "_db_current_job", lambda mine, any_scope: (jid, _shared_job()))
+    assert A.get_recompute_job(jid, user=ORG_A_ADMIN)["processed"] == 4
+    assert A.get_current_recompute_job(user=ORG_A_ADMIN)["job_id"] == jid
+
+
+def test_shared_copy_keeps_org_scope(fake_jobs, monkeypatch):
+    """Another organization's job stays invisible, wherever it runs."""
+    from fastapi import HTTPException
+    monkeypatch.setattr(A, "_db_get_job", lambda j: _shared_job(org_id=ORG_B))
+    with pytest.raises(HTTPException) as exc:
+        A.get_recompute_job("b" * 32, user=ORG_A_ADMIN)
+    assert exc.value.status_code == 404
+
+
+def test_stale_running_row_reports_interrupted():
+    """A process that died mid-job stops its heartbeat: the row reads as an
+    error with a reason, so the page stops polling."""
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    now = datetime.now(timezone.utc)
+    row = SimpleNamespace(status="running", org_id=None, total=5, processed=2, recomputed=2,
+                          failed=0, error=None, started_at=now, finished_at=None,
+                          rerun=False, rerun_org_id=None,
+                          heartbeat_at=now - timedelta(seconds=A._JOB_STALE_SECONDS + 1))
+    job = A._job_from_row(row)
+    assert job["status"] == "error" and "interrupted" in job["error"]
+    row.heartbeat_at = now
+    assert A._job_from_row(row)["status"] == "running"
+
+
+def test_start_joins_job_running_on_another_process(fake_jobs, monkeypatch):
+    """No parallel job when another process already runs an overlapping one."""
+    other = "c" * 32
+    monkeypatch.setattr(A, "_db_claim_or_insert_job",
+                        lambda key, jid, job: (other, _shared_job(rerun=True)))
+    assert A.start_recompute_job(ORG_A)["job_id"] == other
+    assert fake_jobs == [] and A._RECOMPUTE_JOBS == {}
+
+
+def test_finish_runs_rerun_flagged_by_another_process(fake_jobs, monkeypatch):
+    """A save on another process flags the row; the finishing process reads
+    it in its locked finish step and reruns over that scope."""
+    import uuid
+    import database
+
+    first = A.start_recompute_job(ORG_A)["job_id"]
+
+    class FakeSession:
+        def query(self, *a, **k):
+            raise RuntimeError("boom")
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(database, "BackgroundSessionLocal", FakeSession)
+    monkeypatch.setattr(A, "_db_job_finish", lambda jid, job: (True, None))
+    A._run_recompute_job(first, uuid.UUID(ORG_A))
+    assert fake_jobs[1:] == [None]
 
 
 # ── Global scoring config: org admin, Threshold Config edit, or super admin ─

@@ -27,6 +27,7 @@ Drill-down chain:
 
 import uuid
 import threading
+import time
 import re
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -1443,11 +1444,214 @@ def run_equipment_analytics(
     }
 
 
-# In-process recompute jobs ({job_id: state}). The API runs a single
-# uvicorn worker by design (Dockerfile: in-process APScheduler), so polling
-# the status endpoint always reaches the process running the job.
+# Recompute jobs this process runs ({job_id: state}). Each is also mirrored
+# to public.recompute_jobs (RecomputeJob): the DR server answers the same
+# address and the legacy service ran 4 uvicorn workers, so a status poll can
+# reach a process that never saw the job. That copy answers it, and lets a
+# save on another process flag the running job for a rerun.
 _RECOMPUTE_JOBS: dict = {}
 _RECOMPUTE_LOCK = threading.Lock()
+
+_JOB_STORE_ENABLED = True       # tests switch the shared copy off
+_JOB_HEARTBEAT_SECONDS = 2      # how often a running job writes its progress
+_JOB_STALE_SECONDS = 300        # "running" with no heartbeat this long = lost
+_JOB_KEEP_DAYS = 7              # finished rows older than this are deleted
+_JOB_ADVISORY_LOCK = 7_302_018  # serialises job starts across processes
+_job_store_warned = False
+
+
+def _job_store_failed(exc) -> None:
+    """The shared copy is best effort (e.g. alter_recompute_jobs.py not run
+    yet): the job itself carries on in memory. Warn once, not every poll."""
+    global _job_store_warned
+    if not _job_store_warned:
+        _job_store_warned = True
+        logger.warning("recompute_jobs table unavailable, job progress stays in this process: %s", exc)
+
+
+def _job_store_session():
+    from database import VendorSessionLocal
+    return VendorSessionLocal()
+
+
+def _iso_dt(value):
+    return datetime.fromisoformat(value) if isinstance(value, str) else value
+
+
+def _job_from_row(row) -> dict:
+    """A recompute_jobs row as the in-memory job dict. A "running" row whose
+    process stopped writing heartbeats (crash, restart, deploy) is reported
+    as an error, so the page stops polling with a reason."""
+    status, error, finished_at = row.status, row.error, row.finished_at
+    if status == "running" and row.heartbeat_at is not None and (
+            datetime.now(timezone.utc) - row.heartbeat_at).total_seconds() > _JOB_STALE_SECONDS:
+        status = "error"
+        error = "Recompute was interrupted - the server running it stopped or restarted. Run it again."
+        finished_at = row.heartbeat_at
+    return {
+        "status": status, "org_id": row.org_id,
+        "total": row.total, "processed": row.processed or 0,
+        "recomputed": row.recomputed or 0, "failed": row.failed or 0,
+        "error": error,
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "finished_at": finished_at.isoformat() if finished_at else None,
+        "rerun": bool(row.rerun), "rerun_org_id": row.rerun_org_id,
+    }
+
+
+def _db_claim_or_insert_job(key, job_id: str, job: dict):
+    """Under a cross-process lock: if another process runs a job overlapping
+    scope `key`, flag it for a rerun widened to `key` and return
+    (its job_id, state); otherwise store `job` as a new row and return None.
+    Called under _RECOMPUTE_LOCK, after the local check found no overlap."""
+    if not _JOB_STORE_ENABLED:
+        return None
+    from sqlalchemy import text
+    from models import RecomputeJob
+    db = _job_store_session()
+    try:
+        db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _JOB_ADVISORY_LOCK})
+        now = datetime.now(timezone.utc)
+        fresh = now - timedelta(seconds=_JOB_STALE_SECONDS)
+        q = db.query(RecomputeJob).filter(RecomputeJob.status == "running",
+                                          RecomputeJob.heartbeat_at >= fresh)
+        if key is not None:
+            q = q.filter((RecomputeJob.org_id == key) | RecomputeJob.org_id.is_(None))
+        row = q.order_by(RecomputeJob.started_at).with_for_update().first()
+        if row is not None:
+            flags = {"rerun": row.rerun, "rerun_org_id": row.rerun_org_id}
+            _widen_rerun(flags, key)
+            row.rerun, row.rerun_org_id = True, flags["rerun_org_id"]
+            found = (row.job_id, _job_from_row(row))
+            db.commit()
+            return found
+        db.query(RecomputeJob).filter(
+            RecomputeJob.finished_at < now - timedelta(days=_JOB_KEEP_DAYS)
+        ).delete(synchronize_session=False)
+        db.add(RecomputeJob(
+            job_id=job_id, status=job["status"], org_id=job["org_id"],
+            processed=0, recomputed=0, failed=0, rerun=False,
+            started_at=_iso_dt(job["started_at"]), heartbeat_at=now,
+        ))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        _job_store_failed(exc)
+    finally:
+        db.close()
+    return None
+
+
+def _db_job_progress(job_id: str, job: dict) -> None:
+    """Heartbeat: copy the running job's counters to its row."""
+    if not _JOB_STORE_ENABLED:
+        return
+    from models import RecomputeJob
+    db = _job_store_session()
+    try:
+        db.query(RecomputeJob).filter(RecomputeJob.job_id == job_id).update({
+            "total": job["total"], "processed": job["processed"],
+            "recomputed": job["recomputed"], "failed": job["failed"],
+            "heartbeat_at": datetime.now(timezone.utc),
+        }, synchronize_session=False)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        _job_store_failed(exc)
+    finally:
+        db.close()
+
+
+def _db_job_widen_rerun(job_id: str, key) -> None:
+    """A local save coalesced onto this process's job: record the rerun on
+    its row too, where the finish step reads every process's requests."""
+    if not _JOB_STORE_ENABLED:
+        return
+    from models import RecomputeJob
+    db = _job_store_session()
+    try:
+        row = db.query(RecomputeJob).filter(RecomputeJob.job_id == job_id).with_for_update().first()
+        if row is not None:
+            flags = {"rerun": row.rerun, "rerun_org_id": row.rerun_org_id}
+            _widen_rerun(flags, key)
+            row.rerun, row.rerun_org_id = True, flags["rerun_org_id"]
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        _job_store_failed(exc)
+    finally:
+        db.close()
+
+
+def _db_job_finish(job_id: str, job: dict):
+    """Store the final state and return the rerun flags other processes set
+    on the row as (rerun, rerun_org_id), or None if the row is unavailable.
+    The row lock makes this atomic with _db_claim_or_insert_job on another
+    process: a save there either flags the job before this, or sees it
+    finished and starts its own."""
+    if not _JOB_STORE_ENABLED:
+        return None
+    from models import RecomputeJob
+    db = _job_store_session()
+    try:
+        row = db.query(RecomputeJob).filter(RecomputeJob.job_id == job_id).with_for_update().first()
+        if row is None:
+            db.rollback()
+            return None
+        row.status, row.error = job["status"], job["error"]
+        row.total, row.processed = job["total"], job["processed"]
+        row.recomputed, row.failed = job["recomputed"], job["failed"]
+        row.finished_at = _iso_dt(job["finished_at"])
+        row.heartbeat_at = datetime.now(timezone.utc)
+        flags = (bool(row.rerun), row.rerun_org_id)
+        db.commit()
+        return flags
+    except Exception as exc:
+        db.rollback()
+        _job_store_failed(exc)
+        return None
+    finally:
+        db.close()
+
+
+def _db_get_job(job_id: str):
+    """The job's state from the shared copy, or None."""
+    if not _JOB_STORE_ENABLED:
+        return None
+    from models import RecomputeJob
+    db = _job_store_session()
+    try:
+        row = db.query(RecomputeJob).filter(RecomputeJob.job_id == job_id).first()
+        return _job_from_row(row) if row is not None else None
+    except Exception as exc:
+        db.rollback()
+        _job_store_failed(exc)
+        return None
+    finally:
+        db.close()
+
+
+def _db_current_job(mine, any_scope: bool):
+    """A job running on any process for scope `mine` (None = only all-org
+    jobs), as (job_id, state), or None. any_scope: every job (super admin)."""
+    if not _JOB_STORE_ENABLED:
+        return None
+    from models import RecomputeJob
+    db = _job_store_session()
+    try:
+        fresh = datetime.now(timezone.utc) - timedelta(seconds=_JOB_STALE_SECONDS)
+        q = db.query(RecomputeJob).filter(RecomputeJob.status == "running",
+                                          RecomputeJob.heartbeat_at >= fresh)
+        if not any_scope:
+            q = q.filter((RecomputeJob.org_id == mine) | RecomputeJob.org_id.is_(None))
+        row = q.order_by(RecomputeJob.started_at).first()
+        return (row.job_id, _job_from_row(row)) if row is not None else None
+    except Exception as exc:
+        db.rollback()
+        _job_store_failed(exc)
+        return None
+    finally:
+        db.close()
 
 
 def _recompute_result_ids(db: Session, org_id, skip_statuses) -> list:
@@ -1512,6 +1716,14 @@ def _run_recompute_job(job_id: str, org_id) -> None:
                 Equipment.organization_id == org_id)
         ea_ids = [r[0] for r in _ea_q.all()]
         job["total"] = len(result_ids) + len(ea_ids)
+        _db_job_progress(job_id, job)
+        last_beat = time.monotonic()
+
+        def heartbeat():
+            nonlocal last_beat
+            if time.monotonic() - last_beat >= _JOB_HEARTBEAT_SECONDS:
+                last_beat = time.monotonic()
+                _db_job_progress(job_id, job)
 
         engine = AnalyticsEngine(db)
         # Each item in its own SAVEPOINT: the engine only flushes, so a plain
@@ -1528,6 +1740,7 @@ def _run_recompute_job(job_id: str, org_id) -> None:
                 job["failed"] += 1
                 logger.warning("recompute_all: failed for %s: %s", rid, exc)
             job["processed"] += 1
+            heartbeat()
             if i % 200 == 0:
                 db.commit()
         # Second pass: re-aggregate EVERY equipment that has a health row.
@@ -1545,6 +1758,7 @@ def _run_recompute_job(job_id: str, org_id) -> None:
                 job["failed"] += 1
                 logger.warning("recompute_all: equipment re-aggregation failed for %s: %s", eq_id, exc)
             job["processed"] += 1
+            heartbeat()
             if i % 200 == 0:
                 db.commit()
         db.commit()
@@ -1559,12 +1773,17 @@ def _run_recompute_job(job_id: str, org_id) -> None:
         # Leave "running" and read the rerun flag in one step under the lock:
         # start_recompute_job sets the flag under it, so a save either lands
         # before this (and is rerun) or sees the job finished (and starts its
-        # own) - never set on a job that already stopped looking.
+        # own) - never set on a job that already stopped looking. The shared
+        # row is finished under its row lock in the same step, which also
+        # picks up reruns that saves on other processes flagged there.
         with _RECOMPUTE_LOCK:
             job["status"] = final_status
             if final_error is not None:
                 job["error"] = final_error
             job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            shared = _db_job_finish(job_id, job)
+            if shared and shared[0]:
+                _widen_rerun(job, shared[1])
             rerun, rerun_key = job.get("rerun"), job.get("rerun_org_id")
         # A settings change saved while this job was running may have been
         # read too late by it - run once more, over every scope requested
@@ -1604,16 +1823,23 @@ def start_recompute_job(org_id) -> dict:
                        and (key is None or j["org_id"] in (key, None))]
         for _jid, j in overlapping:
             _widen_rerun(j, key)
+            _db_job_widen_rerun(_jid, key)
         if overlapping:
             jid, j = overlapping[0]
             return {"job_id": jid, **j}
         job_id = uuid.uuid4().hex
-        _RECOMPUTE_JOBS[job_id] = {
+        job = {
             "status": "running", "org_id": key,
             "total": None, "processed": 0, "recomputed": 0, "failed": 0,
             "error": None, "started_at": datetime.now(timezone.utc).isoformat(),
             "finished_at": None, "rerun": False, "rerun_org_id": None,
         }
+        # The same check against jobs other processes are running.
+        elsewhere = _db_claim_or_insert_job(key, job_id, job)
+        if elsewhere:
+            jid, j = elsewhere
+            return {"job_id": jid, **j}
+        _RECOMPUTE_JOBS[job_id] = job
     threading.Thread(target=_run_recompute_job, args=(job_id, org_id),
                      name=f"recompute-{job_id[:8]}", daemon=True).start()
     return {"job_id": job_id, **_RECOMPUTE_JOBS[job_id]}
@@ -1658,7 +1884,8 @@ def get_recompute_job(
     job_id: str,
     user: dict = Depends(get_current_user),
 ):
-    job = _RECOMPUTE_JOBS.get(job_id)
+    # Another process (DR server, other worker) may be running it.
+    job = _RECOMPUTE_JOBS.get(job_id) or _db_get_job(job_id)
     org_id = _user_org_id(user)
     _usertype = user.get("usertype") if isinstance(user, dict) else getattr(user, "usertype", None)
     # An all-organizations job (org_id None, started by a Threshold Config
@@ -1681,6 +1908,10 @@ def get_current_recompute_job(user: dict = Depends(get_current_user)):
             if j["status"] == "running" and (
                     _usertype == "super_admin" or j["org_id"] in (mine, None)):
                 return {"job_id": jid, **j}
+    elsewhere = _db_current_job(mine, _usertype == "super_admin")
+    if elsewhere:
+        jid, j = elsewhere
+        return {"job_id": jid, **j}
     return {}
 
 

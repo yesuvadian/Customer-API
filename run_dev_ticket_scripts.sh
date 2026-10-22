@@ -14,7 +14,9 @@
 #   1. alter_ageing_config.py                       ageing_config / equipment_expected_life tables (+ defaults)
 #   2. alter_health_scoring_config.py               health_scoring_config table ("Table scoring"; default worst row)
 #   3. alter_exempt_nameplate_inspection_templates.py   nameplate / inspection templates exempt from "no thresholds"
-#   4. run_recompute_all_analytics.py               re-evaluate + rescore every stored result (the app's
+#   4. alter_recompute_jobs.py                      recompute_jobs table (Recompute All progress shared by
+#                                                   primary + DR, so a poll never 404s on the other server)
+#   5. run_recompute_all_analytics.py               re-evaluate + rescore every stored result (the app's
 #                                                   Recompute All only rescores)
 set -euo pipefail
 
@@ -33,7 +35,7 @@ from database import VendorSessionLocal
 s = VendorSessionLocal()
 q = lambda sql: s.execute(text(sql)).scalar()
 try:
-    for t in ("ageing_config", "equipment_expected_life", "health_scoring_config"):
+    for t in ("ageing_config", "equipment_expected_life", "health_scoring_config", "recompute_jobs"):
         found = s.execute(text("select to_regclass(:t)"), {"t": "public." + t}).scalar()
         print("  table %-24s %s" % (t, "present" if found else "MISSING"))
     rows = s.execute(text(
@@ -65,7 +67,8 @@ fi
 
 for step in alter_ageing_config.py \
             alter_health_scoring_config.py \
-            alter_exempt_nameplate_inspection_templates.py; do
+            alter_exempt_nameplate_inspection_templates.py \
+            alter_recompute_jobs.py; do
     log "Running $step"
     "$PY" "$step"
 done
