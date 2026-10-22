@@ -23,6 +23,11 @@ Data Quality Index rule toggles:
                                             (GET/PUT): default expected life,
                                             life-stage cutoffs, ageing radar
                                             benchmark — see alter_ageing_config.py
+    /threshold-config/health-scoring     -> HealthScoringConfig, global
+                                            singleton (GET/PUT): how results
+                                            tables are scored (worst row /
+                                            row average) — see
+                                            alter_health_scoring_config.py
 
 These replace the previously hardcoded _RISK_BANDS / _SCORE / _CONDITION
 constants in services/analytics_engine.py, the _condition_from_score
@@ -33,8 +38,12 @@ alter_test_status_condition.py, alter_equipment_condition_band_threshold.py,
 alter_dqi_rule_config.py for the seed history). Menu-level visibility is
 gated by the "Threshold Config" module (see seed_threshold_config_module.py);
 this router itself only requires an authenticated user, same as the other
-lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py).
+lookup-table CRUD routers (e.g. equipment_type_kit_mappings.py) - except
+writes to the health bands, condition scores and status conditions, which
+rescore every organization and so need a platform super admin
+(_require_platform_admin).
 """
+import logging
 from typing import List, Optional
 from uuid import UUID
 
@@ -46,6 +55,10 @@ from sqlalchemy.orm import Session
 
 from auth_utils import get_current_user
 from database import get_db
+from services.analytics_engine import (
+    TABLE_SCORING_MODES,
+    TABLE_SCORING_WORST_ROW,
+)
 from models import (
     AgeingConfig,
     DqiRuleConfig,
@@ -55,11 +68,44 @@ from models import (
     EquipmentExpectedLife,
     EquipmentHealthBandThreshold,
     FailureCohortThresholdConfig,
+    HealthScoringConfig,
     ParameterConditionScore,
     TestStatusCondition,
     User,
     get_dqi_all_key_labels,
 )
+
+def _require_platform_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Write guard for the health bands, condition scores and status
+    conditions. Those tables have no organization column - one row set
+    scores every tenant - and each save rescores every organization (see
+    _rescore_after_change), so only a platform super admin may change them;
+    an org admin (who holds the Threshold Config module) would otherwise
+    rewrite every other organization's risk levels. Same super_admin test as
+    /analytics/recompute-all's all-organizations scope."""
+    usertype = (current_user.get("usertype") if isinstance(current_user, dict)
+                else getattr(current_user, "usertype", None))
+    if usertype != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="These settings apply to every organization - super admin only",
+        )
+    return current_user
+
+
+def _rescore_after_change() -> None:
+    """Health bands, condition scores and status conditions decide the stored
+    health score / risk level of every equipment, which the AI dashboards
+    count - re-run the scoring in the background after each change, or the
+    dashboards keep showing the old classification until someone presses
+    "Recompute All". These tables are global, so every organization is
+    rescored; saves made while a run is going coalesce into one more run."""
+    try:
+        from routers.analytics import start_recompute_job
+        start_recompute_job(None)
+    except Exception as exc:  # never fail the save over the rescore
+        logging.getLogger(__name__).warning("threshold-config: rescore not started: %s", exc)
+
 
 router = APIRouter(
     prefix="/threshold-config",
@@ -245,7 +291,7 @@ def list_health_bands(db: Session = Depends(get_db)):
 def create_health_band(
     payload: HealthBandCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.label == payload.label
@@ -261,6 +307,7 @@ def create_health_band(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -270,7 +317,7 @@ def update_health_band(
     band_id: int,
     payload: HealthBandUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.id == band_id
@@ -290,12 +337,17 @@ def update_health_band(
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
 
 @router.delete("/health-bands/{band_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_health_band(band_id: int, db: Session = Depends(get_db)):
+def delete_health_band(
+    band_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(EquipmentHealthBandThreshold).filter(
         EquipmentHealthBandThreshold.id == band_id
     ).first()
@@ -303,6 +355,7 @@ def delete_health_band(band_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Health band not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Condition scores ──────────────────────────────────────────────────────────
@@ -320,7 +373,7 @@ def list_condition_scores(db: Session = Depends(get_db)):
 def create_condition_score(
     payload: ConditionScoreCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(ParameterConditionScore).filter(
         ParameterConditionScore.condition == payload.condition
@@ -336,6 +389,7 @@ def create_condition_score(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -345,7 +399,7 @@ def update_condition_score(
     score_id: int,
     payload: ConditionScoreUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(ParameterConditionScore).filter(
         ParameterConditionScore.id == score_id
@@ -365,12 +419,17 @@ def update_condition_score(
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
 
 @router.delete("/condition-scores/{score_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_condition_score(score_id: int, db: Session = Depends(get_db)):
+def delete_condition_score(
+    score_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(ParameterConditionScore).filter(
         ParameterConditionScore.id == score_id
     ).first()
@@ -378,6 +437,7 @@ def delete_condition_score(score_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Condition score not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Status conditions ─────────────────────────────────────────────────────────
@@ -395,7 +455,7 @@ def list_status_conditions(db: Session = Depends(get_db)):
 def create_status_condition(
     payload: StatusConditionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     if db.query(TestStatusCondition).filter(
         TestStatusCondition.status == payload.status
@@ -411,6 +471,7 @@ def create_status_condition(
     )
     db.add(row)
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
@@ -420,7 +481,7 @@ def update_status_condition(
     condition_id: int,
     payload: StatusConditionUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_require_platform_admin),
 ):
     row = db.query(TestStatusCondition).filter(
         TestStatusCondition.id == condition_id
@@ -440,12 +501,17 @@ def update_status_condition(
     row.modified_by = current_user.id
 
     db.commit()
+    _rescore_after_change()
     db.refresh(row)
     return row
 
 
 @router.delete("/status-conditions/{condition_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_status_condition(condition_id: int, db: Session = Depends(get_db)):
+def delete_status_condition(
+    condition_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
     row = db.query(TestStatusCondition).filter(
         TestStatusCondition.id == condition_id
     ).first()
@@ -453,6 +519,7 @@ def delete_status_condition(condition_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Status condition not found")
     db.delete(row)
     db.commit()
+    _rescore_after_change()
 
 
 # ── Condition bands (5-tier Excellent/Good/Fair/Poor/Critical scale used by
@@ -1221,3 +1288,85 @@ def update_ageing_config(
     db.commit()
     db.refresh(row)
     return _ageing_response(row)
+
+
+# ── Health scoring (HealthScorer.score_test's table scoring mode) ───────────
+# Global like the condition scores whose points it combines, so the same
+# platform-admin write guard and automatic rescore apply. Created by
+# alter_health_scoring_config.py; until it's run GET answers the built-in
+# default and PUT answers 503 (the scorer keeps using "worst_row").
+
+_HEALTH_SCORING_SETUP_HINT = (
+    "Health scoring table doesn't exist yet -- run alter_health_scoring_config.py"
+)
+
+
+class HealthScoringConfigUpdate(BaseModel):
+    table_scoring_mode: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class HealthScoringConfigResponse(BaseModel):
+    # "worst_row" | "row_average"
+    table_scoring_mode: str
+    notes: Optional[str] = None
+    # False = no row saved yet; the value shown is the built-in default.
+    is_configured: bool
+
+
+def _health_scoring_response(row: Optional[HealthScoringConfig]) -> HealthScoringConfigResponse:
+    if row is None:
+        return HealthScoringConfigResponse(
+            table_scoring_mode=TABLE_SCORING_WORST_ROW, notes=None, is_configured=False)
+    return HealthScoringConfigResponse(
+        table_scoring_mode=row.table_scoring_mode, notes=row.notes, is_configured=True)
+
+
+@router.get("/health-scoring", response_model=HealthScoringConfigResponse)
+def get_health_scoring_config(db: Session = Depends(get_db)):
+    try:
+        row = db.query(HealthScoringConfig).order_by(HealthScoringConfig.id.asc()).first()
+    except ProgrammingError:
+        db.rollback()
+        row = None
+    return _health_scoring_response(row)
+
+
+@router.put("/health-scoring", response_model=HealthScoringConfigResponse)
+def update_health_scoring_config(
+    payload: HealthScoringConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_platform_admin),
+):
+    """Partial update of the single global row (created on first save).
+    Changing the mode rescores every organization in the background, same
+    as a condition-score change."""
+    data = payload.model_dump(exclude_unset=True)
+    mode = data.get("table_scoring_mode")
+    if "table_scoring_mode" in data and mode not in TABLE_SCORING_MODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"table_scoring_mode must be one of: {', '.join(TABLE_SCORING_MODES)}",
+        )
+    try:
+        row = db.query(HealthScoringConfig).order_by(HealthScoringConfig.id.asc()).first()
+    except ProgrammingError:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=_HEALTH_SCORING_SETUP_HINT)
+
+    old_mode = row.table_scoring_mode if row else TABLE_SCORING_WORST_ROW
+    if row is None:
+        row = HealthScoringConfig(table_scoring_mode=TABLE_SCORING_WORST_ROW,
+                                  created_by=current_user.id)
+        db.add(row)
+    if mode is not None:
+        row.table_scoring_mode = mode
+    if "notes" in data:
+        row.notes = data["notes"]
+    row.modified_by = current_user.id
+
+    db.commit()
+    if row.table_scoring_mode != old_mode:
+        _rescore_after_change()
+    db.refresh(row)
+    return _health_scoring_response(row)

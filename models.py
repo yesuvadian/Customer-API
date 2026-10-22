@@ -5891,6 +5891,39 @@ class ParameterConditionScore(Base):
     mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class HealthScoringConfig(Base):
+    """Single-row (global, not org-scoped — like ParameterConditionScore
+    just above, whose points it combines) settings for how
+    services/analytics_engine.py's HealthScorer.score_test turns field
+    conditions into a test's health score.
+
+      - table_scoring_mode: how a results-table field (oil test results,
+        DGA gases, tan δ rows) is scored.
+          "worst_row"   — the table counts as one field at its worst row's
+                          condition (the original behaviour, and the
+                          default while no row exists).
+          "row_average" — the table keeps its field weight, split equally
+                          over its evaluated rows, so one breaching row no
+                          longer scores the same as every row failing.
+        Risk level is unaffected either way: a CRITICAL row still produces
+        a critical finding (_risk_from_score).
+
+    Only the first row (lowest id) is ever read; the API upserts it. Created
+    by alter_health_scoring_config.py.
+    """
+    __tablename__ = "health_scoring_config"
+    __table_args__ = {"schema": "public"}
+
+    id                 = Column(Integer, primary_key=True, autoincrement=True)
+    table_scoring_mode = Column(String(20), nullable=False, default="worst_row")
+    notes              = Column(Text, nullable=True)
+
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    modified_by = Column(UUID(as_uuid=True), ForeignKey("public.users.id"), nullable=True)
+    cts = Column(DateTime(timezone=True), server_default=func.now())
+    mts = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class EquipmentConditionBandThreshold(Base):
     """Admin-configurable score-to-band mapping for the AI Graph Dashboard's
     5-tier condition scale (Excellent/Good/Fair/Poor/Critical) — a

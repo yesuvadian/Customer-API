@@ -25,6 +25,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from statistics import mean, stdev
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query
 import re
@@ -32,7 +33,14 @@ import re
 from sqlalchemy import func
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
-from services.analytics_engine import accepted_test_result_ids
+from services.analytics_engine import (
+    _DEFAULT_SCORE,
+    RISK_SLOTS,
+    _load_condition_scores,
+    accepted_test_result_ids,
+    risk_by_finding_checker,
+    risk_slot_mapper,
+)
 
 from database import get_vendor_db
 from auth_utils import get_current_user
@@ -92,6 +100,37 @@ def _eq_capacity_map(eq_ids: list, db: Session) -> dict:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics/ai-graph", tags=["AI Graph Dashboard"])
+
+# The client sends date_from/date_to as LOCAL (India) calendar dates and
+# Organization has no timezone column, so one module-wide zone. India has
+# no DST, so the fixed +05:30 fallback (no tzdata on the host) is exact.
+try:
+    _LOCAL_TZ = ZoneInfo("Asia/Kolkata")
+except ZoneInfoNotFoundError:  # pragma: no cover - host without tzdata
+    _LOCAL_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def _local_date(dt: datetime | date) -> date:
+    """The local calendar date of a timestamp. Every timestamp column read
+    here is timestamptz (the driver returns aware datetimes), so a naive one
+    can only come from code, which writes UTC (_utc_now /
+    datetime.now(timezone.utc)) - read naive as UTC."""
+    if not isinstance(dt, datetime):
+        return dt
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_LOCAL_TZ).date()
+
+
+def _risk_slot(db: Session):
+    """risk_slot_mapper(db), built once per request (cached on the session):
+    stored risk_level labels are compared by slot, so an admin-renamed band
+    (e.g. "Severe" as the worst one) still counts as Critical."""
+    slot = db.info.get("_ai_graph_risk_slot")
+    if slot is None:
+        slot = risk_slot_mapper(db)
+        db.info["_ai_graph_risk_slot"] = slot
+    return slot
 
 # ── Default expected life by equipment type keyword ───────────────────────────
 # Safety fallbacks only — the admin-configurable source of truth is
@@ -234,16 +273,36 @@ def _age_years(commissioned: datetime | None) -> float | None:
     now = datetime.now(timezone.utc)
     if commissioned.tzinfo is None:
         commissioned = commissioned.replace(tzinfo=timezone.utc)
-    return (now - commissioned).days / 365.25
+    # A future commissioned date (data-entry error or planned asset) is age
+    # 0, so life left never exceeds expected life.
+    return max(0.0, (now - commissioned).days / 365.25)
 
 
 def _life_left(
     commissioned: datetime | None, type_name: str | None, db: Session | None = None,
 ) -> float | None:
+    """Expected life minus age. Negative = years past expected life
+    (overdue) - it used to be clamped to 0, so an asset 7 years overdue
+    read the same "0.0 yr" as one exactly at end of life, and the fleet
+    average was inflated by counting every overdue asset as 0."""
     age = _age_years(commissioned)
     if age is None:
         return None
-    return max(0.0, _expected_life(type_name, db) - age)
+    return _expected_life(type_name, db) - age
+
+
+def _is_overdue(age: float | None, exp, ll: float | None, cfg: dict | None = None) -> bool:
+    """THE overdue rule for every card: life left < 0, i.e. age past expected
+    life. The KPI tile, the "Overdue" life bucket and the life-stage
+    "overdue" segment each used their own (round(ll,1) < 0, < 0, and
+    age/exp >= the configured cutoff) and disagreed. Rounded to 1 dp like
+    /life-left's life_left_years, so a row the table shows as "0.0 yr" isn't
+    overdue. `cfg` (AgeingConfig) is deliberately NOT consulted: its
+    life_stage_overdue cutoff no longer moves this line, only the stages
+    below it keep their configured cutoffs."""
+    if ll is None and age is not None and exp:
+        ll = exp - age
+    return ll is not None and round(ll, 1) < 0
 
 
 # ── Ageing index ──────────────────────────────────────────────────────────────
@@ -303,16 +362,23 @@ def _scoped_ea(
     the AI Analytics dashboard - no Testing Kits, no retired equipment, and
     scoped by the equipment's CURRENT department (EquipmentAnalytics'
     denormalized department_id lags behind a move until the next recompute)."""
+    q = (
+        db.query(EquipmentAnalytics)
+        .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
+    )
+    q = _equipment_scope_filter(q, dept_ids, db, organization_id, equipment_id, retired_only)
+    return q.all()
+
+
+def _equipment_scope_filter(q, dept_ids, db, organization_id, equipment_id, retired_only):
+    """The in-scope asset rules shared by _scoped_ea and _scoped_equipment
+    (q must select/join Equipment)."""
     testkit_ids = [
         c.id for c in db.query(CategoryMaster.id)
         .filter(CategoryMaster.name.ilike("%testing kit%")).all() if c.id
     ]
-    q = (
-        db.query(EquipmentAnalytics)
-        .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
-        .filter((Equipment.status == "retired") if retired_only
-                else (Equipment.status != "retired"))
-    )
+    q = q.filter((Equipment.status == "retired") if retired_only
+                 else (Equipment.status != "retired"))
     if testkit_ids:
         q = q.filter((Equipment.equipment_type_id == None)  # noqa: E711
                      | ~Equipment.equipment_type_id.in_(testkit_ids))
@@ -321,8 +387,34 @@ def _scoped_ea(
     if dept_ids is not None:
         q = q.filter(Equipment.department_id.in_(dept_ids))
     if equipment_id:
-        q = q.filter(EquipmentAnalytics.equipment_id == equipment_id)
-    return q.all()
+        q = q.filter(Equipment.id == equipment_id)
+    return q
+
+
+def _scoped_equipment(
+    dept_ids: set | None,
+    db: Session,
+    organization_id=None,
+    equipment_id: uuid.UUID | None = None,
+    retired_only: bool = False,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[Equipment]:
+    """Every in-scope asset, assessed or not (same rules as _scoped_ea minus
+    the EquipmentAnalytics join). Life left needs only commissioned date +
+    expected life, so the life numbers use this population - via _scoped_ea
+    they silently skipped every never-tested asset. A date range still
+    narrows it to equipment tested in the range (the filter every card
+    shares), which by definition drops the never-tested ones."""
+    q = _equipment_scope_filter(db.query(Equipment), dept_ids, db,
+                                organization_id, equipment_id, retired_only)
+    eqs = q.all()
+    if date_from or date_to:
+        ids, _, _ = _apply_test_date_scope(
+            [e.id for e in eqs], [], None, db, date_from, date_to)
+        keep = set(ids)
+        eqs = [e for e in eqs if e.id in keep]
+    return eqs
 
 
 def _ta_with_dates(eq_ids: list, db: Session) -> list[tuple]:
@@ -390,17 +482,13 @@ def _dt_in_range(dt: datetime | None, date_from: date | None, date_to: date | No
         return False
     if not date_from and not date_to:
         return True
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    if date_from:
-        lo = datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc)
-        if dt < lo:
-            return False
-    if date_to:
-        hi_date = date_to + timedelta(days=1)
-        hi = datetime(hi_date.year, hi_date.month, hi_date.day, tzinfo=timezone.utc)
-        if dt >= hi:
-            return False
+    # The bounds are the user's local dates: compare the timestamp's LOCAL
+    # date (UTC midnight bounds put a test at 01:30 IST on the previous day).
+    d = _local_date(dt)
+    if date_from and d < date_from:
+        return False
+    if date_to and d > date_to:
+        return False
     return True
 
 
@@ -411,7 +499,7 @@ def _trend_bucket(dt: datetime, span_days: int | None) -> tuple:
     `date` so callers can sort chronologically without re-parsing the label.
     Falls back to quarterly (the original behaviour) when there's no active
     range (span_days is None) or it's wide (>180 days)."""
-    d = dt.date() if isinstance(dt, datetime) else dt
+    d = _local_date(dt)  # bucket by local day, same as _dt_in_range
     if span_days is not None and span_days <= 31:
         return (d, d.strftime("%b %d"))
     if span_days is not None and span_days <= 180:
@@ -423,6 +511,9 @@ def _trend_bucket(dt: datetime, span_days: int | None) -> tuple:
 
 
 def _life_bucket(years: float) -> str:
+    # Past expected life: its own bucket, not lumped in with 0–5 yrs left.
+    # Same overdue rule as the KPI and life stages (_is_overdue).
+    if _is_overdue(None, None, years): return "Overdue"
     if years < 5:   return "0–5 yrs"
     if years < 10:  return "5–10 yrs"
     if years < 15:  return "10–15 yrs"
@@ -455,7 +546,10 @@ def _load_condition_bands(db: Session | None) -> list[tuple[float, str]]:
     cached = db.info.get("_ai_graph_condition_bands")
     if cached is not None:
         return cached
-    bands = _query_condition_bands(db)
+    # Savepoint-guarded like the ageing config: a missing band table falls
+    # back to the defaults instead of a 500.
+    bands = _query_or_fallback(db, lambda: _query_condition_bands(db),
+                               _DEFAULT_CONDITION_BANDS, "condition_band_thresholds")
     db.info["_ai_graph_condition_bands"] = bands
     return bands
 
@@ -501,8 +595,10 @@ def _condition_from_score_and_risk(
     risk_level of "Critical" the way _risk_from_score's critical-findings
     override does - otherwise an equipment/test with a critical finding but
     a score >=50 lands in "Poor" here while kpis.critical_count (which reads
-    risk_level directly) still counts it as critical, so the two disagree."""
-    if risk_level == "Critical":
+    risk_level directly) still counts it as critical, so the two disagree.
+    Compared by slot like critical_count, so a renamed worst band counts."""
+    slot = _risk_slot(db) if db is not None else risk_slot_mapper(None)
+    if slot(risk_level) == "Critical":
         return "Critical"
     return _condition_from_score(score, db)
 
@@ -515,9 +611,50 @@ def _normalize_0_100(values: list[float]) -> float:
     return min(100.0, round(avg, 1))
 
 
-def _param_risk_score(condition: str | None) -> float:
+_DEFAULT_PARAM_RISK = {"Good": 10.0, "Fair": 50.0, "Poor": 85.0, "Unknown": 50.0}
+
+
+def _param_risk_map(db: Session | None) -> dict:
+    """{condition: 0-100 risk} for the radar axes. From the admin-configured
+    ParameterConditionScore points (analytics_engine._load_condition_scores,
+    health points where higher = better, Poor negative) as
+    risk = 100 - clamp(points, 0, 100); the old constants when there's no
+    session or the table is missing/unseeded. Cached on the session."""
+    if db is None:
+        return _DEFAULT_PARAM_RISK
+    cached = db.info.get("_ai_graph_param_risk")
+    if cached is not None:
+        return cached
+    scores = _query_or_fallback(db, lambda: _load_condition_scores(db),
+                                None, "parameter_condition_scores")
+    risk = dict(_DEFAULT_PARAM_RISK)
+    # `is _DEFAULT_SCORE` = table unseeded (the loader's own fallback).
+    if scores and scores is not _DEFAULT_SCORE:
+        for cond, pts in scores.items():
+            risk[cond] = round(100.0 - min(100.0, max(0.0, float(pts))), 1)
+    db.info["_ai_graph_param_risk"] = risk
+    return risk
+
+
+def _param_risk_score(condition: str | None, db: Session | None = None) -> float:
     """Convert Good/Fair/Poor to a 0-100 risk number (higher = more risk)."""
-    return {"Good": 10.0, "Fair": 50.0, "Poor": 85.0, "Unknown": 50.0}.get(condition or "Unknown", 50.0)
+    return _param_risk_map(db).get(condition or "Unknown", 50.0)
+
+
+def _condition_risk_axis(rows, db: Session | None = None) -> float | None:
+    """A radar axis from ParameterAnalytics rows: mean condition risk over
+    the readings that HAVE a condition. A reading with no condition used to
+    count as "Unknown" = 50, so an axis fed only by unclassified readings
+    showed a fabricated mid-scale risk - None ("no data") instead."""
+    risks = [_param_risk_score(r.condition, db) for r in rows if r.condition]
+    return round(mean(risks), 1) if risks else None
+
+
+def _life_left_out(ll: float | None) -> float | None:
+    """Life left rounded to 1 dp for output; + 0.0 turns the -0.0 a value
+    just under zero rounds to (e.g. -0.04) into 0.0, which JSON sent as
+    "-0.0" and the app showed as "-0.0 yr"."""
+    return round(ll, 1) + 0.0 if ll is not None else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -537,7 +674,8 @@ def get_overview(
     Returns:
       kpis:
         fleet_health        — avg health score 0-100
-        avg_life_left       — avg remaining years
+        avg_life_left       — avg remaining years (negative = past expected life)
+        overdue_count       — assets past expected life
         ageing_risk_index   — 0-100 (higher = more risk) derived from trend rates
         dielectric_index    — avg health score of dielectric-category tests
 
@@ -545,6 +683,7 @@ def get_overview(
       health_trend:        [{period, avg_score, critical_count, fair_count, good_count}]
     """
     dept_scope = _enforced_department(db, user, department_id)
+    slot = _risk_slot(db)
 
     # ── Equipment analytics in scope ─────────────────────────────────────────
     ea_list: list[EquipmentAnalytics] = _scoped_ea(
@@ -585,10 +724,14 @@ def get_overview(
         return ea.risk_level if ea else None
 
     # ── Equipment register (for type name + commissioned_date) ───────────────
-    eq_q = db.query(Equipment).filter(Equipment.id.in_(eq_ids)) if eq_ids else []
-    eq_list: list[Equipment] = list(eq_q) if eq_ids else []
+    # life_eqs: every in-scope asset, assessed or not - the life KPIs below
+    # need no test. eq_list: the assessed subset, for the health numbers.
+    life_eqs: list[Equipment] = _scoped_equipment(
+        dept_scope, db, organization_id=user.organization_id,
+        equipment_id=equipment_id, date_from=date_from, date_to=date_to)
+    eq_list: list[Equipment] = [e for e in life_eqs if e.id in ea_map]
 
-    type_ids = list({e.equipment_type_id for e in eq_list if e.equipment_type_id})
+    type_ids = list({e.equipment_type_id for e in life_eqs if e.equipment_type_id})
     type_map = {
         c.id: c.name
         for c in db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
@@ -603,12 +746,16 @@ def get_overview(
     fleet_health = round(mean(scores), 1) if scores else None
 
     # ── KPI 2: Avg Life Left ─────────────────────────────────────────────────
+    # Over every in-scope asset with a commissioned date, tested or not.
     life_vals: list[float] = []
-    for eq in eq_list:
+    for eq in life_eqs:
         ll = _life_left(eq.commissioned_date, type_map.get(eq.equipment_type_id), db)
         if ll is not None:
             life_vals.append(ll)
-    avg_life_left = round(mean(life_vals), 1) if life_vals else None
+    # Overdue assets count with their negative life left (same values as
+    # /life-left's table), not as 0.
+    avg_life_left = _life_left_out(mean(life_vals)) if life_vals else None
+    overdue_count = sum(1 for v in life_vals if _is_overdue(None, None, v))
 
     # ── KPI 3: Ageing Risk Index ─────────────────────────────────────────────
     # Derived from ParameterAnalytics: mean absolute pct_change_annual across
@@ -665,10 +812,12 @@ def get_overview(
     dielectric_index = round(mean(diel_scores), 1) if diel_scores else None
 
     # ── Health distribution: condition × life-left bucket ────────────────────
-    BUCKETS = ["0–5 yrs", "5–10 yrs", "10–15 yrs", "15–20 yrs", "20–25 yrs", "25+ yrs", "Unknown"]
+    BUCKETS = ["Overdue", "0–5 yrs", "5–10 yrs", "10–15 yrs", "15–20 yrs", "20–25 yrs", "25+ yrs", "Unknown"]
     CONDITIONS = ["critical", "poor", "fair", "good", "excellent"]
     dist: dict[str, dict] = {b: {c: 0 for c in CONDITIONS} | {"unknown": 0, "total": 0} for b in BUCKETS}
 
+    # A health chart: assessed equipment only (unlike the life KPIs above),
+    # so its Overdue bucket can be below overdue_count.
     eq_by_id = {e.id: e for e in eq_list}
     for ea in ea_list:
         eq = eq_by_id.get(ea.equipment_id)
@@ -676,7 +825,7 @@ def get_overview(
                         type_map.get(eq.equipment_type_id) if eq else None, db)
         # No commissioned date = life unknown, not "25+ yrs" (which read as
         # the healthiest bucket).
-        bucket = _life_bucket(ll) if ll is not None else "Unknown"
+        bucket = _life_bucket(round(ll, 1)) if ll is not None else "Unknown"
         cond = _condition_from_score_and_risk(
             _eff_health(ea.equipment_id, ea), _eff_risk(ea.equipment_id, ea), db
         )
@@ -741,11 +890,19 @@ def get_overview(
         "kpis": {
             "fleet_health":       fleet_health,
             "avg_life_left":      avg_life_left,
+            "overdue_count":      overdue_count,
             "ageing_risk_index":  ageing_risk_index,
             "dielectric_index":   dielectric_index,
+            # ASSESSED equipment (has an analytics row; with a date range, a
+            # test in it) - the denominator of the client's "critical share
+            # of assessed assets", not the life KPIs' population.
             "equipment_count":    len(eq_ids),
-            "critical_count":     sum(1 for ea in ea_list if _eff_risk(ea.equipment_id, ea) == "Critical"),
-            "high_count":         sum(1 for ea in ea_list if _eff_risk(ea.equipment_id, ea) == "High"),
+            # Assets with a Critical/High/Medium/Low risk (by slot) - the
+            # client's denominator for the critical share; equipment_count
+            # also counts assessed assets whose risk is Unknown / unscored.
+            "assessed_count":     sum(1 for ea in ea_list if slot(_eff_risk(ea.equipment_id, ea)) in RISK_SLOTS),
+            "critical_count":     sum(1 for ea in ea_list if slot(_eff_risk(ea.equipment_id, ea)) == "Critical"),
+            "high_count":         sum(1 for ea in ea_list if slot(_eff_risk(ea.equipment_id, ea)) == "High"),
         },
         "health_distribution": health_distribution,
         "health_trend":        health_trend,
@@ -777,9 +934,14 @@ def get_life_left(
     eq_ids, ea_list, ea_map = _apply_test_date_scope(
         eq_ids, ea_list, ea_map, db, date_from, date_to)
 
-    eq_list: list[Equipment] = db.query(Equipment).filter(
-        Equipment.id.in_(eq_ids)
-    ).all() if eq_ids else []
+    # Rows: every assessed asset (life unknown without a commissioned date,
+    # sorted last) plus every never-tested one that has a commissioned date
+    # - life left needs no test, and the table used to omit those entirely.
+    eq_list: list[Equipment] = [
+        e for e in _scoped_equipment(dept_scope, db, organization_id=user.organization_id,
+                                     date_from=date_from, date_to=date_to)
+        if e.id in ea_map or e.commissioned_date is not None
+    ]
 
     type_ids = list({e.equipment_type_id for e in eq_list if e.equipment_type_id})
     type_map = {
@@ -803,12 +965,16 @@ def get_life_left(
                 best[ta.equipment_id] = (ta, eff_date)
         latest_ta_map = {k: v[0] for k, v in best.items()}
 
+    _by_finding = risk_by_finding_checker(db)
     assets = []
     for eq in eq_list:
         ea = ea_map.get(eq.id)
+        assessed = ea is not None
         src = latest_ta_map.get(eq.id) if _date_active else ea
         score = float(src.health_score) if src is not None and src.health_score is not None else None
-        risk = (src.risk_level if src is not None else None) or "Unknown"
+        # Never tested: no health/risk at all (null + "Not assessed"), not
+        # the "Unknown" an assessed row with a missing value gets.
+        risk = ((src.risk_level if src is not None else None) or "Unknown") if assessed else None
         type_name = type_map.get(eq.equipment_type_id)
         age = _age_years(eq.commissioned_date)
         exp_life = _expected_life(type_name, db)
@@ -821,10 +987,13 @@ def get_life_left(
             "commissioned_year":  eq.commissioned_date.year if eq.commissioned_date else None,
             "age_years":          round(age, 1) if age is not None else None,
             "expected_life":      exp_life,
-            "life_left_years":    round(ll, 1) if ll is not None else None,
+            "life_left_years":    _life_left_out(ll),
             "health_score":       score,
-            "condition":          _condition_from_score_and_risk(score, risk, db),
+            "condition":          _condition_from_score_and_risk(score, risk, db)
+                                  if assessed else "Not assessed",
             "risk_level":         risk,
+            # Worst band only because of a CRITICAL finding, not the score.
+            "risk_by_finding":    _by_finding(score, risk),
             # For the row's actions menu ("Why Critical?" / "Why At Risk?").
             "critical_findings":  (src.critical_findings or []) if src is not None else [],
         })
@@ -855,8 +1024,10 @@ def get_life_left(
             tested_at = tested_at.replace(tzinfo=timezone.utc)
         if comm.tzinfo is None:
             comm = comm.replace(tzinfo=timezone.utc)
-        age_at = (tested_at - comm).days / 365.25
-        ll_at = max(0.0, _expected_life(tname, db) - age_at)
+        # Age clamped at 0 like _age_years (test before commissioning).
+        age_at = max(0.0, (tested_at - comm).days / 365.25)
+        # Unclamped like _life_left: overdue at test time is negative.
+        ll_at = _expected_life(tname, db) - age_at
         sort_key, q_key = _trend_bucket(tested_at, span_days)
         bucket_sort_key[q_key] = sort_key
         quarter_life.setdefault(q_key, []).append(ll_at)
@@ -864,7 +1035,7 @@ def get_life_left(
     life_trend = [
         {
             "period":        period,
-            "avg_life_left": round(mean(vals), 1),
+            "avg_life_left": _life_left_out(mean(vals)),
         }
         for period, vals in sorted(
             quarter_life.items(),
@@ -923,7 +1094,12 @@ def get_ageing(
         eq_ids, ea_list, ea_map, db, date_from, date_to)
 
     eq_list = db.query(Equipment).filter(Equipment.id.in_(eq_ids)).all() if eq_ids else []
-    type_ids = list({e.equipment_type_id for e in eq_list if e.equipment_type_id})
+    # life_eqs: every in-scope asset, assessed or not - same population as
+    # /overview's avg_life_left / overdue_count (life left needs no test).
+    life_eqs: list[Equipment] = _scoped_equipment(
+        dept_scope, db, organization_id=user.organization_id,
+        equipment_id=equipment_id, date_from=date_from, date_to=date_to)
+    type_ids = list({e.equipment_type_id for e in eq_list + life_eqs if e.equipment_type_id})
     type_map = {
         c.id: c.name
         for c in db.query(CategoryMaster).filter(CategoryMaster.id.in_(type_ids)).all()
@@ -957,22 +1133,26 @@ def get_ageing(
     # Volatility: spread of the (capped) annual % changes, 0-100
     volatility = round(min(100.0, stdev(all_pct)), 1) if len(all_pct) >= 2 else None
 
-    # Life left risk: 100 = no life left, 0 = full life remaining
+    # Life left risk: 100 = no life left, 0 = full life remaining. Over every
+    # in-scope asset with a commissioned date, like the life KPIs - not only
+    # the assessed ones the parameter axes are limited to.
     life_vals = []
-    for eq in eq_list:
+    for eq in life_eqs:
         ll = _life_left(eq.commissioned_date, type_map.get(eq.equipment_type_id), db)
         exp = _expected_life(type_map.get(eq.equipment_type_id), db)
-        if ll is not None:
-            life_vals.append(max(0.0, 100.0 * (1 - ll / exp)))
+        # Share of expected life used, 0-100: past expected life (ll < 0)
+        # is 100, not >100 - the cap _life_left's old 0-clamp used to imply.
+        if ll is not None and exp:
+            life_vals.append(min(100.0, max(0.0, 100.0 * (1 - ll / exp))))
     life_left_risk = round(mean(life_vals), 1) if life_vals else None
 
     # Thermal stress: avg condition risk score for thermal params
     thermal_pa = [r for r in pa_rows if _match(r.parameter_label or r.parameter_key, _AGEING_AXES["thermal_stress"])]
-    thermal_stress = round(mean([_param_risk_score(r.condition) for r in thermal_pa]), 1) if thermal_pa else None
+    thermal_stress = _condition_risk_axis(thermal_pa, db)
 
     # Load factor: avg condition risk score for load params
     load_pa = [r for r in pa_rows if _match(r.parameter_label or r.parameter_key, _AGEING_AXES["load_factor"])]
-    load_factor = round(mean([_param_risk_score(r.condition) for r in load_pa]), 1) if load_pa else None
+    load_factor = _condition_risk_axis(load_pa, db)
 
     fleet_radar = {
         "aging_rate":     aging_rate,
@@ -1111,12 +1291,9 @@ def get_dielectric(
     for axis, keys in _DIEL_AXIS_KEYS.items():
         matched = [r for r in pa_rows
                    if _match(r.parameter_label or r.parameter_key, keys)]
-        if matched:
-            radar_fleet[axis] = round(mean([_param_risk_score(r.condition) for r in matched]), 1)
-        else:
-            # No readings for this axis: null ("no data"), not 0 - a 0 read
-            # as "no risk" on the radar.
-            radar_fleet[axis] = None
+        # No classified readings for this axis: null ("no data"), not 0 - a
+        # 0 read as "no risk" on the radar (nor 50 for unclassified ones).
+        radar_fleet[axis] = _condition_risk_axis(matched, db)
 
     radar_limit = {k: 100.0 for k in _DIEL_AXIS_KEYS}
 
@@ -1218,27 +1395,17 @@ def get_grouped(
     if group_by != "year_failure":
         eq_ids, ea_list, ea_map = _apply_test_date_scope(
             eq_ids, ea_list, ea_map, db, date_from, date_to)
-    if group_by == "year_failure" and not equipment_id:
-        # Every retired unit counts toward its failure year, assessed or not
-        # (AI Analytics' by_failure_year counts them all) - _scoped_ea only
-        # returns equipment with an analytics row, so add the rest here
-        # (they land in the group's count as unscored).
-        _have = set(eq_ids)
-        _testkit_ids = [c.id for c in db.query(CategoryMaster.id)
-                        .filter(CategoryMaster.name.ilike("%testing kit%")).all() if c.id]
-        _rq = db.query(Equipment.id).filter(Equipment.status == "retired")
-        if user.organization_id:
-            _rq = _rq.filter(Equipment.organization_id == user.organization_id)
-        if dept_scope is not None:
-            _rq = _rq.filter(Equipment.department_id.in_(dept_scope))
-        if _testkit_ids:
-            _rq = _rq.filter((Equipment.equipment_type_id == None)  # noqa: E711
-                             | ~Equipment.equipment_type_id.in_(_testkit_ids))
-        eq_ids = eq_ids + [r[0] for r in _rq.all() if r[0] not in _have]
-
-    eq_list: list[Equipment] = db.query(Equipment).filter(
-        Equipment.id.in_(eq_ids)
-    ).all() if eq_ids else []
+    # Every in-scope unit counts toward its group, assessed or not: unscored
+    # ones land in "count" only, but their commissioned date still feeds
+    # avg_life_left / avg_age_years / the life stages (life needs no test;
+    # via _scoped_ea alone never-tested assets were missing from them). Year
+    # of failure: every retired unit (as AI Analytics' by_failure_year).
+    eq_list: list[Equipment] = _scoped_equipment(
+        dept_scope, db, organization_id=user.organization_id, equipment_id=equipment_id,
+        retired_only=(group_by == "year_failure"),
+        date_from=None if group_by == "year_failure" else date_from,
+        date_to=None if group_by == "year_failure" else date_to)
+    eq_ids = [e.id for e in eq_list]
     if group_by == "year_replaced":
         # Same definition as the AI Analytics dashboard's by_replacement_year:
         # the REPLACEMENT unit (replaces_equipment_id set), bucketed by its
@@ -1331,11 +1498,15 @@ def get_grouped(
     group_age_risk: dict[str, dict] = defaultdict(lambda: {
         "overdue": 0, "near_end": 0, "mid_life": 0, "early": 0
     })
-    # Admin-configured age/expected_life cutoffs (AgeingConfig.life_stage_*).
-    life_stage_cutoffs = dict(_load_ageing_config(db)["life_stage_cutoffs"])
+    # Admin-configured age/expected_life cutoffs (AgeingConfig.life_stage_*)
+    # for the stages below overdue. Overdue itself is _is_overdue (life left
+    # < 0, = age/exp > 1.0), the same rule as the KPI tile and the life-left
+    # table, so the reported "overdue" cutoff is the 1.0 actually applied.
+    _ageing_cfg = _load_ageing_config(db)
+    life_stage_cutoffs = dict(_ageing_cfg["life_stage_cutoffs"])
+    life_stage_cutoffs["overdue"] = 1.0
     _ls_mid = life_stage_cutoffs["mid"]
     _ls_near_end = life_stage_cutoffs["near_end"]
-    _ls_overdue = life_stage_cutoffs["overdue"]
 
     # Every in-scope equipment of the group, scored or not - "count" must
     # include unscored units (previously len(scores) or len(lives) or
@@ -1372,7 +1543,7 @@ def get_grouped(
         if age is not None:
             group_age[label].append(age)
             pct = age / exp if exp else 0
-            if pct >= _ls_overdue:
+            if _is_overdue(age, exp, ll, _ageing_cfg):
                 group_age_risk[label]["overdue"] += 1
             elif pct >= _ls_near_end:
                 group_age_risk[label]["near_end"] += 1
@@ -1395,7 +1566,7 @@ def get_grouped(
             "label":         label,
             "count":         group_members[label],
             "avg_health":    round(mean(scores), 1) if scores else None,
-            "avg_life_left": round(mean(lives),  1) if lives  else None,
+            "avg_life_left": _life_left_out(mean(lives)) if lives else None,
             "avg_age_years": round(mean(ages),   1) if ages   else None,
             "critical":      conds.get("critical", 0),
             "poor":          conds.get("poor",     0),
