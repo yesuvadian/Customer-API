@@ -21,7 +21,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from database import VendorSessionLocal  # noqa: E402
-from models import CategoryMaster, Equipment, EquipmentAnalytics, User  # noqa: E402
+from models import (  # noqa: E402
+    OUT_OF_SERVICE_EQUIPMENT_STATUSES, CategoryMaster, Equipment, EquipmentAnalytics, User,
+)
 from routers import ai_graph as G  # noqa: E402
 from services import analytics_engine as AE  # noqa: E402
 from auth_utils import has_org_admin_role  # noqa: E402
@@ -128,7 +130,7 @@ def test_critical_count_matches_slot_count(db, org_admin):
     q = (db.query(EquipmentAnalytics.risk_level)
          .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
          .filter(Equipment.organization_id == org_admin.organization_id,
-                 Equipment.status != "retired"))
+                 ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES)))
     if testkit:
         q = q.filter((Equipment.equipment_type_id == None)  # noqa: E711
                      | ~Equipment.equipment_type_id.in_(testkit))
@@ -138,6 +140,24 @@ def test_critical_count_matches_slot_count(db, org_admin):
     assert kpis["critical_count"] == sum(1 for l in levels if slot(l) == "Critical")
     assert kpis["high_count"] == sum(1 for l in levels if slot(l) == "High")
     assert kpis["equipment_count"] == len(levels)
+
+
+def test_condemned_equipment_leaves_ai_graph(db, org_admin):
+    """Out of service is every OUT_OF_SERVICE_EQUIPMENT_STATUSES status, not
+    only "retired" - a condemned unit leaves the asset count as on AI
+    Analytics."""
+    ea = (db.query(EquipmentAnalytics)
+          .join(Equipment, Equipment.id == EquipmentAnalytics.equipment_id)
+          .filter(Equipment.organization_id == org_admin.organization_id,
+                  ~Equipment.status.in_(OUT_OF_SERVICE_EQUIPMENT_STATUSES))
+          .first())
+    if not ea:
+        pytest.skip("no in-service equipment analytics")
+    before = call(G.get_overview, db=db, user=org_admin)["kpis"]["equipment_count"]
+    db.get(Equipment, ea.equipment_id).status = "condemned"
+    db.flush()
+    after = call(G.get_overview, db=db, user=org_admin)["kpis"]["equipment_count"]
+    assert after == before - 1
 
 
 def test_risk_slot_mapper_renamed_label(monkeypatch):

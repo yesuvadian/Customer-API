@@ -806,13 +806,17 @@ def get_threshold_status(
             and request.organization_id
             and request.organization_id != current_user.organization_id):
         raise HTTPException(status_code=404, detail="Testing request not found")
-    requires = EvaluationService.requires_thresholds(request)
     tpl = EvaluationService.get_template_data(
         template_key, db, org_id=request.organization_id) or {}
+    # Same inputs evaluate_test_data gets on submit (testing_service), so the
+    # notice always matches what the evaluation will actually do.
+    requires = EvaluationService.requires_thresholds(
+        tpl, EvaluationService.is_equipment_test_request(request))
     has = EvaluationService.has_threshold_values(tpl)
     return {
         "requires_thresholds": requires,
         "has_threshold_values": has,
+        # True = no thresholds on an equipment test (the form shows a notice).
         "verdict_decides": requires and not has,
     }
 
