@@ -24,6 +24,7 @@ Trigger flow:
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from statistics import mean, stdev
@@ -46,6 +47,28 @@ from models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _finite_float(raw) -> float:
+    """float(raw), but ValueError for NaN/±inf as well as non-numbers.
+    Plain float() accepts the strings "nan", "inf" and "1e999" a tester can
+    type into a reading; persisted, they poison every slope/mean computed
+    from that parameter and make the dashboards' JSON responses fail."""
+    val = float(raw)
+    if not math.isfinite(val):
+        raise ValueError(f"non-finite reading: {raw!r}")
+    return val
+
+
+def _field_weight(ev: dict) -> float:
+    """A template field's scoring weight: 1.0 when absent, non-numeric,
+    non-finite or negative (a negative weight would invert the field's
+    effect on the health score); 0 is kept - it excludes the field."""
+    try:
+        w = _finite_float(ev.get("weight", 1.0))
+    except (ValueError, TypeError):
+        return 1.0
+    return w if w >= 0 else 1.0
 
 # ── Status / condition constants ───────────────────────────────────────────────
 # Single source for the fixed NORMAL/ALERT/CRITICAL vocabulary — previously
@@ -889,7 +912,7 @@ class HealthScorer:
                 or field.get("date_evaluation")
                 or {}
             )
-            weight    = float(ev.get("weight", 1.0))
+            weight    = _field_weight(ev)
             # Fall back to the hardcoded defaults (not a blanket "Poor"/0.0)
             # when a status/condition is missing from the admin-configured
             # maps - e.g. because that row was deactivated rather than
@@ -1379,7 +1402,7 @@ class AnalyticsEngine:
                     if raw is None or raw == "":
                         continue
                     try:
-                        current_val = float(raw)
+                        current_val = _finite_float(raw)
                     except (ValueError, TypeError):
                         continue
 
@@ -1486,7 +1509,7 @@ class AnalyticsEngine:
                                     continue
                                 row_unit = row.get("unit") or None
                                 try:
-                                    rows_to_track.append((row_id, float(raw), row_idx, row_unit, None))
+                                    rows_to_track.append((row_id, _finite_float(raw), row_idx, row_unit, None))
                                 except (ValueError, TypeError):
                                     if col_ev:
                                         rows_to_track.append((row_id, None, row_idx, row_unit, str(raw)))
@@ -1498,7 +1521,7 @@ class AnalyticsEngine:
                                     continue
                                 row_unit = row.get("unit") or None
                                 try:
-                                    rows_to_track.append((str(row_idx), float(raw), row_idx, row_unit, None))
+                                    rows_to_track.append((str(row_idx), _finite_float(raw), row_idx, row_unit, None))
                                 except (ValueError, TypeError):
                                     if col_ev:
                                         rows_to_track.append((str(row_idx), None, row_idx, row_unit, str(raw)))
@@ -1950,7 +1973,7 @@ class AnalyticsEngine:
                 if raw is None or raw == "":
                     continue
                 try:
-                    val = float(raw)
+                    val = _finite_float(raw)
                     history_map.setdefault(key, []).append((dt, val))
                     continue
                 except (ValueError, TypeError):
@@ -1986,7 +2009,7 @@ class AnalyticsEngine:
                                 continue
                             composite = f"{key}.{row_id}.{col_key}"
                             try:
-                                fval = float(col_val)
+                                fval = _finite_float(col_val)
                                 history_map.setdefault(composite, []).append((dt, fval))
                             except (ValueError, TypeError):
                                 # Non-numeric cell (e.g. "Pass"/"Fail") — keep

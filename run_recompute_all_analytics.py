@@ -45,7 +45,11 @@ def run_recompute_all():
 
         engine = AnalyticsEngine(db)
         done, failed = 0, 0
+        # Each row in its own SAVEPOINT, like the API's recompute job: one DB
+        # error used to poison the session for every later row, and the
+        # failed row's partial re-evaluation was committed at the end.
         for tr in results:
+            sp = db.begin_nested()
             try:
                 # Same evaluation as submission; a CRITICAL result also
                 # becomes overall_result "fail" (no CAR / notification).
@@ -53,8 +57,10 @@ def run_recompute_all():
                 db.flush()
 
                 engine.run_for_test(tr.id)
+                sp.commit()
                 done += 1
             except Exception as exc:
+                sp.rollback()
                 failed += 1
                 print(f"  FAILED for test_result {tr.id}: {exc}")
         # Second pass: re-aggregate EVERY equipment that has a health row.
@@ -66,9 +72,12 @@ def run_recompute_all():
         from models import EquipmentAnalytics
         eq_ids = [row[0] for row in db.query(EquipmentAnalytics.equipment_id).all()]
         for eq_id in eq_ids:
+            sp = db.begin_nested()
             try:
                 engine.run_for_equipment(eq_id)
+                sp.commit()
             except Exception as exc:
+                sp.rollback()
                 failed += 1
                 print(f"  FAILED equipment re-aggregation {eq_id}: {exc}")
         db.commit()

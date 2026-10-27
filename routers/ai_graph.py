@@ -27,7 +27,8 @@ from statistics import mean, stdev
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Query
+import math
+from fastapi import APIRouter, Depends, HTTPException, Query
 import re
 
 from sqlalchemy import func
@@ -109,6 +110,27 @@ try:
     _LOCAL_TZ = ZoneInfo("Asia/Kolkata")
 except ZoneInfoNotFoundError:  # pragma: no cover - host without tzdata
     _LOCAL_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def _check_date_range(date_from: date | None, date_to: date | None) -> None:
+    """422 for a reversed range: it used to match no tests at all (every
+    card silently empty) and gave _trend_bucket a negative span."""
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must be on or before date_to")
+
+
+def _num(v) -> float | None:
+    """A stored numeric column as float, None when NULL or non-finite. Rows
+    written before the engine rejected NaN/inf readings can still hold them,
+    and one NaN fails the whole JSON response (and mean() of the card).
+    Also None for a non-number (test_type_scores is free-form JSONB)."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
 
 def _local_date(dt: datetime | date) -> date:
@@ -313,7 +335,7 @@ def _ageing_index(pct_changes) -> float | None:
     capped at 100%. The old min(100, mean(|pct|) x 2) was pinned at 100 -
     annual % changes are extremely heavy-tailed (a near-zero baseline gives
     thousands of %), so a handful of readings saturated the whole fleet."""
-    vals = [min(100.0, abs(float(v))) for v in pct_changes if v is not None]
+    vals = [min(100.0, abs(f)) for v in pct_changes if (f := _num(v)) is not None]
     return round(mean(vals), 1) if vals else None
 
 
@@ -685,6 +707,7 @@ def get_overview(
       health_distribution: [{bucket, critical, poor, fair, good, excellent, total}]
       health_trend:        [{period, avg_score, critical_count, fair_count, good_count}]
     """
+    _check_date_range(date_from, date_to)
     dept_scope = _enforced_department(db, user, department_id)
     slot = _risk_slot(db)
 
@@ -717,8 +740,8 @@ def get_overview(
     def _eff_health(eq_id, ea) -> float | None:
         if _date_active:
             ta = latest_ta_map.get(eq_id)
-            return float(ta.health_score) if ta and ta.health_score is not None else None
-        return float(ea.health_score) if ea and ea.health_score is not None else None
+            return _num(ta.health_score) if ta else None
+        return _num(ea.health_score) if ea else None
 
     def _eff_risk(eq_id, ea) -> str | None:
         if _date_active:
@@ -777,10 +800,10 @@ def get_overview(
             r.id: (r.tested_at or r.cts)
             for r in db.query(TestResult).filter(TestResult.id.in_(_age_result_ids)).all()
         } if _age_result_ids else {}
-        pct_changes = [float(r[0]) for r in pa_age_rows
+        pct_changes = [r[0] for r in pa_age_rows
                        if _dt_in_range(_age_tr_date_map.get(r[1]), date_from, date_to)]
     else:
-        pct_changes = [float(r[0]) for r in pa_age_rows]
+        pct_changes = [r[0] for r in pa_age_rows]
     ageing_risk_index = _ageing_index(pct_changes)
 
     # ── KPI 4: Dielectric Index ──────────────────────────────────────────────
@@ -803,15 +826,15 @@ def get_overview(
             cur = _diel_best.get(key)
             if cur is None or eff_date > cur[1]:
                 _diel_best[key] = (ta, eff_date)
-        diel_scores = [float(ta.health_score) for ta, _d in _diel_best.values()
-                       if ta.health_score is not None]
+        diel_scores = [s for ta, _d in _diel_best.values()
+                       if (s := _num(ta.health_score)) is not None]
     else:
         for ea in ea_list:
             for tkey, tval in (ea.test_type_scores or {}).items():
                 if any(k in tkey.lower() for k in _DIEL_KEYS):
-                    s = tval.get("score")
+                    s = _num(tval.get("score")) if isinstance(tval, dict) else None
                     if s is not None:
-                        diel_scores.append(float(s))
+                        diel_scores.append(s)
     dielectric_index = round(mean(diel_scores), 1) if diel_scores else None
 
     # ── Health distribution: condition × life-left bucket ────────────────────
@@ -850,7 +873,7 @@ def get_overview(
     # — TestAnalytics.tested_at itself is not a reliable test date).
     ta_rows = [
         (ta, eff_date) for ta, eff_date in _ta_dated
-        if ta.health_score is not None and _dt_in_range(eff_date, date_from, date_to)
+        if _num(ta.health_score) is not None and _dt_in_range(eff_date, date_from, date_to)
     ]
     ta_rows.sort(key=lambda pair: pair[1])
 
@@ -866,9 +889,9 @@ def get_overview(
             dt = dt.replace(tzinfo=timezone.utc)
         sort_key, q_key = _trend_bucket(dt, span_days)
         bucket_sort_key[q_key] = sort_key
-        quarter_buckets.setdefault(q_key, []).append(float(ta.health_score))
+        quarter_buckets.setdefault(q_key, []).append(_num(ta.health_score))
         qc = quarter_conditions.setdefault(q_key, {"critical": 0, "fair": 0, "good": 0})
-        cond = _condition_from_score_and_risk(float(ta.health_score), ta.risk_level, db)
+        cond = _condition_from_score_and_risk(_num(ta.health_score), ta.risk_level, db)
         if cond in ("Critical", "Poor"):
             qc["critical"] += 1
         elif cond == "Fair":
@@ -930,6 +953,7 @@ def get_life_left(
                 expected_life, condition, health_score, commissioned_year}]
       life_trend: [{period, avg_life_left}]  -- quarterly snapshot from TestAnalytics
     """
+    _check_date_range(date_from, date_to)
     dept_scope = _enforced_department(db, user, department_id)
     ea_list = _scoped_ea(dept_scope, db, organization_id=user.organization_id)
     eq_ids = [ea.equipment_id for ea in ea_list]
@@ -974,7 +998,7 @@ def get_life_left(
         ea = ea_map.get(eq.id)
         assessed = ea is not None
         src = latest_ta_map.get(eq.id) if _date_active else ea
-        score = float(src.health_score) if src is not None and src.health_score is not None else None
+        score = _num(src.health_score) if src is not None else None
         # Never tested: no health/risk at all (null + "Not assessed"), not
         # the "Unknown" an assessed row with a missing value gets.
         risk = ((src.risk_level if src is not None else None) or "Unknown") if assessed else None
@@ -1088,6 +1112,7 @@ def get_ageing(
       asset_scores: [{ueic, ageing_index}]  -- per-asset ageing risk 0-100
       dp_trend: [{ueic, tested_at, value, unit, condition}]  -- DP history across fleet
     """
+    _check_date_range(date_from, date_to)
     dept_scope = _enforced_department(db, user, department_id)
     ea_list = _scoped_ea(
         dept_scope, db, organization_id=user.organization_id, equipment_id=equipment_id)
@@ -1129,8 +1154,8 @@ def get_ageing(
     _match = _kw_match
 
     # Aging rate: avg abs pct_change_annual across all params
-    all_pct = [min(100.0, abs(float(r.pct_change_annual))) for r in pa_rows
-               if r.pct_change_annual is not None]
+    all_pct = [min(100.0, abs(f)) for r in pa_rows
+               if (f := _num(r.pct_change_annual)) is not None]
     aging_rate = _ageing_index(all_pct)  # same formula as the KPI tile
 
     # Volatility: spread of the (capped) annual % changes, 0-100
@@ -1171,8 +1196,9 @@ def get_ageing(
     eq_label_map = {e.id: e.ueic for e in eq_list}
     asset_pct: dict = {}
     for r in pa_rows:
-        if r.pct_change_annual is not None:
-            asset_pct.setdefault(r.equipment_id, []).append(abs(float(r.pct_change_annual)))
+        f = _num(r.pct_change_annual)
+        if f is not None:
+            asset_pct.setdefault(r.equipment_id, []).append(abs(f))
 
     asset_scores = []
     for eq_id, pcts in asset_pct.items():
@@ -1195,7 +1221,7 @@ def get_ageing(
                 "ueic":         eq_label_map.get(r.equipment_id, str(r.equipment_id)),
                 "tested_at":    tr_date_map[r.test_result_id].isoformat()
                                 if tr_date_map.get(r.test_result_id) else None,
-                "value":        float(r.current_value) if r.current_value is not None else None,
+                "value":        _num(r.current_value),
                 "unit":         r.unit,
                 "condition":    r.condition,
                 "days_to_breach": r.days_to_breach,
@@ -1260,6 +1286,7 @@ def get_dielectric(
         dga:       [{equipment_id, ueic, parameter_label, tested_at, value, unit, condition}]
         bdv:       [{equipment_id, ueic, tested_at, value, unit, condition}]
     """
+    _check_date_range(date_from, date_to)
     dept_scope = _enforced_department(db, user, department_id)
     ea_list = _scoped_ea(
         dept_scope, db, organization_id=user.organization_id, equipment_id=equipment_id)
@@ -1312,11 +1339,11 @@ def get_dielectric(
                     "ueic":           eq_label_map.get(r.equipment_id, str(r.equipment_id)),
                     "parameter_label":r.parameter_label or r.parameter_key,
                     "tested_at":      tr_date_map[r.test_result_id].isoformat(),
-                    "value":          float(r.current_value) if r.current_value is not None else None,
+                    "value":          _num(r.current_value),
                     "unit":           r.unit,
                     "condition":      r.condition,
                     "trend":          r.trend,
-                    "annual_change":  float(r.annual_change) if r.annual_change is not None else None,
+                    "annual_change":  _num(r.annual_change),
                     "is_anomaly":     r.is_anomaly,
                 }
                 for r in matched
@@ -1381,9 +1408,13 @@ def get_grouped(
       groups:    [{label, count, avg_health, critical, poor, fair, good, excellent, avg_life_left}]
                  sorted by count desc
     """
+    _check_date_range(date_from, date_to)
     dept_scope = _enforced_department(db, user, department_id)
+    # An unknown dimension used to fall back to equipment_type silently, so
+    # the response's group_by contradicted what the client asked for.
     if group_by not in _VALID_GROUP_BY:
-        group_by = "equipment_type"
+        raise HTTPException(status_code=422, detail=(
+            f"group_by must be one of: {', '.join(sorted(_VALID_GROUP_BY))}"))
 
     # Year of failure is about retired equipment only (same as the AI
     # Analytics dashboard's by_failure_year); every other view is in-service.
@@ -1437,8 +1468,8 @@ def get_grouped(
     def _eff_health(eq_id, ea) -> float | None:
         if _date_active:
             ta = latest_ta_map.get(eq_id)
-            return float(ta.health_score) if ta and ta.health_score is not None else None
-        return float(ea.health_score) if ea and ea.health_score is not None else None
+            return _num(ta.health_score) if ta else None
+        return _num(ea.health_score) if ea else None
 
     def _eff_risk(eq_id, ea) -> str | None:
         if _date_active:
