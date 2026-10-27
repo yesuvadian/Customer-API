@@ -343,9 +343,14 @@ class TestingService:
                 )
             # A role with Act as Tester on the request's workflow may submit
             # on behalf of the assigned tester (same rule as the stage gate).
-            from middleware.auth_privilege import user_is_tester_delegate
-            if (str(request.assigned_tester_id) != str(tester_id)
-                    and not user_is_tester_delegate(self.db, request.id, tester_id)):
+            if str(request.assigned_tester_id) != str(tester_id):
+                from models import User
+                from services.tr_wf_access import user_is_tester_delegate
+                tester = self.db.query(User).filter(User.id == tester_id).first()
+                may_submit = bool(tester) and user_is_tester_delegate(self.db, request, tester)
+            else:
+                may_submit = True
+            if not may_submit:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only the assigned tester can submit results",

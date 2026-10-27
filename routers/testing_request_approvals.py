@@ -24,45 +24,9 @@ from schemas import (
 from auth_utils import get_current_user
 from services.testing_request_workflow_service import TestingRequestWorkflowService
 from services.testing_request_pdf_service import TestingRequestPDFService
-from utils.common_service import get_dept_subtree_ids as _get_dept_subtree_ids
+from services.tr_wf_access import caller_dept_ids as _caller_dept_ids, is_tester_delegate
 
 router = APIRouter(prefix="/testing-requests/approvals", tags=["Testing Request Approvals"])
-
-
-def _caller_dept_ids(db: Session, user) -> list:
-    """
-    Return the department subtree IDs visible to this user.
-
-    Strategy: use the department_id from the caller's OrgUserRole assignments
-    (role scoped at a specific department). Falls back to user.department_id.
-    All matching departments and their descendants are included so that a
-    manager at dept X can see all requests / testers under X.
-    """
-    from models import OrgUserRole as _OUR
-    dept_ids_raw = (
-        db.query(_OUR.department_id)
-        .filter(
-            _OUR.user_id == user.id,
-            _OUR.is_active.is_(True),
-            _OUR.department_id.isnot(None),
-        )
-        .distinct()
-        .all()
-    )
-    root_ids = [r[0] for r in dept_ids_raw]
-    if not root_ids and user.department_id:
-        root_ids = [user.department_id]
-    if not root_ids:
-        return []
-    # Expand each root to its full subtree
-    result = []
-    seen = set()
-    for root in root_ids:
-        for did in _get_dept_subtree_ids(db, root):
-            if did not in seen:
-                seen.add(did)
-                result.append(did)
-    return result
 
 
 def _enrich(req):
@@ -831,15 +795,17 @@ def tr_wf_get_pending_queue(
             return True
 
         # 2) If this stage instance is assigned to a specific user, the
-        # assigned user always sees it. Callers whose role has
-        # can_act_as_tester on ANY stage of this workflow definition also
-        # see it — they can execute on behalf of the assigned tester,
-        # regardless of which stage their own act_as_tester flag happens to
-        # be configured on.
+        # assigned user always sees it. Tester delegates (can_act_as_tester
+        # on ANY stage of this workflow definition) also see it when it is
+        # the assigned tester's stage — they can execute on their behalf.
+        # Same helper the stage gate and submit_test_results use, so a
+        # request shown here can also be filled in and submitted.
         if active_si and active_si.assigned_user_id:
             if str(active_si.assigned_user_id) == str(current_user.id):
                 return True
-            if str(inst.wf_definition_id) in tester_def_ids:
+            if (str(inst.wf_definition_id) in tester_def_ids
+                    and is_tester_delegate(db, inst, inst.testing_request,
+                                           caller_role_ids, caller_dept_ids)):
                 return True
 
         # Role scoping — rules are shared definitions; each stage evaluates
