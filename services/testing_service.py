@@ -341,7 +341,11 @@ class TestingService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Only in-progress or test_submitted requests can have results submitted",
                 )
-            if str(request.assigned_tester_id) != str(tester_id):
+            # A role with Act as Tester on the request's workflow may submit
+            # on behalf of the assigned tester (same rule as the stage gate).
+            from middleware.auth_privilege import user_is_tester_delegate
+            if (str(request.assigned_tester_id) != str(tester_id)
+                    and not user_is_tester_delegate(self.db, request.id, tester_id)):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only the assigned tester can submit results",

@@ -87,6 +87,61 @@ def _assigned_current_stage(db, instance, user_id):
     )
 
 
+def is_tester_delegate(db, instance, org_role_ids):
+    """True if the instance's current stage is assigned to a specific tester
+    and one of org_role_ids has can_act_as_tester on ANY stage of the same
+    workflow definition — such a role may execute on behalf of the assigned
+    tester. This is the rule the TR Approval Queue already uses to list the
+    request and offer Fill Result (_caller_sees_instance in
+    routers/testing_request_approvals.py); without it here the delegate saw
+    the form but every upload / save / submit got a 403."""
+    if not org_role_ids or not instance.wf_definition_id:
+        return False
+    assigned = (
+        db.query(TrWfStageInstance.id)
+        .filter(
+            TrWfStageInstance.wf_instance_id == instance.id,
+            TrWfStageInstance.stage_id == instance.current_stage_id,
+            TrWfStageInstance.status.notin_(("completed", "rejected")),
+            TrWfStageInstance.assigned_user_id.isnot(None),
+        )
+        .first()
+    )
+    if not assigned:
+        return False
+    return (
+        db.query(TrWfStageRole.id)
+        .join(TrWfStage, TrWfStage.id == TrWfStageRole.stage_id)
+        .filter(
+            TrWfStage.wf_definition_id == instance.wf_definition_id,
+            TrWfStageRole.role_id.in_(org_role_ids),
+            TrWfStageRole.can_act_as_tester == True,
+        )
+        .first()
+        is not None
+    )
+
+
+def user_is_tester_delegate(db, testing_request_id, user_id):
+    """is_tester_delegate for a user, resolving their active org roles and
+    the request's active workflow instance."""
+    instance = (
+        db.query(TrWfInstance)
+        .filter(
+            TrWfInstance.testing_request_id == testing_request_id,
+            TrWfInstance.status == "active",
+        )
+        .first()
+    )
+    if not instance or not instance.current_stage_id:
+        return False
+    org_role_ids = [
+        r.org_role_id for r in
+        db.query(OrgUserRole).filter_by(user_id=user_id, is_active=True).all()
+    ]
+    return is_tester_delegate(db, instance, org_role_ids)
+
+
 def _find_stage_gate(db, parts, org_role_ids, user_id=None, method=None):
     """
     Look for a TestingRequest.id among the URL's path segments. If one is
@@ -113,6 +168,9 @@ def _find_stage_gate(db, parts, org_role_ids, user_id=None, method=None):
     Results for AE-R&D at the "L4 Test Execution" stage. OR'ing in
     can_act_as_tester keeps the 12 existing grants that rely on it alone
     working unchanged.
+
+    A tester delegate (is_tester_delegate) is also allowed, matching the
+    TR Approval Queue that lists the request to them.
     """
     for segment in parts[1:]:
         if not _UUID_RE.match(segment):
@@ -144,7 +202,7 @@ def _find_stage_gate(db, parts, org_role_ids, user_id=None, method=None):
             )
             .first()
         )
-        if allowed:
+        if allowed or is_tester_delegate(db, instance, org_role_ids):
             return True
         return method == "GET" and _assigned_current_stage(db, instance, user_id)
     return None
