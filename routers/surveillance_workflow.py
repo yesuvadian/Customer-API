@@ -103,10 +103,9 @@ def _serialize_workflow(wf: RepairWorkflow, current_stage: Optional[RepairStageI
             'quarter_number': current_stage.quarter_number if current_stage else None,
             'status': current_stage.status if current_stage else None,
         } if current_stage else None,
-        # Progress based on current stage sequence (Q1=20%, Q2=40%, Q3=60%, Q4=80%, Final=100%)
-        'progress': int(current_stage.stage.sequence / 5 * 100)
-        if current_stage and current_stage.stage
-        else (wf.progress or 0),
+        # Engine progress (sum of completed stage weights) - same value the
+        # detail sheet shows, so a workflow sitting in Q1 reads 0%, not 20%
+        'progress': wf.progress or 0,
         'created_at': wf.created_at.isoformat() if wf.created_at else None,
     }
 
@@ -221,6 +220,14 @@ def get_surveillance_workflow(
 
     # Get workflow detail from existing service
     workflow_detail = RepairWorkflowService(db).get_workflow_detail(workflow_id)
+
+    # Shared detail dict has no quarter; add it from the current stage instance
+    current_stage = workflow_detail.get('current_stage')
+    if current_stage and workflow.current_stage_instance_id:
+        instance = db.query(RepairStageInstance).filter(
+            RepairStageInstance.id == workflow.current_stage_instance_id
+        ).first()
+        current_stage['quarter_number'] = instance.quarter_number if instance else None
 
     # Add surveillance-specific summary
     try:
