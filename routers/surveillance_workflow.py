@@ -34,6 +34,7 @@ from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitReq
 from services.repair_workflow_service import RepairWorkflowService
 from services.surveillance_template_service import SurveillanceTemplateService
 from utils.common_service import get_user_dept_scope
+from utils.surveillance_utils import is_surveillance_test_done, is_surveillance_test_void
 from utils.upload_limits import read_and_validate_upload
 
 router = APIRouter(
@@ -600,9 +601,6 @@ def available_transitions(
             quarter_number = current_instance.quarter_number if current_instance else None
 
             if quarter_number:
-                _DONE_STATUSES = (
-                    'test_submitted', 'under_approval', 'approved', 'completed'
-                )
                 tickets = (
                     db.query(TestingRequest)
                     .filter(
@@ -611,14 +609,14 @@ def available_transitions(
                     )
                     .all()
                 )
-                total = len(tickets)
-                done = sum(
-                    1 for t in tickets
-                    if (t.status.value if hasattr(t.status, 'value') else t.status) in _DONE_STATUSES
-                )
+                # Rejected tickets will never be tested - they don't hold the
+                # quarter open, but a quarter with no tickets at all still waits.
+                active = [t for t in tickets if not is_surveillance_test_void(t)]
+                total = len(active)
+                done = sum(1 for t in active if is_surveillance_test_done(t))
                 pending = total - done
 
-                if total == 0 or pending > 0:
+                if not tickets or pending > 0:
                     result['can_submit'] = False
                     result['submit_blocked_reason'] = (
                         f'{pending} of {total} Q{quarter_number} test(s) still pending '

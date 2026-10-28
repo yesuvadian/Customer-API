@@ -6,6 +6,34 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from models import RepairStageInstance, RepairWorkflow
 
+# Ticket statuses where the tester's part of a surveillance test is done.
+# 'closed', 'outcome_active' and 'commissioned' are terminal states of the
+# test workflow and must count too, or a fully closed quarter reads 0 done.
+# 'procurement_initiated' / 'finance_pending' follow an approved result that
+# triggered replacement - the test itself was carried out.
+SURVEILLANCE_DONE_STATUSES = frozenset({
+    'test_submitted', 'under_approval', 'approved', 'completed',
+    'closed', 'outcome_active', 'commissioned',
+    'procurement_initiated', 'finance_pending',
+})
+
+# Ticket statuses where the test will never be carried out. These are
+# neither done nor pending: they must not hold the quarter open.
+SURVEILLANCE_VOID_STATUSES = frozenset({'rejected'})
+
+
+def _status_value(ticket) -> str:
+    """TestingRequest.status is an Enum column; compare its string value."""
+    return ticket.status.value if hasattr(ticket.status, 'value') else ticket.status
+
+
+def is_surveillance_test_done(ticket) -> bool:
+    return _status_value(ticket) in SURVEILLANCE_DONE_STATUSES
+
+
+def is_surveillance_test_void(ticket) -> bool:
+    return _status_value(ticket) in SURVEILLANCE_VOID_STATUSES
+
 
 def calculate_surveillance_quarter(db: Session, workflow_id: UUID, current_date: datetime) -> int:
     """

@@ -36,6 +36,7 @@ from models import (
     TestingRequest,
 )
 from services.surveillance_config_service import SurveillanceConfigService
+from utils.surveillance_utils import is_surveillance_test_done, is_surveillance_test_void
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class SurveillanceTemplateService:
                 department_id=workflow.equipment.department_id if workflow.equipment else None,
             ) if tr.form_data else False
 
-            if tr.status == 'completed':
+            if is_surveillance_test_done(tr):
                 completed_count += 1
                 if is_abnormal:
                     abnormal_count += 1
@@ -105,7 +106,8 @@ class SurveillanceTemplateService:
             })
 
         # Calculate statistics
-        total_tests = len(testing_requests)
+        # Rejected tickets stay in the table above but aren't planned tests
+        total_tests = sum(1 for tr in testing_requests if not is_surveillance_test_void(tr))
         abnormal_rate = (abnormal_count / completed_count * 100) if completed_count > 0 else 0
 
         # Pre-populated form data
@@ -324,8 +326,6 @@ class SurveillanceTemplateService:
             )
 
         # TestingRequest tickets already created for this quarter
-        _DONE_STATUSES = ('test_submitted', 'under_approval', 'approved', 'completed')
-
         # Surveillance tickets start at 'submitted' (no draft stage).
         # 10 statuses, steps 0-9, each step = 100/9 ≈ 11%.
         _STATUS_STEP = {
@@ -334,8 +334,10 @@ class SurveillanceTemplateService:
             'test_submitted': 6, 'under_approval': 7,
             'approved': 8, 'completed': 9,
             # non-forward states
-            'rejected': 0, 'closed': 9, 'under_review': 6,
-            'finance_pending': 2, 'outcome_active': 9, 'commissioned': 9,
+            'closed': 9, 'under_review': 6,
+            # test done, result went on to replacement
+            'procurement_initiated': 9, 'finance_pending': 9,
+            'outcome_active': 9, 'commissioned': 9,
         }
         _STATUS_MAX_STEP = 9  # completed = step 9 = 100%
 
@@ -349,10 +351,13 @@ class SurveillanceTemplateService:
             )
             .all()
         )
+        # Rejected tickets will never be tested - leave them out of the
+        # quarter's totals so they don't read as pending forever.
+        tickets = [t for t in tickets if not is_surveillance_test_void(t)]
         ticket_count = len(tickets)
-        completed = [t for t in tickets if t.status in _DONE_STATUSES]
+        completed = [t for t in tickets if is_surveillance_test_done(t)]
         # Tickets created but tester hasn't submitted results yet
-        pending_tickets = [t for t in tickets if t.status not in _DONE_STATUSES]
+        pending_tickets = [t for t in tickets if not is_surveillance_test_done(t)]
         abnormal = [t for t in tickets if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
         # total = whichever is larger:
@@ -443,13 +448,12 @@ class SurveillanceTemplateService:
                 total_planned += 4  # fallback if dates not set
 
         # completed/abnormal = from actual TestingRequest tickets with results
-        _DONE_STATUSES = ('test_submitted', 'under_approval', 'approved', 'completed')
         all_tickets = (
             db.query(TestingRequest)
             .filter(TestingRequest.surveillance_workflow_id == workflow_id)
             .all()
         )
-        completed = [t for t in all_tickets if t.status in _DONE_STATUSES]
+        completed = [t for t in all_tickets if is_surveillance_test_done(t)]
         abnormal = [t for t in all_tickets if t.form_data and t.form_data.get('result_status') == 'abnormal']
 
         dept_id = (
