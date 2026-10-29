@@ -504,11 +504,13 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     schedule.surveillance_workflow_id
                     and not existing_generated.surveillance_workflow_id
                 ):
-                    from utils.surveillance_utils import calculate_surveillance_quarter
+                    from utils.surveillance_utils import schedule_run_quarter
                     existing_generated.surveillance_workflow_id = schedule.surveillance_workflow_id
-                    existing_generated.surveillance_quarter = calculate_surveillance_quarter(
-                        db, schedule.surveillance_workflow_id, now
+                    existing_generated.surveillance_quarter = schedule_run_quarter(
+                        db, schedule, now
                     )
+                    from services.surveillance_tracking_service import SurveillanceTrackingService
+                    SurveillanceTrackingService(db).ensure_test_row(existing_generated)
                     db.commit()
                     logger.info(
                         "[ScheduleService] Patched surveillance linkage on existing ticket %s",
@@ -526,12 +528,8 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             # Calculate surveillance quarter dynamically (if this is a surveillance schedule)
             surveillance_quarter = None
             if schedule.surveillance_workflow_id:
-                from utils.surveillance_utils import calculate_surveillance_quarter
-                surveillance_quarter = calculate_surveillance_quarter(
-                    db,
-                    schedule.surveillance_workflow_id,
-                    now
-                )
+                from utils.surveillance_utils import schedule_run_quarter
+                surveillance_quarter = schedule_run_quarter(db, schedule, now)
 
             svc = TestingRequestService(db)
 
@@ -675,6 +673,12 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     "[ScheduleService] WF enrollment FAILED for ticket %s: %s",
                     new_request.request_number, _wf_err, exc_info=True,
                 )
+
+            # Surveillance tracking row - Final Evaluation and the
+            # surveillance dashboard count tests from it
+            if new_request.surveillance_workflow_id:
+                from services.surveillance_tracking_service import SurveillanceTrackingService
+                SurveillanceTrackingService(db).ensure_test_row(new_request)
 
             log_entry = TestRequestScheduleLog(
                 schedule_id=schedule.id,

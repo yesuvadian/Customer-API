@@ -518,7 +518,9 @@ class TestingService:
                     result_status=result_status,
                     tested_at=tested_at
                 )
+                self.db.commit()  # the request itself was committed above
             except Exception as _surv:
+                self.db.rollback()
                 logger.warning("[TestingService] Surveillance tracking update failed: %s", _surv)
 
         return request

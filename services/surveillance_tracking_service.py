@@ -30,6 +30,39 @@ class SurveillanceTrackingService:
     def __init__(self, db: Session):
         self.db = db
 
+    def ensure_test_row(self, testing_request: TestingRequest) -> Optional[RepairSurveillanceTest]:
+        """
+        Get or create the tracking row for a surveillance ticket. Doesn't commit.
+
+        The scheduler never created these rows, so update_test_result found
+        nothing and Final Evaluation / the surveillance dashboard always read
+        0 tests. Called when the scheduler creates the ticket, and as a
+        fallback when a result arrives for a ticket that has no row yet.
+        """
+        if not testing_request.surveillance_workflow_id or not testing_request.surveillance_quarter:
+            return None
+
+        row = (
+            self.db.query(RepairSurveillanceTest)
+            .filter(RepairSurveillanceTest.testing_request_id == testing_request.id)
+            .first()
+        )
+        if row:
+            return row
+
+        status = testing_request.status
+        row = RepairSurveillanceTest(
+            surveillance_workflow_id=testing_request.surveillance_workflow_id,
+            testing_request_id=testing_request.id,
+            quarter_number=testing_request.surveillance_quarter,
+            test_type_id=testing_request.test_type_id,
+            test_status=status.value if hasattr(status, 'value') else status,
+            is_abnormal=False,
+        )
+        self.db.add(row)
+        self.db.flush()
+        return row
+
     def update_test_result(
         self,
         testing_request_id: UUID,
@@ -49,18 +82,6 @@ class SurveillanceTrackingService:
             result_status: Test result (e.g., 'PASS', 'FAIL', 'MARGINAL')
             tested_at: Test completion timestamp
         """
-        # Find surveillance test tracking record
-        surveillance_test = (
-            self.db.query(RepairSurveillanceTest)
-            .filter(RepairSurveillanceTest.testing_request_id == testing_request_id)
-            .first()
-        )
-
-        if not surveillance_test:
-            # Not a surveillance test - silently return
-            return
-
-        # Get testing request for config lookup
         testing_request = self.db.query(TestingRequest).filter(
             TestingRequest.id == testing_request_id
         ).first()
@@ -71,6 +92,17 @@ class SurveillanceTrackingService:
                 testing_request_id
             )
             return
+
+        # None when the ticket isn't linked to a surveillance quarter
+        surveillance_test = self.ensure_test_row(testing_request)
+        if not surveillance_test:
+            return
+
+        # Callers pass the tester's pass/fail; the evaluated status wins
+        from utils.surveillance_utils import latest_result_status
+        derived_status, derived_at = latest_result_status(self.db, testing_request_id)
+        result_status = derived_status or result_status
+        tested_at = tested_at or derived_at
 
         # Update tracking record
         surveillance_test.test_status = test_status
@@ -88,7 +120,9 @@ class SurveillanceTrackingService:
         else:
             surveillance_test.is_abnormal = False
 
-        self.db.commit()
+        # Flush, not commit: the TR workflow's recommendation_finalize calls
+        # this mid-transition, and that transaction is committed by its caller
+        self.db.flush()
 
         logger.info(
             "[SurveillanceTracking] Updated test %s: status=%s, result=%s, abnormal=%s",
@@ -120,7 +154,7 @@ class SurveillanceTrackingService:
             test_type_name = testing_request.test_type.name if testing_request.test_type else "Unknown"
 
             # Get equipment name
-            equipment_name = testing_request.equipment.name if testing_request.equipment else "Unknown"
+            equipment_name = testing_request.equipment.ueic if testing_request.equipment else "Unknown"
 
             NotificationService(self.db).fire(
                 event_type="surveillance_test_abnormal",

@@ -36,7 +36,12 @@ from models import (
     TestingRequest,
 )
 from services.surveillance_config_service import SurveillanceConfigService
-from utils.surveillance_utils import is_surveillance_test_done, is_surveillance_test_void
+from utils.surveillance_utils import (
+    is_surveillance_test_abnormal,
+    is_surveillance_test_done,
+    is_surveillance_test_void,
+    latest_result_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,22 +91,22 @@ class SurveillanceTemplateService:
         completed_count = 0
 
         for tr in testing_requests:
-            is_abnormal = SurveillanceConfigService.is_result_abnormal(
-                db, tr.form_data.get('result_status') if tr.form_data else None,
-                organization_id=workflow.organization_id,
-                department_id=workflow.equipment.department_id if workflow.equipment else None,
-            ) if tr.form_data else False
+            # Result lives on the test result, not tr.form_data
+            result_status, result_tested_at = latest_result_status(db, tr.id)
+            is_abnormal = is_surveillance_test_abnormal(db, tr)
 
             if is_surveillance_test_done(tr):
                 completed_count += 1
                 if is_abnormal:
                     abnormal_count += 1
 
+            tested_at = tr.completed_at or result_tested_at
             test_summary_rows.append({
                 'test_type': tr.test_type.name if tr.test_type else 'Unknown',
-                'status': tr.status,
-                'tested_at': tr.completed_at.isoformat() if tr.completed_at else None,
-                'result_status': tr.form_data.get('result_status') if tr.form_data else None,
+                'status': tr.status.value if hasattr(tr.status, 'value') else tr.status,
+                # Date only - the template column is a date cell
+                'tested_at': tested_at.date().isoformat() if tested_at else None,
+                'result_status': result_status,
                 'is_abnormal': is_abnormal,
             })
 
@@ -110,12 +115,23 @@ class SurveillanceTemplateService:
         total_tests = sum(1 for tr in testing_requests if not is_surveillance_test_void(tr))
         abnormal_rate = (abnormal_count / completed_count * 100) if completed_count > 0 else 0
 
+        # This quarter's own window, not the workflow start for every quarter
+        date_range = f'Q{quarter_number} (N/A)'
+        if workflow.started_at:
+            quarter_months = SurveillanceConfigService.get_surveillance_period_months(
+                db, workflow.organization_id,
+                workflow.equipment.department_id if workflow.equipment else None,
+            ) // 4
+            q_start = workflow.started_at + relativedelta(months=(quarter_number - 1) * quarter_months)
+            q_end = q_start + relativedelta(months=quarter_months, days=-1)
+            date_range = f'Q{quarter_number} ({q_start.strftime("%b %Y")} – {q_end.strftime("%b %Y")})'
+
         # Pre-populated form data
         return {
             'quarter_number': quarter_number,
-            'date_range': f'Q{quarter_number} ({workflow.started_at.strftime("%b %Y") if workflow.started_at else "N/A"})',
-            'parent_repair_workflow': str(workflow.parent_workflow_id) if workflow.parent_workflow_id else 'N/A',
-            'equipment_name': workflow.equipment.name if workflow.equipment else 'N/A',
+            'date_range': date_range,
+            'parent_repair_workflow': SurveillanceTemplateService._parent_number(db, workflow),
+            'equipment_name': workflow.equipment.ueic if workflow.equipment else 'N/A',
             'test_summary_table': test_summary_rows,
             'total_tests_planned': total_tests,
             'tests_completed': completed_count,
@@ -197,8 +213,8 @@ class SurveillanceTemplateService:
             'surveillance_duration': surveillance_duration,
             'start_date': workflow.started_at.isoformat() if workflow.started_at else None,
             'end_date': workflow.completed_at.isoformat() if workflow.completed_at else None,
-            'parent_repair_workflow': str(workflow.parent_workflow_id) if workflow.parent_workflow_id else 'N/A',
-            'equipment_name': workflow.equipment.name if workflow.equipment else 'N/A',
+            'parent_repair_workflow': SurveillanceTemplateService._parent_number(db, workflow),
+            'equipment_name': workflow.equipment.ueic if workflow.equipment else 'N/A',
             'vendor_name': workflow.vendor_name if hasattr(workflow, 'vendor_name') else 'N/A',
             'total_tests_conducted': len(completed_tests),
             'abnormal_tests_count': len(abnormal_tests),
@@ -210,6 +226,16 @@ class SurveillanceTemplateService:
             'ir_trend': trends.get('IR', 'Stable'),
             'oil_quality_trend': trends.get('Oil Quality', 'Stable'),
         }
+
+    @staticmethod
+    def _parent_number(db: Session, workflow: RepairWorkflow) -> str:
+        """Parent repair's workflow number (what users know it by), not its UUID."""
+        if not workflow.parent_workflow_id:
+            return 'N/A'
+        parent = db.query(RepairWorkflow.workflow_number).filter(
+            RepairWorkflow.id == workflow.parent_workflow_id
+        ).first()
+        return parent[0] if parent and parent[0] else str(workflow.parent_workflow_id)
 
     @staticmethod
     def _calculate_trends(
@@ -358,7 +384,7 @@ class SurveillanceTemplateService:
         completed = [t for t in tickets if is_surveillance_test_done(t)]
         # Tickets created but tester hasn't submitted results yet
         pending_tickets = [t for t in tickets if not is_surveillance_test_done(t)]
-        abnormal = [t for t in tickets if t.form_data and t.form_data.get('result_status') == 'abnormal']
+        abnormal = [t for t in completed if is_surveillance_test_abnormal(db, t)]
 
         # total = whichever is larger:
         # - schedule_count: before tickets created (next_run_date still in Q range)
@@ -454,7 +480,7 @@ class SurveillanceTemplateService:
             .all()
         )
         completed = [t for t in all_tickets if is_surveillance_test_done(t)]
-        abnormal = [t for t in all_tickets if t.form_data and t.form_data.get('result_status') == 'abnormal']
+        abnormal = [t for t in completed if is_surveillance_test_abnormal(db, t)]
 
         dept_id = (
             workflow.equipment.department_id
