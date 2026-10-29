@@ -174,6 +174,12 @@ def _on_repair_workflow_completed(
 
         db.commit()
 
+        # Q1's schedules are due now, but the daily scheduler only runs at
+        # 00:00 UTC - until then Q1 has no tickets, CM Schedules shows them
+        # overdue and the review form is locked. Run them once right away,
+        # the same way the scheduler does; a failure is left to the next run.
+        _create_first_quarter_tickets(db, surveillance_workflow.id)
+
         logger.info(
             "[SurveillanceHook] Created surveillance workflow %s for parent %s "
             "(equipment_id=%s, %d months, %d stages, %d test schedules)",
@@ -192,6 +198,26 @@ def _on_repair_workflow_completed(
         )
         db.rollback()
         # Don't raise — hook failures should not block workflow completion
+
+
+def _create_first_quarter_tickets(db: Session, surveillance_workflow_id: UUID) -> None:
+    from services.test_request_schedule_service import TestRequestScheduleService
+
+    schedules = (
+        db.query(TestRequestSchedule)
+        .filter(
+            TestRequestSchedule.surveillance_workflow_id == surveillance_workflow_id,
+            TestRequestSchedule.is_active.is_(True),
+            TestRequestSchedule.is_deleted.is_(False),
+        )
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    for schedule in schedules:
+        # create_one_ticket handles its own errors (rolls back, logs, returns False)
+        TestRequestScheduleService.create_one_ticket(
+            db=db, schedule=schedule, now=now, enforce_open_ticket_guard=False,
+        )
 
 
 def _create_surveillance_test_schedules(
