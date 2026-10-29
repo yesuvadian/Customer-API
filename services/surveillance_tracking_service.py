@@ -105,6 +105,7 @@ class SurveillanceTrackingService:
         tested_at = tested_at or derived_at
 
         # Update tracking record
+        was_abnormal = bool(surveillance_test.is_abnormal)
         surveillance_test.test_status = test_status
         surveillance_test.result_status = result_status
         surveillance_test.tested_at = tested_at or datetime.now(timezone.utc)
@@ -129,8 +130,9 @@ class SurveillanceTrackingService:
             surveillance_test.id, test_status, result_status, surveillance_test.is_abnormal
         )
 
-        # Send alert if abnormal (optional enhancement)
-        if surveillance_test.is_abnormal:
+        # Alert once: this runs on result approval and again when the
+        # workflow ends, and the second call must not repeat the alert
+        if surveillance_test.is_abnormal and not was_abnormal:
             self._send_abnormal_alert(surveillance_test, testing_request, result_status)
 
     def _send_abnormal_alert(
