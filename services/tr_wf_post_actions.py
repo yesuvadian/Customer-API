@@ -131,12 +131,15 @@ class RecommendationFinalizeAction(BaseWfAction):
                     .order_by(TestResult.tested_at.desc())
                     .first()
                 )
-                SurveillanceTrackingService(db).update_test_result(
-                    testing_request_id=testing_request.id,
-                    test_status="completed",
-                    result_status=latest.overall_result if latest else None,
-                    tested_at=latest.tested_at if latest else None,
-                )
+                # Savepoint: this runs inside the approval's transaction, and a
+                # failed tracking write must not leave that transaction broken
+                with db.begin_nested():
+                    SurveillanceTrackingService(db).update_test_result(
+                        testing_request_id=testing_request.id,
+                        test_status="completed",
+                        result_status=latest.overall_result if latest else None,
+                        tested_at=latest.tested_at if latest else None,
+                    )
             except Exception:
                 pass
 

@@ -519,11 +519,13 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                     schedule.surveillance_workflow_id
                     and not existing_generated.surveillance_workflow_id
                 ):
-                    from utils.surveillance_utils import calculate_surveillance_quarter
+                    from utils.surveillance_utils import schedule_run_quarter
                     existing_generated.surveillance_workflow_id = schedule.surveillance_workflow_id
-                    existing_generated.surveillance_quarter = calculate_surveillance_quarter(
-                        db, schedule.surveillance_workflow_id, now
+                    existing_generated.surveillance_quarter = schedule_run_quarter(
+                        db, schedule, now
                     )
+                    from services.surveillance_tracking_service import SurveillanceTrackingService
+                    SurveillanceTrackingService(db).ensure_test_row(existing_generated)
                     db.commit()
                     logger.info(
                         "[ScheduleService] Patched surveillance linkage on existing ticket %s",
@@ -541,12 +543,8 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             # Calculate surveillance quarter dynamically (if this is a surveillance schedule)
             surveillance_quarter = None
             if schedule.surveillance_workflow_id:
-                from utils.surveillance_utils import calculate_surveillance_quarter
-                surveillance_quarter = calculate_surveillance_quarter(
-                    db,
-                    schedule.surveillance_workflow_id,
-                    now
-                )
+                from utils.surveillance_utils import schedule_run_quarter
+                surveillance_quarter = schedule_run_quarter(db, schedule, now)
 
             svc = TestingRequestService(db)
 
@@ -655,41 +653,70 @@ class TestRequestScheduleService(UTCDateTimeMixin):
                 "surveillance_quarter": surveillance_quarter,  # Calculated dynamically for surveillance schedules
             }
 
-            new_request = svc.create_request(
-                new_data,
-                originator_id=(
-                    schedule.created_by
-                ),
-            )
-
-            new_request.status = (
-                TestingRequestStatus.submitted
-            )
-
-            # Maintenance schedules route to PM Workflow
-            if str(getattr(schedule, "request_category", "") or "").lower() == "maintenance":
-                new_request.request_type = "pm"
-
-            db.flush()
-
-            # Enroll in TR workflow engine so the ticket enters the L2→L3→L4
-            # approval/assignment/test flow instead of the old direct-approval path.
-            try:
-                from services.tr_workflow_routing_service import WorkflowRoutingService
-                WorkflowRoutingService(db).instantiate_workflow(
-                    new_request,
-                    performed_by_id=schedule.created_by,
+            # Surveillance: an open request for the same test already on this
+            # equipment (e.g. raised by hand before the repair closed) would
+            # make create_request refuse with 409 every run, until 5 failures
+            # deactivate the schedule and the quarter never gets this test.
+            # Link that request to the quarter instead - it is this test.
+            adopted = None
+            if schedule.surveillance_workflow_id and equipment and schedule.test_type_id:
+                conflict = svc.find_same_period_duplicate(
+                    equipment.id, schedule.test_type_id, _due,
                 )
+                if conflict and not conflict.surveillance_workflow_id:
+                    conflict.surveillance_workflow_id = schedule.surveillance_workflow_id
+                    conflict.surveillance_quarter = surveillance_quarter
+                    adopted = conflict
+                    logger.info(
+                        "[ScheduleService] Linked open request %s to surveillance Q%s "
+                        "instead of creating a duplicate",
+                        conflict.request_number, surveillance_quarter,
+                    )
+
+            if adopted:
+                new_request = adopted
+            else:
+                new_request = svc.create_request(
+                    new_data,
+                    originator_id=(
+                        schedule.created_by
+                    ),
+                )
+
+                new_request.status = (
+                    TestingRequestStatus.submitted
+                )
+
+                # Maintenance schedules route to PM Workflow
+                if str(getattr(schedule, "request_category", "") or "").lower() == "maintenance":
+                    new_request.request_type = "pm"
+
                 db.flush()
-                logger.info(
-                    "[ScheduleService] WF instance created for new ticket %s",
-                    new_request.request_number,
-                )
-            except Exception as _wf_err:
-                logger.error(
-                    "[ScheduleService] WF enrollment FAILED for ticket %s: %s",
-                    new_request.request_number, _wf_err, exc_info=True,
-                )
+
+                # Enroll in TR workflow engine so the ticket enters the L2→L3→L4
+                # approval/assignment/test flow instead of the old direct-approval path.
+                try:
+                    from services.tr_workflow_routing_service import WorkflowRoutingService
+                    WorkflowRoutingService(db).instantiate_workflow(
+                        new_request,
+                        performed_by_id=schedule.created_by,
+                    )
+                    db.flush()
+                    logger.info(
+                        "[ScheduleService] WF instance created for new ticket %s",
+                        new_request.request_number,
+                    )
+                except Exception as _wf_err:
+                    logger.error(
+                        "[ScheduleService] WF enrollment FAILED for ticket %s: %s",
+                        new_request.request_number, _wf_err, exc_info=True,
+                    )
+
+            # Surveillance tracking row - Final Evaluation and the
+            # surveillance dashboard count tests from it
+            if new_request.surveillance_workflow_id:
+                from services.surveillance_tracking_service import SurveillanceTrackingService
+                SurveillanceTrackingService(db).ensure_test_row(new_request)
 
             log_entry = TestRequestScheduleLog(
                 schedule_id=schedule.id,
@@ -733,7 +760,9 @@ class TestRequestScheduleService(UTCDateTimeMixin):
         except Exception as e:
 
             db.rollback()
-            print("RUN NOW ERROR:", str(e))
+            logger.warning(
+                "[ScheduleService] Ticket not created for schedule %s: %s", schedule.id, e,
+            )
 
             log_entry = TestRequestScheduleLog(
                 schedule_id=schedule.id,

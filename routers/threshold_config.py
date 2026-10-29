@@ -228,16 +228,17 @@ class StatusConditionResponse(BaseModel):
         from_attributes = True
 
 
+# Condition bands classify the same 0-100 health score as the health bands.
 class ConditionBandCreate(BaseModel):
     label: str
-    threshold: float
+    threshold: float = Field(ge=0, le=100)
     is_active: bool = True
     notes: Optional[str] = None
 
 
 class ConditionBandUpdate(BaseModel):
     label: Optional[str] = None
-    threshold: Optional[float] = None
+    threshold: Optional[float] = Field(None, ge=0, le=100)
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -254,9 +255,11 @@ class ConditionBandResponse(BaseModel):
 
 
 class FailureCohortThresholdUpdate(BaseModel):
-    min_failure_rate: Optional[float] = None
-    min_cohort_units: Optional[int] = None
-    outlier_z_score: Optional[float] = None
+    # A rate is a percentage; a z-score of 0 or less flags every unit as an
+    # outlier (services/equipment_service.py), and a cohort needs a unit.
+    min_failure_rate: Optional[float] = Field(None, ge=0, le=100)
+    min_cohort_units: Optional[int] = Field(None, ge=1)
+    outlier_z_score: Optional[float] = Field(None, gt=0, le=99.99)  # Numeric(4,2)
     # Failure Reliability panel display (were .env-only)
     dashboard_limit: Optional[int] = None
     trend_years: Optional[int] = None
@@ -836,6 +839,9 @@ def update_failure_cohort_thresholds(
         db.add(row)
 
     data = payload.model_dump(exclude_unset=True)
+    for col in ("min_failure_rate", "min_cohort_units", "outlier_z_score"):
+        if col in data and data[col] is None:
+            raise HTTPException(status_code=422, detail=f"{col} cannot be cleared")
     for field, value in data.items():
         setattr(row, field, value)
     row.modified_by = current_user.id

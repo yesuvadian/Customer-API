@@ -11,6 +11,7 @@ from models import (
     TrWfStageInstance, TrWfStageRole,
 )
 import auth_utils
+from services.tr_wf_access import caller_dept_ids, is_tester_delegate
 from middleware.org_auth import has_workflow_module_view
 from fastapi import Request
 
@@ -113,6 +114,11 @@ def _find_stage_gate(db, parts, org_role_ids, user_id=None, method=None):
     Results for AE-R&D at the "L4 Test Execution" stage. OR'ing in
     can_act_as_tester keeps the 12 existing grants that rely on it alone
     working unchanged.
+
+    A tester delegate (services.tr_wf_access.is_tester_delegate: Act as
+    Tester anywhere in the workflow, request at its assigned tester's stage
+    and inside the caller's department subtree) is also allowed — the same
+    rule the TR Approval Queue lists the request to them by.
     """
     for segment in parts[1:]:
         if not _UUID_RE.match(segment):
@@ -146,6 +152,11 @@ def _find_stage_gate(db, parts, org_role_ids, user_id=None, method=None):
         )
         if allowed:
             return True
+        if user_id is not None:
+            user = db.query(User).filter_by(id=user_id).first()
+            if user and is_tester_delegate(db, instance, testing_request,
+                                           org_role_ids, caller_dept_ids(db, user)):
+                return True
         return method == "GET" and _assigned_current_stage(db, instance, user_id)
     return None
 
@@ -250,7 +261,8 @@ def _record_access_via_workflow(db, method, parts, org_role_ids, user_id):
         return False
 
     if method == "POST":
-        return bool(_find_stage_gate(db, ["testing", str(tr_id)], org_role_ids))
+        return bool(_find_stage_gate(db, ["testing", str(tr_id)], org_role_ids,
+                                     user_id, method))
     return _workflow_viewer(db, tr_id, org_role_ids, user_id)
 
 async def auth_and_privilege_middleware(request: Request, call_next):

@@ -25,6 +25,7 @@ from database import get_db
 from models import (
     Equipment,
     RepairWorkflow,
+    RepairStageDefinition,
     RepairStageInstance,
     TestingRequest,
     User,
@@ -34,6 +35,7 @@ from schemas import RepairSaveDataRequest, RepairAdvanceRequest, RepairSubmitReq
 from services.repair_workflow_service import RepairWorkflowService
 from services.surveillance_template_service import SurveillanceTemplateService
 from utils.common_service import get_user_dept_scope
+from utils.surveillance_utils import quarter_submit_block_reason
 from utils.upload_limits import read_and_validate_upload
 
 router = APIRouter(
@@ -83,6 +85,69 @@ def _check_workflow_access(
     return workflow
 
 
+SURVEILLANCE_MODULE_PATH = "surveillance-workflows"
+
+
+def _has_module_right(db: Session, user: User, right: str) -> bool:
+    """Whether one of the user's active org roles has `right` (e.g. 'can_edit') on the module."""
+    from models import Module, OrgRole, OrgRolePermission, OrgUserRole
+
+    return (
+        db.query(OrgRolePermission.id)
+        .join(Module, Module.id == OrgRolePermission.module_id)
+        .join(OrgRole, OrgRole.id == OrgRolePermission.org_role_id)
+        .join(OrgUserRole, OrgUserRole.org_role_id == OrgRole.id)
+        .filter(
+            Module.path == SURVEILLANCE_MODULE_PATH,
+            getattr(OrgRolePermission, right).is_(True),
+            OrgRole.is_active.is_(True),
+            OrgUserRole.user_id == user.id,
+            OrgUserRole.is_active.is_(True),
+        )
+        .first()
+    ) is not None
+
+
+def _can_edit_stage_form(db: Session, workflow: RepairWorkflow, user: User) -> bool:
+    """
+    Whether the user may fill / save / submit the current stage's form.
+
+    Any of: a stage role with can_edit (Workflow Config), an org admin, or an
+    org role with Edit on the Post Commissioning Workflow module (Role
+    privileges). The seeded stage roles named roles this org doesn't have,
+    so no one could ever open the quarterly review.
+    """
+    from auth_utils import has_org_admin_role
+
+    svc = RepairWorkflowService(db)
+    if workflow.current_stage_id and svc._has_stage_edit(workflow.current_stage_id, user.id):
+        return True
+    if has_org_admin_role(user, db):
+        return True
+    return _has_module_right(db, user, 'can_edit')
+
+
+def _can_approve_stage(db: Session, workflow: RepairWorkflow, user: User) -> bool:
+    """Same rule as _can_edit_stage_form, for approving a submitted stage."""
+    from auth_utils import has_org_admin_role
+
+    svc = RepairWorkflowService(db)
+    if workflow.current_stage_id and svc._has_stage_approve(workflow.current_stage_id, user.id):
+        return True
+    if has_org_admin_role(user, db):
+        return True
+    return _has_module_right(db, user, 'can_approve')
+
+
+def _require_stage_form_edit(db: Session, workflow: RepairWorkflow, user: User) -> None:
+    if not _can_edit_stage_form(db, workflow, user):
+        raise HTTPException(
+            403,
+            "You need Edit on the Post Commissioning Workflow module (or an edit "
+            "role on this stage) to fill this form",
+        )
+
+
 def _serialize_workflow(wf: RepairWorkflow, current_stage: Optional[RepairStageInstance] = None) -> dict:
     """Serialize surveillance workflow to dict."""
     return {
@@ -103,10 +168,9 @@ def _serialize_workflow(wf: RepairWorkflow, current_stage: Optional[RepairStageI
             'quarter_number': current_stage.quarter_number if current_stage else None,
             'status': current_stage.status if current_stage else None,
         } if current_stage else None,
-        # Progress based on current stage sequence (Q1=20%, Q2=40%, Q3=60%, Q4=80%, Final=100%)
-        'progress': int(current_stage.stage.sequence / 5 * 100)
-        if current_stage and current_stage.stage
-        else (wf.progress or 0),
+        # Engine progress (sum of completed stage weights) - same value the
+        # detail sheet shows, so a workflow sitting in Q1 reads 0%, not 20%
+        'progress': wf.progress or 0,
         'created_at': wf.created_at.isoformat() if wf.created_at else None,
     }
 
@@ -221,6 +285,14 @@ def get_surveillance_workflow(
 
     # Get workflow detail from existing service
     workflow_detail = RepairWorkflowService(db).get_workflow_detail(workflow_id)
+
+    # Shared detail dict has no quarter; add it from the current stage instance
+    current_stage = workflow_detail.get('current_stage')
+    if current_stage and workflow.current_stage_instance_id:
+        instance = db.query(RepairStageInstance).filter(
+            RepairStageInstance.id == workflow.current_stage_instance_id
+        ).first()
+        current_stage['quarter_number'] = instance.quarter_number if instance else None
 
     # Add surveillance-specific summary
     try:
@@ -507,9 +579,31 @@ def get_current_form(
     workflow = _check_workflow_access(db, workflow_id, user)
 
     try:
-        return RepairWorkflowService(db).get_current_form(workflow_id)
+        form = RepairWorkflowService(db).get_current_form(workflow_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+    # Fill the template's read-only fields (quarter overview, test table,
+    # statistics) - their keys match the review-data payloads, which nothing
+    # else ever loaded into the form, so they rendered empty. Live values win
+    # over a stale saved copy; the officer's own fields aren't in the payload.
+    stage_code = form.get('stage_code') or ''
+    try:
+        if stage_code == 'FINAL_EVALUATION':
+            prefill = SurveillanceTemplateService.get_final_evaluation_data(db, workflow_id)
+        elif stage_code.startswith('Q') and stage_code[1:2].isdigit():
+            prefill = SurveillanceTemplateService.get_quarter_review_data(
+                db, workflow_id, int(stage_code[1])
+            )
+        else:
+            prefill = {}
+    except Exception:
+        # A prefill failure must not stop the officer opening the form
+        logger.exception("Surveillance form prefill failed for %s", workflow_id)
+        prefill = {}
+    if prefill:
+        form['saved_form_data'] = {**(form.get('saved_form_data') or {}), **prefill}
+    return form
 
 
 @router.get("/{workflow_id}/timeline")
@@ -571,54 +665,53 @@ def available_transitions(
     Response: {can_assign, can_submit, can_approve, can_reject, can_cancel}
 
     Surveillance override: can_submit is blocked until ALL test tickets for
-    the current quarter are in a done status (test_submitted / under_approval /
-    approved / completed). Officers cannot submit the quarterly review form
-    while testers still have open tickets.
+    the current quarter are done (see utils.surveillance_utils). Officers
+    cannot submit the quarterly review form while testers still have open
+    tickets; submit_stage enforces the same rule.
     """
-    _check_workflow_access(db, workflow_id, user)
+    workflow = _check_workflow_access(db, workflow_id, user)
     try:
         result = RepairWorkflowService(db).get_available_transitions(workflow_id, user.id)
 
+        current_instance = (
+            db.query(RepairStageInstance)
+            .filter(RepairStageInstance.id == workflow.current_stage_instance_id)
+            .first()
+        ) if workflow.status == 'active' and workflow.current_stage_instance_id else None
+
+        # Edit rule shared with save/submit (stage role, org admin or module
+        # Edit), still limited to the stage's configured editable statuses
+        if current_instance:
+            stage_def = db.query(RepairStageDefinition).filter(
+                RepairStageDefinition.id == current_instance.stage_id
+            ).first()
+            edit_statuses = (stage_def.edit_statuses if stage_def and stage_def.edit_statuses
+                             else ['assigned', 'in_progress'])
+            result['can_submit'] = (
+                current_instance.status in edit_statuses
+                and _can_edit_stage_form(db, workflow, user)
+            )
+            # Approve follows the same rule with the module's Approve right.
+            # There's no surveillance reject endpoint, so can_reject stays off.
+            approve_statuses = (stage_def.approve_statuses if stage_def and stage_def.approve_statuses
+                                else ['submitted'])
+            result['can_approve'] = (
+                current_instance.status in approve_statuses
+                and _can_approve_stage(db, workflow, user)
+            )
+            result['can_reject'] = False
+
         # Surveillance-specific gate: block submit until all quarter tickets done
         if result.get('can_submit'):
-            workflow = db.query(RepairWorkflow).filter(
-                RepairWorkflow.id == workflow_id
-            ).first()
-            current_instance = (
-                db.query(RepairStageInstance)
-                .filter(RepairStageInstance.id == workflow.current_stage_instance_id)
-                .first()
-            ) if workflow and workflow.current_stage_instance_id else None
 
             quarter_number = current_instance.quarter_number if current_instance else None
 
             if quarter_number:
-                _DONE_STATUSES = (
-                    'test_submitted', 'under_approval', 'approved', 'completed'
-                )
-                tickets = (
-                    db.query(TestingRequest)
-                    .filter(
-                        TestingRequest.surveillance_workflow_id == workflow_id,
-                        TestingRequest.surveillance_quarter == quarter_number,
-                    )
-                    .all()
-                )
-                total = len(tickets)
-                done = sum(
-                    1 for t in tickets
-                    if (t.status.value if hasattr(t.status, 'value') else t.status) in _DONE_STATUSES
-                )
-                pending = total - done
-
-                if total == 0 or pending > 0:
+                # Same rule submit_stage enforces, so the button never lies
+                reason = quarter_submit_block_reason(db, workflow_id, quarter_number)
+                if reason:
                     result['can_submit'] = False
-                    result['submit_blocked_reason'] = (
-                        f'{pending} of {total} Q{quarter_number} test(s) still pending '
-                        f'— complete all tests before submitting'
-                        if total > 0
-                        else f'No Q{quarter_number} test tickets created yet'
-                    )
+                    result['submit_blocked_reason'] = reason
 
         return result
     except ValueError as e:
@@ -637,10 +730,11 @@ def save_stage(
     Save (draft) form data for the current surveillance stage.
     Reviewing Officer fills quarterly review or final evaluation form.
     """
-    _check_workflow_access(db, workflow_id, user)
+    workflow = _check_workflow_access(db, workflow_id, user)
+    _require_stage_form_edit(db, workflow, user)
     try:
         return RepairWorkflowService(db).save_stage_data(
-            workflow_id, stage_id, payload.form_data, user.id
+            workflow_id, stage_id, payload.form_data, user.id, edit_authorized=True
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -657,10 +751,13 @@ def submit_stage(
     """
     Submit the completed stage form. Transitions stage: assigned → submitted.
     """
-    _check_workflow_access(db, workflow_id, user)
+    # Enforced here even for an unassigned stage, which submit_stage itself
+    # doesn't role-check
+    workflow = _check_workflow_access(db, workflow_id, user)
+    _require_stage_form_edit(db, workflow, user)
     try:
         return RepairWorkflowService(db).submit_stage(
-            workflow_id, stage_id, payload.remarks, user.id
+            workflow_id, stage_id, payload.remarks, user.id, edit_authorized=True
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -677,9 +774,17 @@ def advance_stage(
     Approve current stage and advance to next quarter (Q1→Q2→Q3→Q4→Final Evaluation).
     Stage must be submitted. Requires can_approve on this stage.
     """
-    _check_workflow_access(db, workflow_id, user)
+    workflow = _check_workflow_access(db, workflow_id, user)
+    if not _can_approve_stage(db, workflow, user):
+        raise HTTPException(
+            403,
+            "You need Approve on the Post Commissioning Workflow module (or an "
+            "approve role on this stage) to approve this stage",
+        )
     try:
-        return RepairWorkflowService(db).advance_stage(workflow_id, payload.remarks, user.id)
+        return RepairWorkflowService(db).advance_stage(
+            workflow_id, payload.remarks, user.id, approve_authorized=True
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
 

@@ -2160,6 +2160,12 @@ async def startup_event():
             "[Scheduler] APScheduler started — "
             "daily test request job scheduled at 00:00 UTC"
         )
+        # The in-memory job store forgets missed runs across restarts, so a
+        # process that wasn't up at 00:00 UTC never creates its due tickets
+        # (e.g. surveillance Q1 tests stay "scheduled" and Q1 can't be
+        # submitted). Catch up once on startup; already-processed schedules
+        # have next_run_date advanced, so this doesn't duplicate tickets.
+        scheduler.add_job(_run_schedule_job, id="daily_test_scheduler_catchup")
     else:
         logger.info("[Scheduler] APScheduler disabled on this instance (ENABLE_SCHEDULER=false)")
     # Register workflow lifecycle hooks (import = self-registration side-effect)

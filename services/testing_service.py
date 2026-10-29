@@ -341,7 +341,16 @@ class TestingService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Only in-progress or test_submitted requests can have results submitted",
                 )
+            # A role with Act as Tester on the request's workflow may submit
+            # on behalf of the assigned tester (same rule as the stage gate).
             if str(request.assigned_tester_id) != str(tester_id):
+                from models import User
+                from services.tr_wf_access import user_is_tester_delegate
+                tester = self.db.query(User).filter(User.id == tester_id).first()
+                may_submit = bool(tester) and user_is_tester_delegate(self.db, request, tester)
+            else:
+                may_submit = True
+            if not may_submit:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only the assigned tester can submit results",
@@ -509,7 +518,9 @@ class TestingService:
                     result_status=result_status,
                     tested_at=tested_at
                 )
+                self.db.commit()  # the request itself was committed above
             except Exception as _surv:
+                self.db.rollback()
                 logger.warning("[TestingService] Surveillance tracking update failed: %s", _surv)
 
         return request

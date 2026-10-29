@@ -306,6 +306,71 @@ class TestingRequestService:
             return value.date()
         return value
 
+    def find_same_period_duplicate(
+        self,
+        equipment_id,
+        test_type_id,
+        due_date,
+        ignore_ids: Optional[set] = None,
+    ) -> Optional[TestingRequest]:
+        """
+        The active request create_request would refuse a new one over
+        (KPTCL spec §4), or None. Also used by the surveillance scheduler to
+        link that request to the quarter instead of failing on it.
+        """
+        candidates_q = (
+            self.db.query(TestingRequest)
+            .filter(
+                TestingRequest.equipment_id == equipment_id,
+                TestingRequest.test_type_id == test_type_id,
+                TestingRequest.is_schedule_template.is_(False),
+                ~TestingRequest.status.in_(self._DUPLICATE_CHECK_TERMINAL_STATUSES),
+            )
+        )
+        if ignore_ids:
+            candidates_q = candidates_q.filter(~TestingRequest.id.in_(list(ignore_ids)))
+        candidates = candidates_q.all()
+        if not candidates:
+            return None
+
+        # "Same scheduling period" — not "ever coexisting": a request
+        # due next quarter is a different cadence cycle from one due
+        # this week, even for the identical equipment+test-type, and
+        # must be allowed (e.g. an ad-hoc test now alongside the
+        # already-auto-created next recurring instance). Use this
+        # equipment's own configured recurring cadence for this test
+        # type, when one exists, as the period width; 30 days
+        # ("monthly") otherwise — conservative enough to still catch
+        # true duplicates without a configured schedule to measure
+        # against.
+        new_due = self._as_date(due_date)
+        active_schedule = (
+            self.db.query(TestRequestSchedule)
+            .filter(
+                TestRequestSchedule.equipment_id == equipment_id,
+                TestRequestSchedule.test_type_id == test_type_id,
+                TestRequestSchedule.is_recurring.is_(True),
+                TestRequestSchedule.is_deleted.is_(False),
+            )
+            .first()
+        )
+        period_days = ScheduleFrequency.cooldown(
+            active_schedule.frequency.value
+            if active_schedule and active_schedule.frequency else None,
+            default=30,
+        )
+
+        for existing in candidates:
+            existing_due = self._as_date(existing.due_date)
+            # No due_date on either side to compare against — can't
+            # tell the periods apart, so stay conservative and treat
+            # it as a conflict rather than silently allow a real dup.
+            if new_due is None or existing_due is None:
+                return existing
+            if abs((existing_due - new_due).days) < period_days:
+                return existing
+        return None
+
     def create_request(
         self,
         data: dict,
@@ -322,69 +387,20 @@ class TestingRequestService:
 
         equipment_id = data.get("equipment_id")
         if equipment_id and test_type_id and not data.get("is_schedule_template"):
-            candidates_q = (
-                self.db.query(TestingRequest)
-                .filter(
-                    TestingRequest.equipment_id == equipment_id,
-                    TestingRequest.test_type_id == test_type_id,
-                    TestingRequest.is_schedule_template.is_(False),
-                    ~TestingRequest.status.in_(self._DUPLICATE_CHECK_TERMINAL_STATUSES),
-                )
+            conflict = self.find_same_period_duplicate(
+                equipment_id, test_type_id, data.get("due_date"),
+                ignore_ids=duplicate_check_ignore_ids,
             )
-            if duplicate_check_ignore_ids:
-                candidates_q = candidates_q.filter(~TestingRequest.id.in_(list(duplicate_check_ignore_ids)))
-            candidates = candidates_q.all()
-            if candidates:
-                # "Same scheduling period" — not "ever coexisting": a request
-                # due next quarter is a different cadence cycle from one due
-                # this week, even for the identical equipment+test-type, and
-                # must be allowed (e.g. an ad-hoc test now alongside the
-                # already-auto-created next recurring instance). Use this
-                # equipment's own configured recurring cadence for this test
-                # type, when one exists, as the period width; 30 days
-                # ("monthly") otherwise — conservative enough to still catch
-                # true duplicates without a configured schedule to measure
-                # against.
-                new_due = self._as_date(data.get("due_date"))
-                active_schedule = (
-                    self.db.query(TestRequestSchedule)
-                    .filter(
-                        TestRequestSchedule.equipment_id == equipment_id,
-                        TestRequestSchedule.test_type_id == test_type_id,
-                        TestRequestSchedule.is_recurring.is_(True),
-                        TestRequestSchedule.is_deleted.is_(False),
-                    )
-                    .first()
+            if conflict:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"An active test request for this equipment and test "
+                        f"type already exists within the same scheduling "
+                        f"period ({conflict.request_number}, status: "
+                        f"{conflict.status.value})."
+                    ),
                 )
-                period_days = ScheduleFrequency.cooldown(
-                    active_schedule.frequency.value
-                    if active_schedule and active_schedule.frequency else None,
-                    default=30,
-                )
-
-                conflict = None
-                for existing in candidates:
-                    existing_due = self._as_date(existing.due_date)
-                    # No due_date on either side to compare against — can't
-                    # tell the periods apart, so stay conservative and treat
-                    # it as a conflict rather than silently allow a real dup.
-                    if new_due is None or existing_due is None:
-                        conflict = existing
-                        break
-                    if abs((existing_due - new_due).days) < period_days:
-                        conflict = existing
-                        break
-
-                if conflict:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=(
-                            f"An active test request for this equipment and test "
-                            f"type already exists within the same scheduling "
-                            f"period ({conflict.request_number}, status: "
-                            f"{conflict.status.value})."
-                        ),
-                    )
 
         is_cumulative = self._resolve_is_cumulative(test_type_id)
         # A caller who already knows the exact template being used (e.g. the

@@ -875,6 +875,34 @@ class WorkflowRoutingService:
                     testing_request.status = _TRS.closed
                     testing_request.completed_at = _dt.now(_tz.utc)
 
+            # Surveillance tracking row: only the result-review approval's
+            # recommendation_finalize used to update it, so a test whose
+            # workflow ends another way (e.g. L4 `complete` with no review, or
+            # a rejection) stayed 'submitted' on the surveillance dashboard
+            # and Final Evaluation. Savepoint so it can't break the transition.
+            if getattr(testing_request, "surveillance_workflow_id", None):
+                try:
+                    from services.surveillance_tracking_service import SurveillanceTrackingService
+                    from utils.surveillance_utils import (
+                        is_surveillance_test_done, is_surveillance_test_void,
+                    )
+                    _surv_status = (
+                        "completed" if is_surveillance_test_done(testing_request)
+                        else "rejected" if is_surveillance_test_void(testing_request)
+                        else testing_request.status.value
+                    )
+                    self.db.flush()
+                    with self.db.begin_nested():
+                        SurveillanceTrackingService(self.db).update_test_result(
+                            testing_request_id=testing_request.id,
+                            test_status=_surv_status,
+                        )
+                except Exception as _surv_err:
+                    log.warning(
+                        "Surveillance tracking update failed for request %s: %s",
+                        testing_request.id, _surv_err,
+                    )
+
             # A request just finished: its CARs may now be closable (a CAR
             # closes only when every linked request is finished) or have
             # retests to raise (e.g. corrective work done). Runs after the

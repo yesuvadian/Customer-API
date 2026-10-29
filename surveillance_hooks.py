@@ -174,6 +174,12 @@ def _on_repair_workflow_completed(
 
         db.commit()
 
+        # Q1's schedules are due now, but the daily scheduler only runs at
+        # 00:00 UTC - until then Q1 has no tickets, CM Schedules shows them
+        # overdue and the review form is locked. Run them once right away,
+        # the same way the scheduler does; a failure is left to the next run.
+        _create_first_quarter_tickets(db, surveillance_workflow.id)
+
         logger.info(
             "[SurveillanceHook] Created surveillance workflow %s for parent %s "
             "(equipment_id=%s, %d months, %d stages, %d test schedules)",
@@ -192,6 +198,26 @@ def _on_repair_workflow_completed(
         )
         db.rollback()
         # Don't raise — hook failures should not block workflow completion
+
+
+def _create_first_quarter_tickets(db: Session, surveillance_workflow_id: UUID) -> None:
+    from services.test_request_schedule_service import TestRequestScheduleService
+
+    schedules = (
+        db.query(TestRequestSchedule)
+        .filter(
+            TestRequestSchedule.surveillance_workflow_id == surveillance_workflow_id,
+            TestRequestSchedule.is_active.is_(True),
+            TestRequestSchedule.is_deleted.is_(False),
+        )
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    for schedule in schedules:
+        # create_one_ticket handles its own errors (rolls back, logs, returns False)
+        TestRequestScheduleService.create_one_ticket(
+            db=db, schedule=schedule, now=now, enforce_open_ticket_guard=False,
+        )
 
 
 def _create_surveillance_test_schedules(
@@ -248,7 +274,17 @@ def _create_surveillance_test_schedules(
 
     created_count = 0
 
-    # Create ONE repeating schedule per test type (runs every 6 months for 24 months)
+    # One run per quarter: a fixed semi-annual cadence only lines up with a
+    # 24-month period - at 12 months it skipped Q2/Q4 and left them with no
+    # tests. Lengths without a matching frequency keep the old semi-annual.
+    frequency = {
+        1: ScheduleFrequency.monthly,
+        3: ScheduleFrequency.quarterly,
+        6: ScheduleFrequency.semi_annual,
+        12: ScheduleFrequency.yearly,
+    }.get(quarter_months, ScheduleFrequency.semi_annual)
+
+    # Create ONE repeating schedule per test type (runs once per quarter)
     # Quarter is calculated dynamically when test is created by daily scheduler
     for test_config in test_configs:
         try:
@@ -279,11 +315,8 @@ def _create_surveillance_test_schedules(
                 continue
 
             # Generate title
-            equipment_name = (
-                equipment.name or
-                equipment.nameplate_data.get('substation_name') if equipment.nameplate_data else None or
-                str(equipment.id)
-            )
+            # Equipment has no `name` column - ueic is what every screen shows
+            equipment_name = equipment.ueic or str(equipment.id)
             title = f"{test_type.name} - Surveillance - {equipment_name}"
 
             # Calculate end date (24 months from start)
@@ -302,7 +335,7 @@ def _create_surveillance_test_schedules(
                 description=f"Auto-scheduled surveillance test (runs quarterly for {surveillance_period_months} months)",
                 request_category='test',
                 priority=test_config.default_priority or 'high',
-                frequency=ScheduleFrequency.semi_annual,  # Every 6 months
+                frequency=frequency,
                 start_date=start_date,
                 next_run_date=start_date,  # First run immediately (Q1)
                 end_date=end_date,  # Stop after 24 months

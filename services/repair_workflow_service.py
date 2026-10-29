@@ -637,9 +637,13 @@ class RepairWorkflowService:
         remarks: Optional[str],
         user_id: UUID,
         form_data: Optional[dict] = None,
+        edit_authorized: bool = False,
     ) -> dict:
         """
         Stage actor submits the stage after filling the form.
+        edit_authorized: the caller already checked edit rights with its own
+        rule (surveillance also accepts org admin / module edit), so the
+        stage-role check below is skipped.
         Status flow: assigned → submitted.
         Requires can_edit permission. Same role then calls /advance to approve.
         """
@@ -671,7 +675,8 @@ class RepairWorkflowService:
             )
 
         # Submitter must be the assigned user OR have can_edit for this stage
-        if instance.assigned_user_id and str(instance.assigned_user_id) != str(user_id):
+        if (not edit_authorized and instance.assigned_user_id
+                and str(instance.assigned_user_id) != str(user_id)):
             self._check_stage_rbac(stage_id, user_id)
 
         # Auto-save form data if submitted inline (user didn't explicitly save first)
@@ -752,12 +757,16 @@ class RepairWorkflowService:
             "stage": stage.name if stage else str(stage_id),
         }
 
-    def advance_stage(self, workflow_id: UUID, remarks: Optional[str], user_id: UUID, action_label: str = "approve") -> dict:
+    def advance_stage(self, workflow_id: UUID, remarks: Optional[str], user_id: UUID, action_label: str = "approve",
+                      approve_authorized: bool = False) -> dict:
         """
         Stage actor approves and advances to the next stage.
         Status flow: submitted → completed → next stage pending.
         Requires can_approve permission (same role as can_edit).
         action_label overrides the audit log entry (default "approve"); routing always uses "approve".
+        approve_authorized: the caller already checked approve rights with its
+        own rule (surveillance: stage role, org admin or module Approve), so
+        the stage-role check is skipped.
         """
 
         workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
@@ -770,7 +779,8 @@ class RepairWorkflowService:
         instance = self._get_instance(workflow_id, current_stage_id)
 
         # RBAC: caller must have can_approve for the current stage
-        self._check_can_approve(current_stage_id, user_id)
+        if not approve_authorized:
+            self._check_can_approve(current_stage_id, user_id)
 
         # Stage must be submitted before it can be approved
         if instance.status != "submitted":
@@ -1751,14 +1761,17 @@ class RepairWorkflowService:
             "saved_form_data": saved_data,
         }
 
-    def save_stage_data(self, workflow_id: UUID, stage_id: UUID, form_data: dict, user_id: UUID) -> dict:
+    def save_stage_data(self, workflow_id: UUID, stage_id: UUID, form_data: dict, user_id: UUID,
+                        edit_authorized: bool = False) -> dict:
         workflow = self.db.query(RepairWorkflow).filter(RepairWorkflow.id == workflow_id).first()
         if not workflow:
             raise ValueError("Workflow not found.")
         if str(workflow.current_stage_id) != str(stage_id):
             raise ValueError("Cannot save data for a stage that is not currently active.")
 
-        self._check_stage_rbac(stage_id, user_id)
+        # See submit_stage's edit_authorized
+        if not edit_authorized:
+            self._check_stage_rbac(stage_id, user_id)
 
         instance = self._get_instance(workflow_id, stage_id)
         if not instance:
@@ -2186,41 +2199,14 @@ class RepairWorkflowService:
             workflow_id: Surveillance workflow ID
             quarter_number: Quarter number (1-4)
         """
-        from models import TestingRequest
+        # Shared with the available-transitions gate. TestingRequest.status is
+        # an Enum, so the old string comparison treated every ticket (closed
+        # ones included) as incomplete and no quarter could ever be submitted.
+        from utils.surveillance_utils import quarter_submit_block_reason
 
-        # Get all testing requests for this quarter
-        testing_requests = (
-            self.db.query(TestingRequest)
-            .filter(
-                TestingRequest.surveillance_workflow_id == workflow_id,
-                TestingRequest.surveillance_quarter == quarter_number
-            )
-            .all()
-        )
-
-        if not testing_requests:
-            # No tests created yet - this shouldn't happen but allow submission
-            # (tests will be created by daily scheduler)
-            return
-
-        # Check for incomplete tests
-        incomplete = [
-            tr for tr in testing_requests
-            if tr.status not in ['completed', 'cancelled']
-        ]
-
-        if incomplete:
-            test_names = [tr.title or f"Test {tr.test_type.name if tr.test_type else 'Unknown'}"
-                         for tr in incomplete[:3]]  # Show first 3
-            count = len(incomplete)
-            msg = (
-                f"Cannot submit quarterly review: {count} testing request(s) still in progress. "
-                f"Please complete all tests before submitting this stage. "
-                f"Incomplete tests: {', '.join(test_names)}"
-            )
-            if count > 3:
-                msg += f" and {count - 3} more"
-            raise ValueError(msg)
+        reason = quarter_submit_block_reason(self.db, workflow_id, quarter_number)
+        if reason:
+            raise ValueError(f"Cannot submit quarterly review: {reason}")
 
     def _fire_notification_safe(
         self,

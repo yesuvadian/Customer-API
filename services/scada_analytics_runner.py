@@ -17,6 +17,7 @@ Call run_for_organization(db, org_id) from a Celery beat task or cron.
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -47,6 +48,9 @@ def run_for_organization(db: Session, organization_id: UUID) -> None:
         try:
             run_for_equipment_tag(db, organization_id, row.equipment_id, row.scada_tag)
         except Exception as exc:
+            # The failed pair's flush error leaves the session unusable;
+            # without a rollback every later pair in the org failed too.
+            db.rollback()
             logger.warning(
                 "[SCADA Analytics] equipment=%s tag=%s error=%s",
                 row.equipment_id, row.scada_tag, exc,
@@ -78,7 +82,12 @@ def run_for_equipment_tag(
     if not rows:
         return
 
-    history = [(r.hour, float(r.avg_val)) for r in rows]
+    # A NaN/inf reading makes the hour's AVG non-finite, which would poison
+    # the slope and forecast - drop those hours.
+    history = [(r.hour, float(r.avg_val)) for r in rows
+               if r.avg_val is not None and math.isfinite(float(r.avg_val))]
+    if not history:
+        return
 
     # 2. Get threshold bounds from alert rules
     from models import ScadaAlertRule, Equipment
@@ -113,6 +122,13 @@ def run_for_equipment_tag(
     db.commit()
 
 
+def _pct_for_column(v):
+    """Clamp to scada_parameter_analytics.pct_change_annual's NUMERIC(8,2)
+    (the engine clamps ParameterAnalytics the same way): a near-zero
+    baseline gives a % change that overflowed the column."""
+    return None if v is None else max(-999999.99, min(999999.99, v))
+
+
 def _upsert_analytics(
     db: Session,
     organization_id: UUID,
@@ -141,7 +157,7 @@ def _upsert_analytics(
         existing.trend_slope         = result.get("trend_slope")
         existing.trend_r_squared     = result.get("trend_r_squared")
         existing.annual_change       = result.get("annual_change")
-        existing.pct_change_annual   = result.get("pct_change_annual")
+        existing.pct_change_annual   = _pct_for_column(result.get("pct_change_annual"))
         existing.is_anomaly          = result.get("is_anomaly", False)
         existing.anomaly_type        = result.get("anomaly_type")
         existing.anomaly_detail      = result.get("anomaly_detail")
@@ -162,7 +178,7 @@ def _upsert_analytics(
             trend_slope         = result.get("trend_slope"),
             trend_r_squared     = result.get("trend_r_squared"),
             annual_change       = result.get("annual_change"),
-            pct_change_annual   = result.get("pct_change_annual"),
+            pct_change_annual   = _pct_for_column(result.get("pct_change_annual")),
             is_anomaly          = result.get("is_anomaly", False),
             anomaly_type        = result.get("anomaly_type"),
             anomaly_detail      = result.get("anomaly_detail"),
