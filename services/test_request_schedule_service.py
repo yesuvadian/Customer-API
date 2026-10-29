@@ -101,6 +101,21 @@ def _advance_date(
     return current
 
 
+def _advance_past(
+    current: datetime,
+    frequency: ScheduleFrequency,
+    anchor: datetime,
+) -> datetime:
+    """Advance at least one period, then keep advancing until after anchor."""
+    nxt = _advance_date(current, frequency)
+    while nxt <= anchor:
+        step = _advance_date(nxt, frequency)
+        if step == nxt:   # unknown frequency -- _advance_date is a no-op
+            break
+        nxt = step
+    return nxt
+
+
 # ============================================================
 # SERVICE
 # ============================================================
@@ -688,11 +703,14 @@ class TestRequestScheduleService(UTCDateTimeMixin):
             db.add(log_entry)
 
             if schedule.is_recurring:
-                schedule.next_run_date = (
-                    _advance_date(
-                        schedule.next_run_date,
-                        schedule.frequency,
-                    )
+                # Roll past `now`, not just one period: if the scheduler was
+                # down for a while, a single step leaves next_run_date in the
+                # past -- the CM Schedules screen keeps showing it overdue,
+                # and every following daily run generates yet another
+                # catch-up ticket (one per missed period). This one ticket
+                # covers the whole backlog.
+                schedule.next_run_date = _advance_past(
+                    schedule.next_run_date, schedule.frequency, now,
                 )
             else:
                 # One-off schedule — it has fired, so it won't run again,

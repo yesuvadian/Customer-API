@@ -3820,6 +3820,40 @@ class NotificationService:
             f"</table>"
         )
 
+    @staticmethod
+    def build_schedule_overdue_digest_table(group: list) -> str:
+        """
+        Build the HTML table injected as {{digest_table}} for schedule_missed /
+        schedule_overdue_escalation (main.py Pass 3). Previously Pass 3 only
+        passed the first schedule's fields, so a department with N overdue
+        schedules got an email naming just one of them.
+
+        ``group`` -- list of (TestRequestSchedule, days_missed) tuples.
+        """
+        TD = "padding:6px 10px;border:1px solid #ddd;font-size:13px"
+        TH = ("padding:6px 10px;border:1px solid #ddd;background:#1E3C72;"
+              "color:#fff;font-size:13px;text-align:left")
+        headers = "".join(
+            f"<th style='{TH}'>{h}</th>"
+            for h in ("Equipment", "Test", "Schedule", "Due Date", "Days Overdue")
+        )
+        rows_html = "".join(
+            "<tr>"
+            f"<td style='{TD}'>{getattr(getattr(sch, 'equipment', None), 'ueic', '') or ''}</td>"
+            f"<td style='{TD}'>{getattr(getattr(sch, 'test_type', None), 'name', '') or ''}</td>"
+            f"<td style='{TD}'>{sch.title or ''}</td>"
+            f"<td style='{TD}'>{sch.next_run_date.date() if sch.next_run_date else ''}</td>"
+            f"<td style='{TD}'>{days_missed}</td>"
+            "</tr>"
+            for sch, days_missed in group
+        )
+        return (
+            f"<table cellspacing='0' style='border-collapse:collapse;width:100%'>"
+            f"<tr>{headers}</tr>"
+            f"{rows_html}"
+            f"</table>"
+        )
+
     def _fire_schedule_notification(self, request, event_type: str, severity: str) -> None:
         """
         Shared helper for all scheduler-fired notifications.

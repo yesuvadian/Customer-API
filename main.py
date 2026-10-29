@@ -768,11 +768,16 @@ def _check_schedule_notifications(only_request_ids=None):
 
         # ── Pass 3: Schedule execution overdue ───────────────────────────────
         #
-        # Checks TestRequestSchedule rows whose next_run_date has passed without
-        # a successful TestRequestScheduleLog entry for that period.
+        # Checks active TestRequestSchedule rows whose next_run_date has passed --
+        # the same rule the CM Schedules compliance screen uses. A successful
+        # run always rolls next_run_date past the run time (create_one_ticket),
+        # so a past next_run_date means that period genuinely was not executed.
+        # (This used to also skip any schedule with a success log after
+        # next_run_date, which hid schedules a one-period catch-up had left
+        # stale while the screen still showed them overdue.)
         # Fires schedule_missed (1–6 days) or schedule_overdue_escalation (≥7 days).
         try:
-            from models import TestRequestSchedule, TestRequestScheduleLog, ScheduleLogStatus
+            from models import TestRequestSchedule
             from datetime import datetime as _dt3
 
             overdue_schedules = (
@@ -780,6 +785,13 @@ def _check_schedule_notifications(only_request_ids=None):
                 .filter(
                     TestRequestSchedule.is_active.is_(True),
                     TestRequestSchedule.is_deleted.is_(False),
+                    # Operational schedules only. Master/template schedules
+                    # (equipment_id NULL, one per equipment type) are never
+                    # executed by run_daily_scheduler, so they would alert
+                    # as "missed" forever, org-wide, with no equipment or
+                    # department -- and the CM Schedules screen doesn't list
+                    # them either.
+                    TestRequestSchedule.equipment_id.isnot(None),
                     TestRequestSchedule.next_run_date < _dt3.combine(today, _dt3.min.time()),
                 )
                 .all()
@@ -787,30 +799,25 @@ def _check_schedule_notifications(only_request_ids=None):
             if only_request_ids:
                 overdue_schedules = []
 
-            # Build set of schedule_ids that already have a success log after next_run_date
-            executed_ids: set = set()
-            for sch in overdue_schedules:
-                success = (
-                    db.query(TestRequestScheduleLog.id)
-                    .filter(
-                        TestRequestScheduleLog.schedule_id == sch.id,
-                        TestRequestScheduleLog.status == ScheduleLogStatus.success,
-                        TestRequestScheduleLog.run_date >= sch.next_run_date,
-                    )
-                    .first()
-                )
-                if success:
-                    executed_ids.add(sch.id)
-
-            # Group by (org_id, dept_id, event_type) for digest
+            # Group by (org_id, dept_id, event_type) for digest. Schedules
+            # without their own department_id fall back to the equipment's,
+            # so they are dept-scoped and land in that department's digest.
             sch_digest: dict = _ddict(list)
             for sch in overdue_schedules:
-                if sch.id in executed_ids:
-                    continue
                 days_missed = (today - sch.next_run_date.date()).days
                 event_type = "schedule_overdue_escalation" if days_missed >= 7 else "schedule_missed"
-                dept_id = getattr(sch, "department_id", None)
+                dept_id = (
+                    getattr(sch, "department_id", None)
+                    or getattr(getattr(sch, "equipment", None), "department_id", None)
+                )
                 sch_digest[(sch.organization_id, dept_id, event_type)].append((sch, days_missed))
+
+            from models import OrgDepartment
+            _dept_ids = {d for (_o, d, _e) in sch_digest.keys() if d}
+            dept_names = {
+                d.id: d.name
+                for d in db.query(OrgDepartment).filter(OrgDepartment.id.in_(_dept_ids)).all()
+            } if _dept_ids else {}
 
             for (org_id, dept_id, event_type), group in sch_digest.items():
                 try:
@@ -829,21 +836,25 @@ def _check_schedule_notifications(only_request_ids=None):
                     if already:
                         continue
 
+                    # Most overdue first -- the table and the "Oldest:" SMS/in-app
+                    # fallbacks (first_sch) both lead with the worst schedule.
+                    group.sort(key=lambda g: g[1], reverse=True)
                     first_sch, first_days = group[0]
                     eq_obj = getattr(first_sch, "equipment", None)
                     eq_label = getattr(eq_obj, "ueic", "") or getattr(eq_obj, "name", "") or ""
-                    dept_obj = getattr(first_sch, "department", None)
-                    dept_name = getattr(dept_obj, "name", "") or ""
+                    dept_name = dept_names.get(dept_id, "")
 
                     nsvc.fire(
                         event_type=event_type,
                         context={
+                            "digest_table": NotificationService.build_schedule_overdue_digest_table(group),
+                            "digest_count": str(len(group)),
+                            "dept.name": dept_name,
                             "schedule.title": first_sch.title or "",
                             "equipment.ueic": eq_label,
                             "equipment.department": dept_name,
                             "next_run_date": str(first_sch.next_run_date.date()),
                             "days_missed": str(first_days),
-                            "digest_count": str(len(group)),
                         },
                         organization_id=org_id,
                         department_id=dept_id,

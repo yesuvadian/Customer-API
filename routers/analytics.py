@@ -709,7 +709,15 @@ def get_asset_breakdown(
             by_replacement_year_tests[ry] = by_replacement_year_tests.get(ry, 0) + tested_n
             by_replacement_year_test_events[ry] = by_replacement_year_test_events.get(ry, 0) + tc
 
+    # Retired (out-of-service) units per manufacturer, for the Asset
+    # Dashboard's "Retired by manufacturer" card. The client shows each as a
+    # share of that manufacturer's whole fleet (active by_make + retired).
+    by_make_retired: dict[str, int] = {}
+
     for eq in retired_eq:
+        rmk = (eq.manufacturer or "").strip() or "Unknown"
+        by_make_retired[rmk] = by_make_retired.get(rmk, 0) + 1
+
         yr = str(eq.retired_date.year) if eq.retired_date else "Unknown"
         by_failure_year[yr] = by_failure_year.get(yr, 0) + 1
         by_failure_year_h.setdefault(yr, _empty_health())
@@ -746,6 +754,7 @@ def get_asset_breakdown(
         "by_make":                  _sort(by_make),
         "by_make_health":           {k: _finalise(v) for k, v in by_make_h.items()},
         "by_make_tests":            _sort(by_make_tests),
+        "by_make_retired":          _sort(by_make_retired),
         "by_make_test_events":      by_make_test_events,
         "by_make_model":            _sort(by_make_model),
         "by_make_model_health":     {k: _finalise(v) for k, v in by_make_model_h.items()},
